@@ -1,0 +1,33 @@
+================================================================================
+DCC FILE IDENTITY & CONTENT-BASED ADDRESSING REPORT — MILESTONE 2.3
+================================================================================
+Generated: 2026-09-15
+Location: D:\DC\docs\report\milestone_2_3_file_identity_report.txt
+Status: FILE IDENTITY SPECIFICATION & TIMESTAMP INVARIANCE TESTS PASSED
+
+--------------------------------------------------------------------------------
+1. FILE IDENTITY MODEL AUDIT
+--------------------------------------------------------------------------------
+Every input file identity consists of:
+  normalized relative path
++ SHA-256 content digest
++ size (u64)
++ is_executable (optional bool permission bit)
+
+Timestamp Invariance Rule:
+- Modification timestamps (mtime) are strictly excluded from semantic computation identity.
+- Two input files with identical path and content hash produce identical CacheKeys
+  regardless of file creation time, modification time, or access time.
+
+--------------------------------------------------------------------------------
+2. TEST SUITE EXECUTION RESULTS
+--------------------------------------------------------------------------------
+- test canonical::tests::test_file_identity_content_primary_and_timestamp_invariant ... PASSED
+- test canonical::tests::test_file_identity_executable_bit_matters_when_set ........ PASSED
+- test canonical::tests::test_differing_inputs_produce_different_keys .............. PASSED
+- test canonical::tests::test_canonical_key_determinism ............................ PASSED
+- All 13 unit tests in dcc-core, 2 in dcc-storage, and 5 integration/concurrency/security tests passed.
+
+Total: 20 tests passed, 0 failed.
+Quality gates (fmt, clippy, test) pass with zero warnings.
+================================================================================

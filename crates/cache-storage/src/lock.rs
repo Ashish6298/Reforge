@@ -1,8 +1,8 @@
+use dcc_core::{CacheError, CacheKey, Result};
+use fs2::FileExt;
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use dcc_core::{CacheError, CacheKey, Result};
-use fs2::FileExt;
 
 pub struct ComputationLock {
     lock_file: File,
@@ -21,6 +21,7 @@ impl ComputationLock {
                 .read(true)
                 .write(true)
                 .create(true)
+                .truncate(false)
                 .open(&lock_path)?;
 
             match file.try_lock_exclusive() {

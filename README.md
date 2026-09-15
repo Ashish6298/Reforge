@@ -7,31 +7,203 @@ A high-performance, local-first, content-addressed developer computation caching
 > **A cache hit must never change the semantic result of the computation.**
 > If the system cannot prove that a cached result is safe to reuse, it executes the computation again.
 
-## Features
+---
 
-- **Content-Addressed Storage (CAS)**: SHA-256 sharded storage for inputs, outputs, logs, and computation metadata.
-- **Deterministic Key Derivation**: Canonical JSON normalization and SHA-256 hashing.
-- **Explainable Cache Misses**: Precise human and machine-readable reasons when a computation must re-execute.
-- **Multi-Process Concurrency Safety**: File-locking and duplicate-execution guards prevent redundant work across concurrent terminals or CI jobs.
-- **Integrity Validation & Quarantine**: Validates checksums before restoration; automatically detects and quarantines tampered or corrupted artifacts.
-- **Path Traversal Protection**: Prevents malicious directory escape attempts.
-- **CLI & Rust Library**: First-class developer API and CLI with JSON output mode.
+## Cache Entry Model (`CacheEntry`)
 
-## Quickstart
+Metadata records never embed raw binary output data directly. Instead, entries reference CAS blobs via cryptographic digests:
+
+```text
+CacheEntry
+├── key: CacheKey (SHA-256 computation digest)
+├── schema_version: u32
+├── created_at: DateTime<Utc>
+├── last_accessed_at: DateTime<Utc>
+├── hit_count: u64
+├── computation: Computation (operation, command, args, inputs, env, tool, platform)
+├── outputs: Vec<OutputManifestItem> (manifest mapping paths to CAS SHA-256 digests)
+├── execution: ExecutionMetadata (exit code, duration, stdout_digest, stderr_digest)
+└── integrity: Option<IntegrityInfo> (record verification checksum)
+```
+
+---
+
+## Library-Level Cache API (`Cache`)
+
+High-level library API decoupling callers (CLI, runners, build tools) from CAS internals:
+
+```rust
+use dcc_storage::{Cache, CasStorage, StorageConfig};
+
+let storage = CasStorage::new(StorageConfig::default())?;
+let cache = Cache::new(storage);
+
+// Core Cache API operations
+let entry_opt = cache.lookup(&key)?;
+cache.store(&entry)?;
+cache.restore(&entry, Path::new("./workspace"))?;
+let was_deleted = cache.remove(&key)?;
+let exists = cache.contains(&key);
+cache.verify(&key)?;
+```
+
+---
+
+## Physical Storage Abstraction (`Storage`)
+
+Decouples *what* is cached from *where* and *how* physical bytes are stored:
+
+```rust
+use dcc_storage::{BlobMetadata, Storage};
+
+pub trait Storage: Send + Sync {
+    fn put(&self, bytes: &[u8]) -> Result<(Digest, u64)>;
+    fn put_file(&self, source_path: &Path) -> Result<(Digest, u64)>;
+    fn get(&self, digest: &Digest) -> Result<Box<dyn Read + Send>>;
+    fn get_bytes(&self, digest: &Digest) -> Result<Vec<u8>>;
+    fn exists(&self, digest: &Digest) -> bool;
+    fn delete(&self, digest: &Digest) -> Result<bool>;
+    fn metadata(&self, digest: &Digest) -> Result<Option<BlobMetadata>>;
+    fn verify(&self, digest: &Digest) -> Result<()>;
+}
+```
+
+The primary implementation is local filesystem content-addressed storage (`CasStorage`).
+
+---
+
+## Storage Directory Layout
+
+To prevent scalability bottlenecks from storing millions of files in a single folder, DCC distributes objects and metadata entries using 2-character hex prefixes (256 shards):
+
+```text
+.dcc_cache/
+├── objects/        # Content-Addressed Storage (CAS) for outputs/stdout/stderr
+│   ├── ab/
+│   │   └── ab34cdef...
+│   └── 12/
+│       └── 1298af7b...
+├── entries/        # Computation metadata records (JSON)
+│   ├── 01/
+│   │   └── 01a4e2...json
+│   └── 9f/
+│       └── 9f5c88...json
+├── metadata/       # General cache metadata and indices
+├── index/          # Fast lookup indices
+├── tmp/            # Atomic write staging directory
+└── locks/          # Multi-process concurrency locks
+```
+
+---
+
+## Atomic Writes & Crash Consistency
+
+To guarantee that DCC never leaves partially written or corrupted artifacts in the live cache, all writes follow a strict two-stage atomic pipeline:
+
+```text
+temporary file (.dcc_cache/tmp/*.tmp)
+          ↓
+        write
+          ↓
+        flush
+          ↓
+   sync (fsync / sync_all)
+          ↓
+    atomic rename (.dcc_cache/objects/ab/...)
+```
+
+If an error or process interruption occurs during write or sync, temporary staging files are cleaned up and the live cache remains intact.
+
+---
+
+## Corruption Detection & Quarantining
+
+DCC validates the cryptographic hash of every CAS object before reading or restoring:
+
+- If `expected_digest != actual_digest`:
+  - A structured `CacheError::IntegrityError` is generated.
+  - The corrupted object is immediately isolated and renamed to `*.corrupted`.
+  - The runner engine detects the miss/corruption and automatically falls back to re-executing the computation rather than returning invalid data.
+
+---
+
+## Storage Inspection APIs
+
+The storage engine exposes dedicated inspection methods that power `dcc stats` and telemetry:
+
+```rust
+let stats = storage.stats()?;
+let obj_count = storage.count_objects()?;
+let entry_count = storage.count_entries()?;
+let total_bytes = storage.total_size_bytes()?;
+let (largest_size, largest_path) = storage.largest_object()?;
+```
+
+---
+
+## Workspace Architecture
+
+- **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`), streaming hashing, and canonical key derivation.
+- **[`crates/cache-storage`](crates/cache-storage)**: Content-Addressed Storage (CAS) with 2-char hex prefix sharding, two-stage atomic writes (`.tmp` $\rightarrow$ `fsync` $\rightarrow$ rename), checksum verification, corrupted object isolation, LRU eviction, and `fs2` multi-process locking.
+- **[`crates/cache-runner`](crates/cache-runner)**: Direct OS process execution, sandboxed output restoration with path-traversal protection, and structured miss explainer.
+- **[`crates/cache-cli`](crates/cache-cli)**: CLI binary (`dcc`) supporting `init`, `run`, `inspect`, `stats`, `verify`, `clean`, `prune`, and `doctor`.
+- **[`crates/cache-integrations`](crates/cache-integrations)**: Developer adapters for code generators, build systems, and tools.
+- **[`crates/cache-test-utils`](crates/cache-test-utils)**: Test harnesses, synthetic workspace generators, and failure injectors.
+
+---
+
+## Documentation
+
+- [Project Invariants](project/invariants.md)
+- [System Architecture](docs/architecture.md)
+- [Computation Model](docs/computation-model.md)
+- [Cache Identity & Keys](docs/cache-keys.md)
+- [Cache Correctness & Guarantees](docs/cache-correctness.md)
+- [Storage Model & CAS](docs/storage-model.md)
+- [Security Model](docs/security-model.md)
+- [Scope & Non-Goals](docs/non-goals.md)
+- [Dependency Policy](docs/dependency-policy.md)
+- [Structured Logging](docs/logging.md)
+
+---
+
+## CLI Usage
 
 ```bash
-# Initialize local cache
+# Initialize local cache directory
 dcc init
 
-# Run a computation with caching
+# Execute a computation with caching
 dcc run --input src/schema.json --output generated/models.rs -- generator src/schema.json
 
-# View cache statistics
+# Explain cache miss reasons
+dcc run --explain --input src/schema.json --output generated/models.rs -- generator src/schema.json
+
+# View cache storage statistics
 dcc stats
 
-# Inspect a computation
+# Inspect a specific computation by key
 dcc inspect <key>
 
-# Prune unreferenced objects
-dcc prune
+# Verify storage integrity
+dcc verify
+
+# Run health diagnostics
+dcc doctor
+
+# Prune unreferenced objects and enforce max size
+dcc prune --max-size 10737418240
 ```
+
+---
+
+## Quality Gates & Verification
+
+```bash
+cargo check --workspace
+cargo test --workspace
+cargo clippy --workspace --all-targets --all-features
+cargo fmt --all -- --check
+```
+
+All 6 core exit criteria (deterministic computation modeling, canonical key generation, cache entry creation, retrieval, identity verification, and corrupted metadata detection) and all 11 physical storage scenarios (empty cache, single object, deduplication, corruption quarantine, interrupted write isolation, deletion, concurrent read/write races, deeply nested paths, multi-MB large files, and binary byte safety) are fully verified and tested.

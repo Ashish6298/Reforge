@@ -3,9 +3,16 @@ pub mod computation;
 pub mod digest;
 pub mod entry;
 pub mod error;
+pub mod event;
 
 pub use canonical::CanonicalComputation;
-pub use computation::{Computation, ComputationBuilder, InputFile, OutputFile, PlatformConstraints, ToolIdentity};
+pub use computation::{
+    Computation, ComputationBuilder, InputFile, OutputFile, PlatformConstraints, ToolIdentity,
+};
 pub use digest::{CacheKey, Digest};
-pub use entry::{CacheEntry, CacheMetadata, CachePolicy, ExecutionMetadata, MissReason, OutputManifestItem};
+pub use entry::{
+    CacheEntry, CacheMetadata, CachePolicy, CacheResult, ExecutionMetadata, IntegrityInfo,
+    MissReason, OutputManifest, OutputManifestItem,
+};
 pub use error::{CacheError, Result};
+pub use event::{EventKind, EventSubscriber, StructuredEvent};

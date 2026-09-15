@@ -3,17 +3,14 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum CacheError {
-    #[error("Invalid digest format: {0}")]
-    InvalidDigest(String),
-
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
+    #[error("Storage error: {0}")]
+    StorageError(#[from] std::io::Error),
 
     #[error("Serialization error: {0}")]
-    Serialization(#[from] serde_json::Error),
+    SerializationError(#[from] serde_json::Error),
 
     #[error("Integrity error: expected digest {expected}, actual {actual} for path {path}")]
-    IntegrityMismatch {
+    IntegrityError {
         expected: String,
         actual: String,
         path: String,
@@ -22,26 +19,32 @@ pub enum CacheError {
     #[error("Corrupted cache entry at {0}: {1}")]
     CorruptedEntry(PathBuf, String),
 
-    #[error("Path traversal detected: {0}")]
+    #[error("Lock error: {0}")]
+    LockError(String),
+
+    #[error("Execution error: process exited with code {0}")]
+    ExecutionError(i32),
+
+    #[error("Process terminated by signal")]
+    ProcessTerminated,
+
+    #[error("Key generation error: {0}")]
+    KeyGenerationError(String),
+
+    #[error("Configuration error: {0}")]
+    ConfigurationError(String),
+
+    #[error("Validation error: {0}")]
+    ValidationError(String),
+
+    #[error("Path traversal rejected: {0}")]
     PathTraversal(String),
 
     #[error("Declared output not produced by computation: {0}")]
     MissingOutput(String),
 
-    #[error("Computation execution failed with exit code: {0}")]
-    ExecutionFailed(i32),
-
-    #[error("Process terminated by signal")]
-    ProcessTerminated,
-
-    #[error("Lock error: {0}")]
-    LockError(String),
-
-    #[error("Configuration error: {0}")]
-    ConfigError(String),
-
-    #[error("Validation error: {0}")]
-    ValidationError(String),
+    #[error("Invalid digest format: {0}")]
+    InvalidDigest(String),
 
     #[error("Cache miss: {0}")]
     Miss(String),

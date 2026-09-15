@@ -1,22 +1,30 @@
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufReader, BufWriter, Read, Write};
-use std::path::{Path, PathBuf};
 use dcc_core::{CacheEntry, CacheError, Digest, Result};
 use dcc_storage::CasStorage;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, BufReader, BufWriter, Write};
+use std::path::{Path, PathBuf};
 
 pub struct OutputRestorer;
 
 impl OutputRestorer {
     pub fn sanitize_path(base_dir: &Path, rel_path: &str) -> Result<PathBuf> {
         let norm = rel_path.replace('\\', "/");
-        if norm.starts_with('/') || norm.starts_with("../") || norm.contains("/../") || norm == ".." {
-            return Err(CacheError::PathTraversal(format!("Illegal path component in output path: {}", rel_path)));
+        if norm.starts_with('/') || norm.starts_with("../") || norm.contains("/../") || norm == ".."
+        {
+            return Err(CacheError::PathTraversal(format!(
+                "Illegal path component in output path: {}",
+                rel_path
+            )));
         }
 
         let full_path = base_dir.join(rel_path);
         // Ensure path stays within base_dir
         if !full_path.starts_with(base_dir) {
-            return Err(CacheError::PathTraversal(format!("Path {} escapes base directory {}", rel_path, base_dir.display())));
+            return Err(CacheError::PathTraversal(format!(
+                "Path {} escapes base directory {}",
+                rel_path,
+                base_dir.display()
+            )));
         }
 
         Ok(full_path)
@@ -62,7 +70,7 @@ impl OutputRestorer {
             let check_digest = Digest::from_reader(BufReader::new(check_file))?;
             if check_digest != output.digest {
                 let _ = fs::remove_file(&tmp_path);
-                return Err(CacheError::IntegrityMismatch {
+                return Err(CacheError::IntegrityError {
                     expected: output.digest.as_str().to_string(),
                     actual: check_digest.as_str().to_string(),
                     path: target_path.display().to_string(),

@@ -1,13 +1,10 @@
-use std::collections::{BTreeMap, HashSet};
 use dcc_core::{Computation, MissReason};
+use std::collections::BTreeMap;
 
 pub struct MissExplainer;
 
 impl MissExplainer {
-    pub fn explain(
-        current: &Computation,
-        previous: Option<&Computation>,
-    ) -> MissReason {
+    pub fn explain(current: &Computation, previous: Option<&Computation>) -> MissReason {
         let prev = match previous {
             Some(p) => p,
             None => return MissReason::NoEntryFound,
@@ -104,7 +101,10 @@ impl MissExplainer {
 
         if current.platform != prev.platform {
             return MissReason::PlatformChanged {
-                reason: format!("Current: {:?}, Previous: {:?}", current.platform, prev.platform),
+                reason: format!(
+                    "Current: {:?}, Previous: {:?}",
+                    current.platform, prev.platform
+                ),
             };
         }
 

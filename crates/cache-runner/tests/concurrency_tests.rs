@@ -1,13 +1,14 @@
-use std::sync::Arc;
-use std::thread;
 use dcc_core::{Computation, Digest};
 use dcc_runner::{EngineOptions, ExecutionStatus, RunnerEngine};
 use dcc_test_utils::TestEnv;
+use std::sync::Arc;
+use std::thread;
 
 #[test]
 fn test_concurrent_identical_computations() {
     let env = Arc::new(TestEnv::new().unwrap());
-    env.create_input_file("shared.txt", b"concurrent payload").unwrap();
+    env.create_input_file("shared.txt", b"concurrent payload")
+        .unwrap();
 
     let num_threads = 8;
     let mut handles = Vec::new();
@@ -24,7 +25,10 @@ fn test_concurrent_identical_computations() {
                 ],
             );
             #[cfg(not(windows))]
-            let (cmd, args) = ("cp", vec!["shared.txt".to_string(), "shared_out.txt".to_string()]);
+            let (cmd, args) = (
+                "cp",
+                vec!["shared.txt".to_string(), "shared_out.txt".to_string()],
+            );
 
             let computation = Computation::builder("concurrent-op", cmd)
                 .args(args)
@@ -58,7 +62,13 @@ fn test_concurrent_identical_computations() {
         }
     }
 
-    assert!(misses >= 1, "At least 1 thread should execute the computation");
+    assert!(
+        misses >= 1,
+        "At least 1 thread should execute the computation"
+    );
     assert!(hits + misses == num_threads);
-    assert_eq!(env.read_output_file("shared_out.txt").unwrap(), b"concurrent payload");
+    assert_eq!(
+        env.read_output_file("shared_out.txt").unwrap(),
+        b"concurrent payload"
+    );
 }

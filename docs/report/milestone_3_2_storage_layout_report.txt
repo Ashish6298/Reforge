@@ -1,0 +1,59 @@
+================================================================================
+DCC IMPLEMENTATION & VERIFICATION REPORT - MILESTONE 3.2: STORAGE LAYOUT
+================================================================================
+Timestamp: 2026-09-15T17:48:45+05:30
+Milestone: 3.2 Storage Layout (Content-Addressed Directory Sharding)
+Workspace: d:\DC
+Branch: ashish
+Status: PASSED / FULLY VERIFIED
+
+1. OBJECTIVE & REQUIREMENTS:
+--------------------------------------------------------------------------------
+- Implement and enforce the content-addressed directory structure for DCC:
+    .cache/
+    ├── objects/
+    │   ├── ab/
+    │   │   └── cdef...
+    │   ├── 12/
+    │   │   └── 98af...
+    ├── entries/
+    │   ├── 01/
+    │   └── 9f/
+    ├── metadata/
+    ├── index/
+    ├── tmp/
+    └── locks/
+- Prevent performance degradation from having millions of files in a single directory.
+- Distribute both CAS objects and computation metadata entries across 2-character hex
+  prefix buckets (`digest.prefix(2)` / 256 subdirectories).
+
+2. IMPLEMENTATION DETAILS:
+--------------------------------------------------------------------------------
+- `CasStorage` directory getters and initialization (`crates/cache-storage/src/cas.rs`):
+    * `objects_dir()` -> `.dcc_cache/objects/`
+    * `entries_dir()` -> `.dcc_cache/entries/`
+    * `metadata_dir()` -> `.dcc_cache/metadata/`
+    * `index_dir()` -> `.dcc_cache/index/`
+    * `tmp_dir()` -> `.dcc_cache/tmp/`
+    * `locks_dir()` -> `.dcc_cache/locks/`
+    * `init_dirs()`: Ensures all layout directories exist before storage operations.
+- Sharding logic:
+    * `object_path(digest)`: Returns `objects/{prefix}/{digest}` where prefix is the first 2 hex characters.
+    * `entry_path(key)`: Returns `entries/{prefix}/{key}.json` where prefix is the first 2 hex characters.
+
+3. TEST EXECUTION & VERIFICATION:
+--------------------------------------------------------------------------------
+Command: cargo test --workspace
+- `cas::tests::test_storage_layout_sharding` ... PASSED
+  * Verified creation of `objects`, `entries`, `metadata`, `index`, `tmp`, and `locks` directories.
+  * Verified that CAS object storage places files in `objects/{prefix}/{digest}`.
+  * Verified that entry metadata storage places files in `entries/{prefix}/{key}.json`.
+- Total Workspace Unit & Integration Tests: 27 passed, 0 failed, 0 ignored.
+- Static Analysis (`cargo clippy --workspace --all-targets --all-features -- -D warnings`): PASSED (0 warnings).
+- Code Formatting (`cargo fmt --all -- --check`): PASSED.
+
+4. CONCLUSION:
+--------------------------------------------------------------------------------
+Milestone 3.2 (Storage Layout) is fully implemented, verified, and adheres strictly
+to directory sharding requirements with zero regressions.
+================================================================================

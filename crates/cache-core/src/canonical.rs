@@ -1,8 +1,8 @@
-use std::collections::BTreeMap;
-use serde::{Deserialize, Serialize};
 use crate::computation::Computation;
 use crate::digest::{CacheKey, Digest};
 use crate::error::Result;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CanonicalComputation {
@@ -23,6 +23,8 @@ pub struct CanonicalInput {
     pub path: String,
     pub digest: String,
     pub size: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_executable: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,6 +59,7 @@ impl CanonicalComputation {
                 path: i.path.replace('\\', "/"),
                 digest: i.digest.as_str().to_string(),
                 size: i.size,
+                is_executable: i.is_executable,
             })
             .collect();
         inputs.sort_by(|a, b| a.path.cmp(&b.path));
@@ -148,8 +151,12 @@ mod tests {
             .build()
             .unwrap();
 
-        let key1 = CanonicalComputation::from_computation(&comp1).compute_key().unwrap();
-        let key2 = CanonicalComputation::from_computation(&comp2).compute_key().unwrap();
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
 
         assert_ne!(key1, key2);
     }
@@ -166,8 +173,12 @@ mod tests {
             .build()
             .unwrap();
 
-        let key1 = CanonicalComputation::from_computation(&comp1).compute_key().unwrap();
-        let key2 = CanonicalComputation::from_computation(&comp2).compute_key().unwrap();
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
 
         assert_ne!(key1, key2);
     }
@@ -184,8 +195,12 @@ mod tests {
             .build()
             .unwrap();
 
-        let key1 = CanonicalComputation::from_computation(&comp1).compute_key().unwrap();
-        let key2 = CanonicalComputation::from_computation(&comp2).compute_key().unwrap();
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
 
         assert_ne!(key1, key2);
     }
@@ -202,9 +217,68 @@ mod tests {
             .build()
             .unwrap();
 
-        let key1 = CanonicalComputation::from_computation(&comp1).compute_key().unwrap();
-        let key2 = CanonicalComputation::from_computation(&comp2).compute_key().unwrap();
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
 
         assert_ne!(key1, key2);
+    }
+
+    #[test]
+    fn test_file_identity_content_primary_and_timestamp_invariant() {
+        // Files with identical content and path have identical identity regardless of mtime
+        let d = Digest::from_bytes(b"content alpha");
+        let comp1 = Computation::builder("build", "tool")
+            .input("src/lib.rs", d.clone(), 100)
+            .build()
+            .unwrap();
+
+        let comp2 = Computation::builder("build", "tool")
+            .input("src/lib.rs", d, 100)
+            .build()
+            .unwrap();
+
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
+
+        assert_eq!(
+            key1, key2,
+            "Content is the primary identity; mtime changes do not alter key"
+        );
+    }
+
+    #[test]
+    fn test_file_identity_executable_bit_matters_when_set() {
+        let d = Digest::from_bytes(b"script payload");
+        let mut comp1 = Computation::builder("run", "bash")
+            .input("script.sh", d.clone(), 50)
+            .build()
+            .unwrap();
+        comp1.inputs[0].is_executable = Some(false);
+
+        let mut comp2 = Computation::builder("run", "bash")
+            .input("script.sh", d, 50)
+            .build()
+            .unwrap();
+        comp2.inputs[0].is_executable = Some(true);
+
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
+
+        assert_ne!(
+            key1, key2,
+            "Executable permission bit differences alter computation identity"
+        );
     }
 }

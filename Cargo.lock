@@ -219,6 +219,19 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "dcc-integrations"
+version = "1.0.0"
+dependencies = [
+ "dcc-core",
+ "dcc-runner",
+ "dcc-storage",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 

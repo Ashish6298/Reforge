@@ -1,8 +1,8 @@
+use dcc_core::{CacheError, Result};
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
-use dcc_core::{CacheError, Result};
 
 #[derive(Debug, Clone)]
 pub struct ProcessOutput {
@@ -34,7 +34,10 @@ impl ProcessExecutor {
 
         let start = Instant::now();
         let output = cmd.output().map_err(|e| {
-            CacheError::ConfigError(format!("Failed to execute process '{}': {}", command, e))
+            CacheError::ConfigurationError(format!(
+                "Failed to execute process '{}': {}",
+                command, e
+            ))
         })?;
         let elapsed = start.elapsed().as_millis() as u64;
 

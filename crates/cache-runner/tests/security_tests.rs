@@ -1,13 +1,14 @@
-use std::fs::{self, File};
-use std::io::Write;
 use dcc_core::{Computation, Digest};
 use dcc_runner::{EngineOptions, ExecutionStatus, RunnerEngine};
 use dcc_test_utils::TestEnv;
+use std::fs::File;
+use std::io::Write;
 
 #[test]
 fn test_corrupted_cas_object_causes_safe_fallback() {
     let env = TestEnv::new().unwrap();
-    env.create_input_file("source.txt", b"important source code").unwrap();
+    env.create_input_file("source.txt", b"important source code")
+        .unwrap();
 
     #[cfg(windows)]
     let (cmd, args) = (
@@ -18,7 +19,10 @@ fn test_corrupted_cas_object_causes_safe_fallback() {
         ],
     );
     #[cfg(not(windows))]
-    let (cmd, args) = ("cp", vec!["source.txt".to_string(), "build_out.txt".to_string()]);
+    let (cmd, args) = (
+        "cp",
+        vec!["source.txt".to_string(), "build_out.txt".to_string()],
+    );
 
     let computation = Computation::builder("build-integrity", cmd)
         .args(args)
@@ -53,5 +57,8 @@ fn test_corrupted_cas_object_causes_safe_fallback() {
     assert_eq!(res2.status, ExecutionStatus::Miss);
     assert!(res2.miss_reason.is_some());
     // Ensure final output matches legitimate source data, not corrupted CAS
-    assert_eq!(env.read_output_file("build_out.txt").unwrap(), b"important source code");
+    assert_eq!(
+        env.read_output_file("build_out.txt").unwrap(),
+        b"important source code"
+    );
 }

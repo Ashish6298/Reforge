@@ -4,6 +4,7 @@ members = [
     "crates/cache-storage",
     "crates/cache-runner",
     "crates/cache-cli",
+    "crates/cache-integrations",
     "crates/cache-test-utils",
 ]
 resolver = "2"

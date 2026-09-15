@@ -1,0 +1,39 @@
+================================================================================
+DCC STRUCTURED LOGGING & TELEMETRY REPORT — MILESTONE 1.4
+================================================================================
+Generated: 2026-09-15
+Location: D:\DC\docs\report\milestone_1_4_logging_report.txt
+Status: STRUCTURED LOGGING & EVENTS VERIFIED & TESTS PASSED
+
+--------------------------------------------------------------------------------
+1. STRUCTURED EVENT TAXONOMY IMPLEMENTATION
+--------------------------------------------------------------------------------
+The structured event architecture in `crates/cache-core/src/event.rs` models all 10 required events:
+- `cache.lookup` ............. Querying cache index for computation key
+- `cache.hit` ................ Cache hit and output verification
+- `cache.miss` ............... Cache miss or invalidation
+- `cache.store` .............. Storing outputs and metadata in CAS
+- `cache.restore` ............ Restoring cached files to workspace
+- `cache.delete` ............. Deleting entry or CAS object
+- `cache.verify` ............. Integrity validation of CAS blobs
+- `computation.start` ........ Child process invocation
+- `computation.finish` ....... Child process successful completion
+- `computation.failed` ....... Child process non-zero exit or abortion
+
+--------------------------------------------------------------------------------
+2. EVENT PAYLOAD & SUBSCRIBER MODEL
+--------------------------------------------------------------------------------
+- StructuredEvent: Timestamps, EventKind, CacheKey, duration_ms, message, and key-value fields.
+- EventSubscriber: Decoupled trait for telemetry and instrumentation collectors.
+- Dotted JSON serialization validated: `test event::tests::test_event_formatting ... OK`.
+
+--------------------------------------------------------------------------------
+3. TEST EXECUTION SUMMARY
+--------------------------------------------------------------------------------
+Total tests: 16 passed, 0 failed.
+- dcc-core: 9 passed
+- dcc-storage: 2 passed
+- dcc-runner: 5 passed
+
+README.md and docs/logging.md updated and synchronized.
+================================================================================

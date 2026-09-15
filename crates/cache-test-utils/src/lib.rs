@@ -1,8 +1,8 @@
-use std::fs::{self, File};
-use std::io::Write;
-use std::path::{Path, PathBuf};
 use dcc_core::Result;
 use dcc_storage::{CasStorage, StorageConfig};
+use std::fs::{self, File};
+use std::io::Write;
+use std::path::PathBuf;
 use tempfile::TempDir;
 
 pub struct TestEnv {

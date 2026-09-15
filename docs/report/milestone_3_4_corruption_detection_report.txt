@@ -1,0 +1,55 @@
+================================================================================
+DCC IMPLEMENTATION & VERIFICATION REPORT - MILESTONE 3.4: CORRUPTION DETECTION
+================================================================================
+Timestamp: 2026-09-15T18:02:20+05:30
+Milestone: 3.4 Corruption Detection & Object Quarantining
+Workspace: d:\DC
+Branch: ashish
+Status: PASSED / FULLY VERIFIED
+
+1. OBJECTIVE & REQUIREMENTS:
+--------------------------------------------------------------------------------
+- Every stored CAS object must be verifiable against its expected cryptographic digest.
+- If expected digest != actual digest:
+    * Signal a structured `CacheError::IntegrityError`.
+    * Never return corrupted / bitrotted bytes as valid cache hits.
+    * Automatically quarantine the invalid object (e.g. renaming to `.corrupted`)
+      so it can no longer be accessed or restored by computations.
+    * Allow the execution engine to fall back to safe re-execution rather than crashing.
+
+2. IMPLEMENTATION DETAILS:
+--------------------------------------------------------------------------------
+- CAS Verification & Quarantine Logic (`CasStorage::verify_object` in `crates/cache-storage/src/cas.rs`):
+    * Computes actual SHA-256 digest from the on-disk file stream via `Digest::from_reader`.
+    * Compares expected digest with actual on-disk digest.
+    * On mismatch:
+        1. Immediately moves/renames the offending file to `path.with_extension("corrupted")`.
+        2. Returns `CacheError::IntegrityError { expected, actual, path }`.
+- Consumer Safeguards:
+    * `CasStorage::get_object_reader(&digest)`: Runs `verify_object(&digest)?` prior to opening a stream.
+    * `Storage::get(&digest)`: Inherits pre-read validation and quarantine.
+    * `Cache::restore(&entry, dest)`: Verifies all output blobs before writing to disk.
+    * `RunnerEngine::execute()`: Catches integrity failure, clears corrupted entry reference,
+      quarantines bad blobs, and safely recomputes.
+
+3. TEST EXECUTION & VERIFICATION:
+--------------------------------------------------------------------------------
+Command: cargo test --workspace
+- `cas::tests::test_corruption_detection_and_quarantine` ... PASSED
+  * Stored valid CAS object and verified it initially passed integrity checks.
+  * Simulated bitrot / direct file modification.
+  * `verify_object()` caught the digest mismatch and returned `CacheError::IntegrityError`.
+  * Verified the file was removed from its primary CAS path and quarantined to `.corrupted`.
+  * Verified `get_object_reader()` failed cleanly on the corrupted object.
+- `security_tests::test_corrupted_cas_object_causes_safe_fallback` ... PASSED
+  * Verified end-to-end that corrupted objects trigger automatic computation fallback
+    without failing or returning bad data.
+- Total Workspace Unit & Integration Tests: 29 passed, 0 failed, 0 ignored.
+- Static Analysis (`cargo clippy --workspace --all-targets --all-features -- -D warnings`): PASSED (0 warnings).
+- Code Formatting (`cargo fmt --all -- --check`): PASSED.
+
+4. CONCLUSION:
+--------------------------------------------------------------------------------
+Milestone 3.4 (Corruption Detection) is fully verified, guaranteeing that corrupted
+objects are quarantined and never compromise execution semantics.
+================================================================================

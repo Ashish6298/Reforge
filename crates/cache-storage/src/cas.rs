@@ -1,9 +1,9 @@
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufReader, BufWriter, Read, Write};
-use std::path::{Path, PathBuf};
 use chrono::Utc;
 use dcc_core::{CacheEntry, CacheError, CacheKey, Digest, Result};
 use serde::{Deserialize, Serialize};
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, BufReader, BufWriter, Write};
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageConfig {
@@ -55,6 +55,14 @@ impl CasStorage {
         self.config.root_dir.join("entries")
     }
 
+    pub fn metadata_dir(&self) -> PathBuf {
+        self.config.root_dir.join("metadata")
+    }
+
+    pub fn index_dir(&self) -> PathBuf {
+        self.config.root_dir.join("index")
+    }
+
     pub fn tmp_dir(&self) -> PathBuf {
         self.config.root_dir.join("tmp")
     }
@@ -66,6 +74,8 @@ impl CasStorage {
     pub fn init_dirs(&self) -> Result<()> {
         fs::create_dir_all(self.objects_dir())?;
         fs::create_dir_all(self.entries_dir())?;
+        fs::create_dir_all(self.metadata_dir())?;
+        fs::create_dir_all(self.index_dir())?;
         fs::create_dir_all(self.tmp_dir())?;
         fs::create_dir_all(self.locks_dir())?;
         Ok(())
@@ -78,7 +88,9 @@ impl CasStorage {
 
     pub fn entry_path(&self, key: &CacheKey) -> PathBuf {
         let prefix = key.prefix(2);
-        self.entries_dir().join(prefix).join(format!("{}.json", key.as_str()))
+        self.entries_dir()
+            .join(prefix)
+            .join(format!("{}.json", key.as_str()))
     }
 
     pub fn has_object(&self, digest: &Digest) -> bool {
@@ -99,7 +111,7 @@ impl CasStorage {
         }
 
         let parent = final_path.parent().ok_or_else(|| {
-            CacheError::ConfigError("Failed to get parent directory for CAS object".into())
+            CacheError::ConfigurationError("Failed to get parent directory for CAS object".into())
         })?;
         fs::create_dir_all(parent)?;
 
@@ -122,7 +134,7 @@ impl CasStorage {
         if let Err(e) = fs::rename(&tmp_file_path, &final_path) {
             let _ = fs::remove_file(&tmp_file_path);
             if !final_path.exists() {
-                return Err(CacheError::Io(e));
+                return Err(CacheError::StorageError(e));
             }
         }
 
@@ -138,7 +150,7 @@ impl CasStorage {
         }
 
         let parent = final_path.parent().ok_or_else(|| {
-            CacheError::ConfigError("Failed to get parent directory for CAS object".into())
+            CacheError::ConfigurationError("Failed to get parent directory for CAS object".into())
         })?;
         fs::create_dir_all(parent)?;
 
@@ -158,7 +170,7 @@ impl CasStorage {
         if let Err(e) = fs::rename(&tmp_file_path, &final_path) {
             let _ = fs::remove_file(&tmp_file_path);
             if !final_path.exists() {
-                return Err(CacheError::Io(e));
+                return Err(CacheError::StorageError(e));
             }
         }
 
@@ -168,7 +180,7 @@ impl CasStorage {
     pub fn verify_object(&self, digest: &Digest) -> Result<()> {
         let path = self.object_path(digest);
         if !path.exists() {
-            return Err(CacheError::IntegrityMismatch {
+            return Err(CacheError::IntegrityError {
                 expected: digest.as_str().to_string(),
                 actual: "<missing>".to_string(),
                 path: path.display().to_string(),
@@ -181,7 +193,7 @@ impl CasStorage {
             // Quarantine corrupted object
             let corrupted_path = path.with_extension("corrupted");
             let _ = fs::rename(&path, corrupted_path);
-            return Err(CacheError::IntegrityMismatch {
+            return Err(CacheError::IntegrityError {
                 expected: digest.as_str().to_string(),
                 actual: actual.as_str().to_string(),
                 path: path.display().to_string(),
@@ -200,7 +212,7 @@ impl CasStorage {
     pub fn store_entry(&self, entry: &CacheEntry) -> Result<()> {
         let path = self.entry_path(&entry.key);
         let parent = path.parent().ok_or_else(|| {
-            CacheError::ConfigError("Failed to get parent directory for cache entry".into())
+            CacheError::ConfigurationError("Failed to get parent directory for cache entry".into())
         })?;
         fs::create_dir_all(parent)?;
 
@@ -222,7 +234,7 @@ impl CasStorage {
         if let Err(e) = fs::rename(&tmp_file_path, &path) {
             let _ = fs::remove_file(&tmp_file_path);
             if !path.exists() {
-                return Err(CacheError::Io(e));
+                return Err(CacheError::StorageError(e));
             }
         }
 
@@ -261,6 +273,32 @@ impl CasStorage {
             Ok(false)
         }
     }
+
+    /// Inspect storage and collect comprehensive metrics.
+    pub fn stats(&self) -> Result<crate::stats::StorageStats> {
+        crate::stats::StorageStats::collect(self)
+    }
+
+    /// Returns the total number of physical CAS objects currently stored.
+    pub fn count_objects(&self) -> Result<usize> {
+        Ok(self.stats()?.total_objects)
+    }
+
+    /// Returns the total number of cached computation entries currently stored.
+    pub fn count_entries(&self) -> Result<usize> {
+        Ok(self.stats()?.total_entries)
+    }
+
+    /// Returns the total disk space consumed by CAS objects and entry records in bytes.
+    pub fn total_size_bytes(&self) -> Result<u64> {
+        Ok(self.stats()?.total_size_bytes)
+    }
+
+    /// Returns the size in bytes and optional path of the largest stored CAS object.
+    pub fn largest_object(&self) -> Result<(u64, Option<PathBuf>)> {
+        let stats = self.stats()?;
+        Ok((stats.largest_object_size_bytes, stats.largest_object_path))
+    }
 }
 
 fn uuid_like_nonce() -> String {
@@ -284,6 +322,7 @@ mod tests {
     use super::*;
     use dcc_core::computation::Computation;
     use dcc_core::entry::ExecutionMetadata;
+    use std::io::Read;
 
     #[test]
     fn test_cas_store_and_verify() {
@@ -337,5 +376,142 @@ mod tests {
 
         assert!(storage.delete_entry(&key).unwrap());
         assert!(storage.get_entry(&key).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_storage_layout_sharding() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = StorageConfig {
+            root_dir: temp_dir.path().to_path_buf(),
+            max_size_bytes: None,
+        };
+        let storage = CasStorage::new(config).unwrap();
+
+        // 1. Verify directory layout creation
+        assert!(storage.objects_dir().is_dir());
+        assert!(storage.entries_dir().is_dir());
+        assert!(storage.metadata_dir().is_dir());
+        assert!(storage.index_dir().is_dir());
+        assert!(storage.tmp_dir().is_dir());
+        assert!(storage.locks_dir().is_dir());
+
+        // 2. Verify objects sharded by 2-character hex prefix
+        let (digest, _) = storage.store_object_bytes(b"shard test data").unwrap();
+        let expected_obj_path = storage
+            .objects_dir()
+            .join(digest.prefix(2))
+            .join(digest.as_str());
+        assert_eq!(storage.object_path(&digest), expected_obj_path);
+        assert!(expected_obj_path.is_file());
+
+        // 3. Verify entries sharded by 2-character hex prefix
+        let comp = Computation::builder("op", "cmd").build().unwrap();
+        let key = comp.compute_key().unwrap();
+        let entry = CacheEntry::new(key.clone(), comp, Vec::new(), ExecutionMetadata::default());
+        storage.store_entry(&entry).unwrap();
+
+        let expected_entry_path = storage
+            .entries_dir()
+            .join(key.prefix(2))
+            .join(format!("{}.json", key.as_str()));
+        assert_eq!(storage.entry_path(&key), expected_entry_path);
+        assert!(expected_entry_path.is_file());
+    }
+
+    #[test]
+    fn test_atomic_writes_pipeline() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = StorageConfig {
+            root_dir: temp_dir.path().to_path_buf(),
+            max_size_bytes: None,
+        };
+        let storage = CasStorage::new(config).unwrap();
+
+        // Storing an object should write to tmp, flush, sync, rename, and leave tmp clean
+        let payload = b"atomic write verification content payload";
+        let (digest, size) = storage.store_object_bytes(payload).unwrap();
+        assert_eq!(size, payload.len() as u64);
+
+        let final_obj_path = storage.object_path(&digest);
+        assert!(final_obj_path.is_file());
+
+        // Verify no leftover .tmp files in tmp_dir
+        let mut tmp_entries = fs::read_dir(storage.tmp_dir()).unwrap();
+        assert!(
+            tmp_entries.next().is_none(),
+            "tmp directory must be empty after successful atomic store"
+        );
+
+        // Deduplication test: re-storing identical object does not create temporary or duplicate files
+        let (digest2, _) = storage.store_object_bytes(payload).unwrap();
+        assert_eq!(digest, digest2);
+        assert!(
+            fs::read_dir(storage.tmp_dir()).unwrap().next().is_none(),
+            "tmp directory must remain clean after deduplicated store"
+        );
+
+        // Entry atomic write test
+        let comp = Computation::builder("atomic_test", "echo").build().unwrap();
+        let key = comp.compute_key().unwrap();
+        let entry = CacheEntry::new(key.clone(), comp, Vec::new(), ExecutionMetadata::default());
+        storage.store_entry(&entry).unwrap();
+
+        let final_entry_path = storage.entry_path(&key);
+        assert!(final_entry_path.is_file());
+        assert!(
+            fs::read_dir(storage.tmp_dir()).unwrap().next().is_none(),
+            "tmp directory must remain clean after atomic entry write"
+        );
+    }
+
+    #[test]
+    fn test_corruption_detection_and_quarantine() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = StorageConfig {
+            root_dir: temp_dir.path().to_path_buf(),
+            max_size_bytes: None,
+        };
+        let storage = CasStorage::new(config).unwrap();
+
+        let original_data = b"integrity verified payload data";
+        let (digest, _) = storage.store_object_bytes(original_data).unwrap();
+
+        let obj_path = storage.object_path(&digest);
+        assert!(obj_path.is_file());
+        assert!(storage.verify_object(&digest).is_ok());
+
+        // Simulate bitrot / corruption by modifying file content directly
+        fs::write(&obj_path, b"bitrot corrupted payload data").unwrap();
+
+        // Verification must detect the corruption
+        let verify_res = storage.verify_object(&digest);
+        assert!(
+            verify_res.is_err(),
+            "Corrupted object must fail verification"
+        );
+
+        match verify_res {
+            Err(CacheError::IntegrityError {
+                expected, actual, ..
+            }) => {
+                assert_eq!(expected, digest.as_str());
+                assert_ne!(actual, digest.as_str());
+            }
+            other => panic!("Expected IntegrityError, got: {:?}", other),
+        }
+
+        // Must quarantine the corrupted file so it is no longer at the valid object_path
+        assert!(
+            !obj_path.exists(),
+            "Corrupted object must be quarantined from primary path"
+        );
+        let quarantined_path = obj_path.with_extension("corrupted");
+        assert!(
+            quarantined_path.is_file(),
+            "Quarantined file must exist with .corrupted extension"
+        );
+
+        // Attempting to read via get_object_reader should also fail
+        assert!(storage.get_object_reader(&digest).is_err());
     }
 }

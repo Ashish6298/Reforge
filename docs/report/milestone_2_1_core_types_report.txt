@@ -1,0 +1,36 @@
+================================================================================
+DCC CONTENT-ADDRESSED CACHE CORE TYPES REPORT — MILESTONE 2.1
+================================================================================
+Generated: 2026-09-15
+Location: D:\DC\docs\report\milestone_2_1_core_types_report.txt
+Status: ALL CORE TYPES VALIDATED & TESTS PASSED
+
+--------------------------------------------------------------------------------
+1. TYPED CORE ABSTRACTIONS (ZERO RAW STRINGS)
+--------------------------------------------------------------------------------
+The fundamental domain model in `crates/cache-core` strictly implements all required types:
+
+1. `Digest` ............. Validated 64-char lowercase hex SHA-256 content hash
+2. `CacheKey` ........... Strongly typed key derived from canonical JSON computation
+3. `Computation` ........ Full declarative task definition
+4. `InputFile` .......... Declared input path, content digest, size, and executable bit
+5. `OutputFile` ......... Declared output path with required flag
+6. `OutputManifest` ..... Manifest containing collection of OutputManifestItems
+7. `CacheEntry` ......... Persistent cache entry linking key, computation, manifest, and execution
+8. `CacheMetadata` ...... Metadata containing timestamps, hit count, and execution metrics
+9. `ExecutionMetadata` .. Exit code, duration_ms, and stdout/stderr blob digests
+10. `CacheResult<T>` .... Typed lookup outcome (`Hit`, `Miss`, `Bypassed`)
+11. `CachePolicy` ....... Caching policy directives (`ReadWrite`, `ReadOnly`, `WriteOnly`, etc.)
+
+--------------------------------------------------------------------------------
+2. QUALITY GATES & TEST SUITE
+--------------------------------------------------------------------------------
+- cargo fmt --all -- --check ........................................ PASSED
+- cargo clippy --workspace --all-targets --all-features ............. PASSED
+- cargo test --workspace (16 tests) ................................. PASSED
+  * dcc-core: 9 passed
+  * dcc-storage: 2 passed
+  * dcc-runner (integration/concurrency/security): 5 passed
+
+README.md updated with domain models documentation.
+================================================================================

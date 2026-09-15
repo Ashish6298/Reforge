@@ -1,16 +1,15 @@
-use std::fs::{self, File};
-use std::io::BufReader;
-use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
 use dcc_core::{
     CacheEntry, CacheError, CacheKey, CachePolicy, CanonicalComputation, Computation, Digest,
     ExecutionMetadata, MissReason, OutputManifestItem, Result,
 };
 use dcc_storage::{CasStorage, ComputationLock};
 use serde::{Deserialize, Serialize};
+use std::fs::{self, File};
+use std::io::BufReader;
+use std::path::PathBuf;
+use std::time::Duration;
 
-use crate::explain::MissExplainer;
-use crate::process::{ProcessExecutor, ProcessOutput};
+use crate::process::ProcessExecutor;
 use crate::restore::OutputRestorer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,7 +66,7 @@ impl<'a> RunnerEngine<'a> {
         for input in &computation.inputs {
             let full_input_path = self.options.working_dir.join(&input.path);
             if !full_input_path.exists() {
-                return Err(CacheError::ConfigError(format!(
+                return Err(CacheError::ConfigurationError(format!(
                     "Declared input file does not exist: {}",
                     full_input_path.display()
                 )));
@@ -102,28 +101,31 @@ impl<'a> RunnerEngine<'a> {
         if self.options.policy != CachePolicy::WriteOnly {
             if let Some(entry) = self.storage.get_entry(&key)? {
                 // Verify all outputs exist in CAS and restore
-                match OutputRestorer::restore_entry(self.storage, &entry, &self.options.working_dir) {
+                match OutputRestorer::restore_entry(self.storage, &entry, &self.options.working_dir)
+                {
                     Ok(()) => {
                         // Restore stdout/stderr if available
-                        let stdout = if let Some(out_digest) = &entry.metadata.execution.stdout_digest {
-                            let mut buf = Vec::new();
-                            if let Ok(mut r) = self.storage.get_object_reader(out_digest) {
-                                let _ = std::io::Read::read_to_end(&mut r, &mut buf);
-                            }
-                            buf
-                        } else {
-                            Vec::new()
-                        };
+                        let stdout =
+                            if let Some(out_digest) = &entry.metadata.execution.stdout_digest {
+                                let mut buf = Vec::new();
+                                if let Ok(mut r) = self.storage.get_object_reader(out_digest) {
+                                    let _ = std::io::Read::read_to_end(&mut r, &mut buf);
+                                }
+                                buf
+                            } else {
+                                Vec::new()
+                            };
 
-                        let stderr = if let Some(err_digest) = &entry.metadata.execution.stderr_digest {
-                            let mut buf = Vec::new();
-                            if let Ok(mut r) = self.storage.get_object_reader(err_digest) {
-                                let _ = std::io::Read::read_to_end(&mut r, &mut buf);
-                            }
-                            buf
-                        } else {
-                            Vec::new()
-                        };
+                        let stderr =
+                            if let Some(err_digest) = &entry.metadata.execution.stderr_digest {
+                                let mut buf = Vec::new();
+                                if let Ok(mut r) = self.storage.get_object_reader(err_digest) {
+                                    let _ = std::io::Read::read_to_end(&mut r, &mut buf);
+                                }
+                                buf
+                            } else {
+                                Vec::new()
+                            };
 
                         return Ok(ExecutionResult {
                             key,
@@ -164,16 +166,17 @@ impl<'a> RunnerEngine<'a> {
         miss_reason: Option<MissReason>,
     ) -> Result<ExecutionResult> {
         // Concurrency Lock
-        let _lock = ComputationLock::acquire(
-            &self.storage.locks_dir(),
-            &key,
-            self.options.lock_timeout,
-        )?;
+        let _lock =
+            ComputationLock::acquire(&self.storage.locks_dir(), &key, self.options.lock_timeout)?;
 
         // Re-check cache in case another process completed it while waiting for lock
-        if self.options.policy != CachePolicy::WriteOnly && self.options.policy != CachePolicy::ForceRecompute {
+        if self.options.policy != CachePolicy::WriteOnly
+            && self.options.policy != CachePolicy::ForceRecompute
+        {
             if let Some(entry) = self.storage.get_entry(&key)? {
-                if OutputRestorer::restore_entry(self.storage, &entry, &self.options.working_dir).is_ok() {
+                if OutputRestorer::restore_entry(self.storage, &entry, &self.options.working_dir)
+                    .is_ok()
+                {
                     return Ok(ExecutionResult {
                         key,
                         status: ExecutionStatus::Hit,
