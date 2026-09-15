@@ -70,6 +70,32 @@ pub trait Storage: Send + Sync {
 
 The primary implementation is local filesystem content-addressed storage (`CasStorage`).
 
+---
+
+## Storage Directory Layout
+
+To prevent scalability bottlenecks from storing millions of files in a single folder, DCC distributes objects and metadata entries using 2-character hex prefixes (256 shards):
+
+```text
+.dcc_cache/
+├── objects/        # Content-Addressed Storage (CAS) for outputs/stdout/stderr
+│   ├── ab/
+│   │   └── ab34cdef...
+│   └── 12/
+│       └── 1298af7b...
+├── entries/        # Computation metadata records (JSON)
+│   ├── 01/
+│   │   └── 01a4e2...json
+│   └── 9f/
+│       └── 9f5c88...json
+├── metadata/       # General cache metadata and indices
+├── index/          # Fast lookup indices
+├── tmp/            # Atomic write staging directory
+└── locks/          # Multi-process concurrency locks
+```
+
+---
+
 ## Workspace Architecture
 
 - **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`), streaming hashing, and canonical key derivation.

@@ -55,6 +55,14 @@ impl CasStorage {
         self.config.root_dir.join("entries")
     }
 
+    pub fn metadata_dir(&self) -> PathBuf {
+        self.config.root_dir.join("metadata")
+    }
+
+    pub fn index_dir(&self) -> PathBuf {
+        self.config.root_dir.join("index")
+    }
+
     pub fn tmp_dir(&self) -> PathBuf {
         self.config.root_dir.join("tmp")
     }
@@ -66,6 +74,8 @@ impl CasStorage {
     pub fn init_dirs(&self) -> Result<()> {
         fs::create_dir_all(self.objects_dir())?;
         fs::create_dir_all(self.entries_dir())?;
+        fs::create_dir_all(self.metadata_dir())?;
+        fs::create_dir_all(self.index_dir())?;
         fs::create_dir_all(self.tmp_dir())?;
         fs::create_dir_all(self.locks_dir())?;
         Ok(())
@@ -340,5 +350,45 @@ mod tests {
 
         assert!(storage.delete_entry(&key).unwrap());
         assert!(storage.get_entry(&key).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_storage_layout_sharding() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = StorageConfig {
+            root_dir: temp_dir.path().to_path_buf(),
+            max_size_bytes: None,
+        };
+        let storage = CasStorage::new(config).unwrap();
+
+        // 1. Verify directory layout creation
+        assert!(storage.objects_dir().is_dir());
+        assert!(storage.entries_dir().is_dir());
+        assert!(storage.metadata_dir().is_dir());
+        assert!(storage.index_dir().is_dir());
+        assert!(storage.tmp_dir().is_dir());
+        assert!(storage.locks_dir().is_dir());
+
+        // 2. Verify objects sharded by 2-character hex prefix
+        let (digest, _) = storage.store_object_bytes(b"shard test data").unwrap();
+        let expected_obj_path = storage
+            .objects_dir()
+            .join(digest.prefix(2))
+            .join(digest.as_str());
+        assert_eq!(storage.object_path(&digest), expected_obj_path);
+        assert!(expected_obj_path.is_file());
+
+        // 3. Verify entries sharded by 2-character hex prefix
+        let comp = Computation::builder("op", "cmd").build().unwrap();
+        let key = comp.compute_key().unwrap();
+        let entry = CacheEntry::new(key.clone(), comp, Vec::new(), ExecutionMetadata::default());
+        storage.store_entry(&entry).unwrap();
+
+        let expected_entry_path = storage
+            .entries_dir()
+            .join(key.prefix(2))
+            .join(format!("{}.json", key.as_str()));
+        assert_eq!(storage.entry_path(&key), expected_entry_path);
+        assert!(expected_entry_path.is_file());
     }
 }
