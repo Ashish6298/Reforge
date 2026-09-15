@@ -49,6 +49,27 @@ cache.verify(&key)?;
 
 ---
 
+## Physical Storage Abstraction (`Storage`)
+
+Decouples *what* is cached from *where* and *how* physical bytes are stored:
+
+```rust
+use dcc_storage::{BlobMetadata, Storage};
+
+pub trait Storage: Send + Sync {
+    fn put(&self, bytes: &[u8]) -> Result<(Digest, u64)>;
+    fn put_file(&self, source_path: &Path) -> Result<(Digest, u64)>;
+    fn get(&self, digest: &Digest) -> Result<Box<dyn Read + Send>>;
+    fn get_bytes(&self, digest: &Digest) -> Result<Vec<u8>>;
+    fn exists(&self, digest: &Digest) -> bool;
+    fn delete(&self, digest: &Digest) -> Result<bool>;
+    fn metadata(&self, digest: &Digest) -> Result<Option<BlobMetadata>>;
+    fn verify(&self, digest: &Digest) -> Result<()>;
+}
+```
+
+The primary implementation is local filesystem content-addressed storage (`CasStorage`).
+
 ## Workspace Architecture
 
 - **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`), streaming hashing, and canonical key derivation.
