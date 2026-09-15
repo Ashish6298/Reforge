@@ -1,14 +1,13 @@
-use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 use anyhow::{Context, Result};
 use clap::Parser;
 use dcc_core::{
-    CacheEntry, CacheKey, CachePolicy, Computation, Digest,
+    CacheKey, CachePolicy, Computation, Digest,
 };
 use dcc_runner::{EngineOptions, ExecutionStatus, RunnerEngine};
-use dcc_storage::{CasStorage, EvictionResult, Pruner, StorageConfig, StorageStats};
+use dcc_storage::{CasStorage, Pruner, StorageConfig, StorageStats};
 use walkdir::WalkDir;
 
 mod cli;

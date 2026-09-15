@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use dcc_core::{Computation, MissReason};
 
 pub struct MissExplainer;

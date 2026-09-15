@@ -223,6 +223,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "dcc-integrations"
+version = "1.0.0"
+dependencies = [
+ "dcc-core",
+ "dcc-runner",
+ "dcc-storage",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "dcc-runner"
 version = "1.0.0"
 dependencies = [

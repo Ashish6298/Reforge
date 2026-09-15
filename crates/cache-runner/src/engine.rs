@@ -1,7 +1,7 @@
 use std::fs::{self, File};
 use std::io::BufReader;
-use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
+use std::time::Duration;
 use dcc_core::{
     CacheEntry, CacheError, CacheKey, CachePolicy, CanonicalComputation, Computation, Digest,
     ExecutionMetadata, MissReason, OutputManifestItem, Result,
@@ -9,8 +9,7 @@ use dcc_core::{
 use dcc_storage::{CasStorage, ComputationLock};
 use serde::{Deserialize, Serialize};
 
-use crate::explain::MissExplainer;
-use crate::process::{ProcessExecutor, ProcessOutput};
+use crate::process::ProcessExecutor;
 use crate::restore::OutputRestorer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

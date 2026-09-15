@@ -1,0 +1,54 @@
+================================================================================
+DCC RUST PROJECT FOUNDATION REPORT — MILESTONE 1.1
+================================================================================
+Generated: 2026-09-15
+Location: D:\DC\docs\report\milestone_1_1_rust_foundation_report.txt
+Status: WORKSPACE STRUCTURE VERIFIED & TESTS PASSED
+
+--------------------------------------------------------------------------------
+1. WORKSPACE ARCHITECTURE
+--------------------------------------------------------------------------------
+The project is configured as a modular Cargo workspace across 6 crates:
+- crates/cache-core:
+  * Domain types: Digest, CacheKey, Computation, CacheEntry, CachePolicy, MissReason.
+  * Canonical deterministic JSON normalization and SHA-256 key generator.
+
+- crates/cache-storage:
+  * Content-Addressed Storage (CAS) with 2-char hex directory sharding.
+  * Atomic two-stage write protocol (tempfile -> sync_all -> rename).
+  * Checksum verification, corruption quarantine, LRU eviction, and storage metrics.
+  * Concurrency locking using `fs2`.
+
+- crates/cache-runner:
+  * Process execution engine, sandbox output restorer, and miss explanation.
+
+- crates/cache-cli:
+  * Command-line interface (`dcc`) supporting `init`, `run`, `inspect`, `stats`, `verify`, `clean`, `prune`, `doctor`.
+
+- crates/cache-integrations:
+  * Developer adapters for generic tools and code generators.
+
+- crates/cache-test-utils:
+  * Test harnesses, isolated test environments, and failure injectors.
+
+--------------------------------------------------------------------------------
+2. DEPENDENCY POLICY AUDIT
+--------------------------------------------------------------------------------
+- Minimal, pure, and maintained dependencies:
+  * sha2 & hex for cryptographic content addressing.
+  * serde & serde_json for canonical serialization.
+  * chrono for UTC timestamps.
+  * clap for CLI parsing.
+  * fs2 for multi-process file locking.
+  * walkdir & tempfile for directory traversal and test isolation.
+  * thiserror & anyhow for structured error context.
+
+--------------------------------------------------------------------------------
+3. TEST SUITE RESULTS
+--------------------------------------------------------------------------------
+- dcc-core: 8 passed, 0 failed
+- dcc-storage: 2 passed, 0 failed
+- dcc-runner / integration / concurrency / security: 5 passed, 0 failed
+Total: 15 passed, 0 failed. All crates check and build cleanly.
+
+================================================================================

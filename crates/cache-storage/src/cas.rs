@@ -1,5 +1,5 @@
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufReader, BufWriter, Read, Write};
+use std::io::{self, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use chrono::Utc;
 use dcc_core::{CacheEntry, CacheError, CacheKey, Digest, Result};
@@ -282,6 +282,7 @@ fn rand_simple() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
     use dcc_core::computation::Computation;
     use dcc_core::entry::ExecutionMetadata;
 

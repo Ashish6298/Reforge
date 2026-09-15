@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::PathBuf;
 use dcc_core::Result;
 use serde::{Deserialize, Serialize};
