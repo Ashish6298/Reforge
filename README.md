@@ -13,7 +13,7 @@ A high-performance, local-first, content-addressed developer computation caching
 
 The project is structured as a modular Cargo workspace across dedicated crates:
 
-- **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `MissReason`), deterministic normalization, and canonical SHA-256 key generation.
+- **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `MissReason`, `StructuredEvent`), deterministic normalization, structured logging, and canonical SHA-256 key generation.
 - **[`crates/cache-storage`](crates/cache-storage)**: Content-Addressed Storage (CAS) with 2-char hex prefix sharding, two-stage atomic writes (`.tmp` $\rightarrow$ `fsync` $\rightarrow$ rename), checksum verification, corrupted object isolation, LRU eviction, and `fs2` multi-process locking.
 - **[`crates/cache-runner`](crates/cache-runner)**: Direct OS process execution, sandboxed output restoration with path-traversal protection, and structured miss explainer.
 - **[`crates/cache-cli`](crates/cache-cli)**: CLI binary (`dcc`) supporting `init`, `run`, `inspect`, `stats`, `verify`, `clean`, `prune`, and `doctor`.
@@ -22,14 +22,12 @@ The project is structured as a modular Cargo workspace across dedicated crates:
 
 ---
 
-## Dependency Policy
+## Structured Logging & Telemetry
 
-DCC enforces a strict, minimalist dependency policy:
-- **Zero Network / Async in Core**: Pure, fast, local-first synchronous execution.
-- **Audited Cryptography**: Standard SHA-256 (`sha2` + `hex`).
-- **Deterministic Serialization**: `serde` + `serde_json` with strict canonical key ordering.
-- **Cross-Platform File Locks**: Advisory multi-process file locking via `fs2`.
-- Detailed specification in [docs/dependency-policy.md](docs/dependency-policy.md).
+DCC implements structured events for observability:
+- `cache.lookup`, `cache.hit`, `cache.miss`, `cache.store`, `cache.restore`, `cache.delete`, `cache.verify`
+- `computation.start`, `computation.finish`, `computation.failed`
+- Specification in [docs/logging.md](docs/logging.md).
 
 ---
 
@@ -44,6 +42,7 @@ DCC enforces a strict, minimalist dependency policy:
 - [Security Model](docs/security-model.md)
 - [Scope & Non-Goals](docs/non-goals.md)
 - [Dependency Policy](docs/dependency-policy.md)
+- [Structured Logging](docs/logging.md)
 
 ---
 
