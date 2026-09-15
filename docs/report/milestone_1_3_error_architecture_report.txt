@@ -1,0 +1,44 @@
+================================================================================
+DCC ERROR ARCHITECTURE REPORT — MILESTONE 1.3
+================================================================================
+Generated: 2026-09-15
+Location: D:\DC\docs\report\milestone_1_3_error_architecture_report.txt
+Status: STRUCTURED ERROR HIERARCHY AUDITED & VERIFIED
+
+--------------------------------------------------------------------------------
+1. STRUCTURED ERROR HIERARCHY
+--------------------------------------------------------------------------------
+The error architecture in `crates/cache-core/src/error.rs` models all failure domains:
+
+CacheError
+├── StorageError(std::io::Error) ................. Filesystem I/O and CAS storage failures
+├── SerializationError(serde_json::Error) ........ Canonical encoding/decoding errors
+├── IntegrityError { expected, actual, path } .... SHA-256 digest validation failures
+├── CorruptedEntry(PathBuf, String) .............. Malformed or corrupted entry metadata
+├── LockError(String) ............................ Multi-process lock timeout or collision
+├── ExecutionError(i32) .......................... Process execution failures (exit != 0)
+├── ProcessTerminated ............................ Process aborted by signal
+├── KeyGenerationError(String) ................... Invariant validation in key derivation
+├── ConfigurationError(String) ................... Misconfigured paths or options
+├── ValidationError(String) ...................... Empty fields, invalid arguments
+├── PathTraversal(String) ........................ Relative or root path escape attempts
+├── MissingOutput(String) ........................ Declared output not created
+├── InvalidDigest(String) ........................ Non-hex or invalid length digest
+└── Miss(String) ................................. Cache miss fallback
+
+--------------------------------------------------------------------------------
+2. PRODUCTION PANIC POLICY AUDIT
+--------------------------------------------------------------------------------
+- Zero unwrap(), expect(), or panic!() in runtime production paths.
+- All I/O, CAS, and process execution errors return strongly typed `Result<T, CacheError>`.
+
+--------------------------------------------------------------------------------
+3. TEST EXECUTION SUMMARY
+--------------------------------------------------------------------------------
+Total tests: 15 passed, 0 failed.
+- dcc-core: 8 passed
+- dcc-storage: 2 passed
+- dcc-runner: 5 passed
+
+README.md remains synchronized with current error hierarchy.
+================================================================================

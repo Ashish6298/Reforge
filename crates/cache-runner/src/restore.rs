@@ -62,7 +62,7 @@ impl OutputRestorer {
             let check_digest = Digest::from_reader(BufReader::new(check_file))?;
             if check_digest != output.digest {
                 let _ = fs::remove_file(&tmp_path);
-                return Err(CacheError::IntegrityMismatch {
+                return Err(CacheError::IntegrityError {
                     expected: output.digest.as_str().to_string(),
                     actual: check_digest.as_str().to_string(),
                     path: target_path.display().to_string(),

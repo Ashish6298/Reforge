@@ -34,7 +34,7 @@ impl ProcessExecutor {
 
         let start = Instant::now();
         let output = cmd.output().map_err(|e| {
-            CacheError::ConfigError(format!("Failed to execute process '{}': {}", command, e))
+            CacheError::ConfigurationError(format!("Failed to execute process '{}': {}", command, e))
         })?;
         let elapsed = start.elapsed().as_millis() as u64;
 

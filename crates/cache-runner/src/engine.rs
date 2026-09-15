@@ -66,7 +66,7 @@ impl<'a> RunnerEngine<'a> {
         for input in &computation.inputs {
             let full_input_path = self.options.working_dir.join(&input.path);
             if !full_input_path.exists() {
-                return Err(CacheError::ConfigError(format!(
+                return Err(CacheError::ConfigurationError(format!(
                     "Declared input file does not exist: {}",
                     full_input_path.display()
                 )));

@@ -99,7 +99,7 @@ impl CasStorage {
         }
 
         let parent = final_path.parent().ok_or_else(|| {
-            CacheError::ConfigError("Failed to get parent directory for CAS object".into())
+            CacheError::ConfigurationError("Failed to get parent directory for CAS object".into())
         })?;
         fs::create_dir_all(parent)?;
 
@@ -122,7 +122,7 @@ impl CasStorage {
         if let Err(e) = fs::rename(&tmp_file_path, &final_path) {
             let _ = fs::remove_file(&tmp_file_path);
             if !final_path.exists() {
-                return Err(CacheError::Io(e));
+                return Err(CacheError::StorageError(e));
             }
         }
 
@@ -138,7 +138,7 @@ impl CasStorage {
         }
 
         let parent = final_path.parent().ok_or_else(|| {
-            CacheError::ConfigError("Failed to get parent directory for CAS object".into())
+            CacheError::ConfigurationError("Failed to get parent directory for CAS object".into())
         })?;
         fs::create_dir_all(parent)?;
 
@@ -158,7 +158,7 @@ impl CasStorage {
         if let Err(e) = fs::rename(&tmp_file_path, &final_path) {
             let _ = fs::remove_file(&tmp_file_path);
             if !final_path.exists() {
-                return Err(CacheError::Io(e));
+                return Err(CacheError::StorageError(e));
             }
         }
 
@@ -168,7 +168,7 @@ impl CasStorage {
     pub fn verify_object(&self, digest: &Digest) -> Result<()> {
         let path = self.object_path(digest);
         if !path.exists() {
-            return Err(CacheError::IntegrityMismatch {
+            return Err(CacheError::IntegrityError {
                 expected: digest.as_str().to_string(),
                 actual: "<missing>".to_string(),
                 path: path.display().to_string(),
@@ -181,7 +181,7 @@ impl CasStorage {
             // Quarantine corrupted object
             let corrupted_path = path.with_extension("corrupted");
             let _ = fs::rename(&path, corrupted_path);
-            return Err(CacheError::IntegrityMismatch {
+            return Err(CacheError::IntegrityError {
                 expected: digest.as_str().to_string(),
                 actual: actual.as_str().to_string(),
                 path: path.display().to_string(),
@@ -200,7 +200,7 @@ impl CasStorage {
     pub fn store_entry(&self, entry: &CacheEntry) -> Result<()> {
         let path = self.entry_path(&entry.key);
         let parent = path.parent().ok_or_else(|| {
-            CacheError::ConfigError("Failed to get parent directory for cache entry".into())
+            CacheError::ConfigurationError("Failed to get parent directory for cache entry".into())
         })?;
         fs::create_dir_all(parent)?;
 
@@ -222,7 +222,7 @@ impl CasStorage {
         if let Err(e) = fs::rename(&tmp_file_path, &path) {
             let _ = fs::remove_file(&tmp_file_path);
             if !path.exists() {
-                return Err(CacheError::Io(e));
+                return Err(CacheError::StorageError(e));
             }
         }
 
