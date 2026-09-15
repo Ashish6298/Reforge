@@ -45,7 +45,7 @@ pub enum CacheResult<T> {
     Bypassed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ExecutionMetadata {
     pub exit_code: i32,
     pub execution_time_ms: u64,

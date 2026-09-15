@@ -28,6 +28,27 @@ CacheEntry
 
 ---
 
+## Library-Level Cache API (`Cache`)
+
+High-level library API decoupling callers (CLI, runners, build tools) from CAS internals:
+
+```rust
+use dcc_storage::{Cache, CasStorage, StorageConfig};
+
+let storage = CasStorage::new(StorageConfig::default())?;
+let cache = Cache::new(storage);
+
+// Core Cache API operations
+let entry_opt = cache.lookup(&key)?;
+cache.store(&entry)?;
+cache.restore(&entry, Path::new("./workspace"))?;
+let was_deleted = cache.remove(&key)?;
+let exists = cache.contains(&key);
+cache.verify(&key)?;
+```
+
+---
+
 ## Workspace Architecture
 
 - **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`), streaming hashing, and canonical key derivation.
