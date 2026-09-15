@@ -1,0 +1,53 @@
+# Rust / Cargo build outputs
+/target/
+**/*.rs.bk
+*.rmeta
+*.o
+*.obj
+*.exe
+*.pdb
+*.dll
+*.so
+*.dylib
+
+# Local Cache Directory & Artifacts
+.dcc_cache/
+.cache/
+*.lock.tmp
+*.tmp
+*.corrupted
+
+# Secrets & Environment Configurations
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
+credentials.json
+secrets/
+id_rsa
+id_ed25519
+
+# IDEs & Editor Configuration
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Test outputs & temporary directories
+/tmp/
+/scratch/
+test_output/
+*.log
+
+# Coverage & Profiling
+*.profraw
+*.profdata
+lcov.info
+coverage/

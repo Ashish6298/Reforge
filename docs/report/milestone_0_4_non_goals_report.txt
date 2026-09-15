@@ -1,0 +1,41 @@
+================================================================================
+DCC PRODUCT SCOPE & NON-GOALS REPORT — MILESTONE 0.4
+================================================================================
+Generated: 2026-09-15
+Location: D:\DC\docs\report\milestone_0_4_non_goals_report.txt
+Status: SCOPE BOUNDARIES AUDITED & TESTS PASSED
+
+--------------------------------------------------------------------------------
+1. SCOPE BOUNDARIES & NON-GOALS AUDIT
+--------------------------------------------------------------------------------
+The v1 architecture explicitly limits scope and verifies that DCC is NOT:
+1. A remote build farm (no distributed worker orchestrator in v1)
+2. A distributed execution engine (local-first process execution)
+3. A Docker replacement (no container runtime or kernel cgroups)
+4. A package manager (no registry resolution, downloads, or locking)
+5. A full Bazel replacement (no multi-language build DAG DSL)
+6. A compiler (wraps existing compilers, does not parse ASTs)
+7. A CI platform (runs inside existing CI runners like GitHub Actions)
+8. A cloud service (100% offline and local-first)
+9. A build system (wraps discrete build steps, does not orchestrate DAGs)
+
+--------------------------------------------------------------------------------
+2. ARCHITECTURAL BOUNDARY VERIFICATION
+--------------------------------------------------------------------------------
+- Codebase dependencies and abstractions adhere strictly to local filesystem CAS
+  and direct OS process execution without extraneous network daemons.
+- High-level orchestrators interface with DCC via CLI or Rust library API.
+
+--------------------------------------------------------------------------------
+3. TEST EXECUTION SUMMARY
+--------------------------------------------------------------------------------
+Total tests executed: 15
+Passed: 15
+Failed: 0
+Ignored: 0
+
+- dcc-core: 8 passed
+- dcc-storage: 2 passed
+- dcc-runner / integration / concurrency / security: 5 passed
+
+================================================================================

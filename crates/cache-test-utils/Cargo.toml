@@ -1,0 +1,13 @@
+[package]
+name = "dcc-test-utils"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Test utilities, synthetic workspace generator, and failure injectors for DCC"
+
+[dependencies]
+dcc-core = { path = "../cache-core" }
+dcc-storage = { path = "../cache-storage" }
+dcc-runner = { path = "../cache-runner" }
+tempfile = { workspace = true }
+serde_json = { workspace = true }

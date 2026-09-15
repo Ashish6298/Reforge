@@ -1,0 +1,210 @@
+use std::collections::BTreeMap;
+use serde::{Deserialize, Serialize};
+use crate::computation::Computation;
+use crate::digest::{CacheKey, Digest};
+use crate::error::Result;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CanonicalComputation {
+    pub schema_version: u32,
+    pub operation: String,
+    pub command: String,
+    pub args: Vec<String>,
+    pub inputs: Vec<CanonicalInput>,
+    pub outputs: Vec<CanonicalOutput>,
+    pub env: BTreeMap<String, String>,
+    pub platform: CanonicalPlatform,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool: Option<CanonicalTool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CanonicalInput {
+    pub path: String,
+    pub digest: String,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CanonicalOutput {
+    pub path: String,
+    pub required: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CanonicalPlatform {
+    pub os: String,
+    pub arch: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CanonicalTool {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
+}
+
+impl CanonicalComputation {
+    pub fn from_computation(comp: &Computation) -> Self {
+        let mut inputs: Vec<CanonicalInput> = comp
+            .inputs
+            .iter()
+            .map(|i| CanonicalInput {
+                path: i.path.replace('\\', "/"),
+                digest: i.digest.as_str().to_string(),
+                size: i.size,
+            })
+            .collect();
+        inputs.sort_by(|a, b| a.path.cmp(&b.path));
+
+        let mut outputs: Vec<CanonicalOutput> = comp
+            .outputs
+            .iter()
+            .map(|o| CanonicalOutput {
+                path: o.path.replace('\\', "/"),
+                required: o.required,
+            })
+            .collect();
+        outputs.sort_by(|a, b| a.path.cmp(&b.path));
+
+        Self {
+            schema_version: comp.schema_version,
+            operation: comp.operation.clone(),
+            command: comp.command.clone(),
+            args: comp.args.clone(),
+            inputs,
+            outputs,
+            env: comp.env.clone(),
+            platform: CanonicalPlatform {
+                os: comp.platform.os.clone(),
+                arch: comp.platform.arch.clone(),
+                target: comp.platform.target.clone(),
+            },
+            tool: comp.tool.as_ref().map(|t| CanonicalTool {
+                name: t.name.clone(),
+                version: t.version.clone(),
+                digest: t.digest.as_ref().map(|d| d.as_str().to_string()),
+            }),
+        }
+    }
+
+    pub fn to_canonical_json(&self) -> Result<String> {
+        Ok(serde_json::to_string(self)?)
+    }
+
+    pub fn compute_key(&self) -> Result<CacheKey> {
+        let json = self.to_canonical_json()?;
+        let digest = Digest::from_bytes(json.as_bytes());
+        Ok(CacheKey::new(digest))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::computation::Computation;
+
+    #[test]
+    fn test_canonical_key_determinism() {
+        let digest_a = Digest::from_bytes(b"hello");
+        let comp1 = Computation::builder("build", "rustc")
+            .arg("main.rs")
+            .input("src/main.rs", digest_a.clone(), 10)
+            .env("MODE", "release")
+            .env("OPT", "3")
+            .build()
+            .unwrap();
+
+        let comp2 = Computation::builder("build", "rustc")
+            .arg("main.rs")
+            .env("OPT", "3") // inserted in different order
+            .env("MODE", "release")
+            .input("src/main.rs", digest_a, 10)
+            .build()
+            .unwrap();
+
+        let canon1 = CanonicalComputation::from_computation(&comp1);
+        let canon2 = CanonicalComputation::from_computation(&comp2);
+
+        assert_eq!(canon1.compute_key().unwrap(), canon2.compute_key().unwrap());
+    }
+
+    #[test]
+    fn test_differing_inputs_produce_different_keys() {
+        let d1 = Digest::from_bytes(b"content 1");
+        let d2 = Digest::from_bytes(b"content 2");
+
+        let comp1 = Computation::builder("gen", "tool")
+            .input("file.txt", d1, 9)
+            .build()
+            .unwrap();
+
+        let comp2 = Computation::builder("gen", "tool")
+            .input("file.txt", d2, 9)
+            .build()
+            .unwrap();
+
+        let key1 = CanonicalComputation::from_computation(&comp1).compute_key().unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2).compute_key().unwrap();
+
+        assert_ne!(key1, key2);
+    }
+
+    #[test]
+    fn test_differing_arguments_produce_different_keys() {
+        let comp1 = Computation::builder("fmt", "tool")
+            .arg("--fast")
+            .build()
+            .unwrap();
+
+        let comp2 = Computation::builder("fmt", "tool")
+            .arg("--safe")
+            .build()
+            .unwrap();
+
+        let key1 = CanonicalComputation::from_computation(&comp1).compute_key().unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2).compute_key().unwrap();
+
+        assert_ne!(key1, key2);
+    }
+
+    #[test]
+    fn test_differing_tool_versions_produce_different_keys() {
+        let comp1 = Computation::builder("compile", "rustc")
+            .tool("rustc", Some("1.80.0".into()), None)
+            .build()
+            .unwrap();
+
+        let comp2 = Computation::builder("compile", "rustc")
+            .tool("rustc", Some("1.81.0".into()), None)
+            .build()
+            .unwrap();
+
+        let key1 = CanonicalComputation::from_computation(&comp1).compute_key().unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2).compute_key().unwrap();
+
+        assert_ne!(key1, key2);
+    }
+
+    #[test]
+    fn test_differing_environment_produce_different_keys() {
+        let comp1 = Computation::builder("test", "runner")
+            .env("NODE_ENV", "development")
+            .build()
+            .unwrap();
+
+        let comp2 = Computation::builder("test", "runner")
+            .env("NODE_ENV", "production")
+            .build()
+            .unwrap();
+
+        let key1 = CanonicalComputation::from_computation(&comp1).compute_key().unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2).compute_key().unwrap();
+
+        assert_ne!(key1, key2);
+    }
+}

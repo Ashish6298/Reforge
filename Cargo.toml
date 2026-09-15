@@ -1,0 +1,30 @@
+[workspace]
+members = [
+    "crates/cache-core",
+    "crates/cache-storage",
+    "crates/cache-runner",
+    "crates/cache-cli",
+    "crates/cache-test-utils",
+]
+resolver = "2"
+
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+authors = ["DCC Contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/developer-computation-cache/dcc"
+rust-version = "1.75"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+sha2 = "0.10"
+hex = "0.4"
+thiserror = "1.0"
+clap = { version = "4.4", features = ["derive", "env"] }
+chrono = { version = "0.4", features = ["serde"] }
+fs2 = "0.4"
+tempfile = "3.10"
+walkdir = "2.4"
+anyhow = "1.0"

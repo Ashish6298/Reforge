@@ -1,0 +1,19 @@
+[package]
+name = "dcc-runner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Execution engine, cache lookup, process execution, restoration, and miss explanation for DCC"
+
+[dependencies]
+dcc-core = { path = "../cache-core" }
+dcc-storage = { path = "../cache-storage" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+walkdir = { workspace = true }
+tempfile = { workspace = true }
+
+[dev-dependencies]
+dcc-test-utils = { path = "../cache-test-utils" }

@@ -1,0 +1,63 @@
+================================================================================
+DCC COMPUTATION MODEL VERIFICATION REPORT — MILESTONE 0.1
+================================================================================
+Generated: 2026-09-15
+Location: D:\DC\docs\report\milestone_0_1_computation_model_report.txt
+Status: ALL VALIDATIONS & TESTS PASSED
+
+--------------------------------------------------------------------------------
+1. OBJECTIVE AUDIT & SPECIFICATION MAPPING
+--------------------------------------------------------------------------------
+Milestone 0.1 specifies a formal Computation Model containing at minimum:
+1. Operation identifier ............................................. [IMPLEMENTED] (String)
+2. Command / Tool identity .......................................... [IMPLEMENTED] (Command String + ToolIdentity struct)
+3. Arguments ........................................................ [IMPLEMENTED] (Vec<String> preserving order)
+4. Declared input files ............................................. [IMPLEMENTED] (Vec<InputFile>)
+5. Input content hashes ............................................. [IMPLEMENTED] (Digest SHA-256)
+6. Declared output files ............................................ [IMPLEMENTED] (Vec<OutputFile> + required flag)
+7. Relevant environment variables ................................... [IMPLEMENTED] (BTreeMap<String, String>)
+8. Working directory information .................................... [IMPLEMENTED] (Option<String> / Option<PathBuf>)
+9. Platform constraints ............................................. [IMPLEMENTED] (PlatformConstraints: os, arch, target)
+10. Tool / runtime version information ............................... [IMPLEMENTED] (ToolIdentity: name, version, digest)
+11. Cache policy .................................................... [IMPLEMENTED] (CachePolicy: ReadWrite, ReadOnly, WriteOnly, Bypass, ForceRecompute)
+12. Metadata ........................................................ [IMPLEMENTED] (BTreeMap<String, String>)
+
+--------------------------------------------------------------------------------
+2. ENVIRONMENT VARIABLE RELEVANCE RULES
+--------------------------------------------------------------------------------
+- Ambient system variables (e.g. USER, TMP, PATH, process IDs) are NOT automatically
+  hashed into the computation identity to prevent unnecessary cache fragmentation.
+- Only explicitly declared environment variables needed for computation correctness
+  are recorded into the computation identity.
+- Environment variables are lexicographically ordered in a BTreeMap to guarantee
+  deterministic canonical JSON key generation.
+
+--------------------------------------------------------------------------------
+3. TESTS & INTEGRATION RESULTS
+--------------------------------------------------------------------------------
+- Crate: dcc-core
+  * test digest::tests::test_valid_digest ........................... PASSED
+  * test digest::tests::test_from_bytes ............................. PASSED
+  * test digest::tests::test_invalid_digest ......................... PASSED
+  * test canonical::tests::test_canonical_key_determinism ........... PASSED
+  * test canonical::tests::test_differing_inputs_produce_different_keys  PASSED
+
+- Crate: dcc-storage
+  * test cas::tests::test_cas_store_and_verify ...................... PASSED
+  * test cas::tests::test_cas_entry_lifecycle ....................... PASSED
+
+- Integration & Security:
+  * test_cold_miss_then_warm_hit .................................... PASSED
+  * test_input_change_causes_cache_miss ............................. PASSED
+  * test_path_traversal_rejection ................................... PASSED
+  * test_concurrent_identical_computations .......................... PASSED
+  * test_corrupted_cas_object_causes_safe_fallback .................. PASSED
+
+Total: 12 tests passed; 0 failed; 0 warnings/regressions.
+
+--------------------------------------------------------------------------------
+4. CONCLUSION
+--------------------------------------------------------------------------------
+The formal Computation Model strictly satisfies Milestone 0.1, preserving deterministic
+canonical serialization, explicit environment isolation, policy control, and security boundaries.
+================================================================================
