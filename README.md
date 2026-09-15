@@ -9,25 +9,31 @@ A high-performance, local-first, content-addressed developer computation caching
 
 ---
 
+## Core Domain Models (`cache-core`)
+
+DCC avoids unstructured raw strings by employing strongly typed domain models:
+
+- **`Digest`**: Validated 64-character lowercase hexadecimal SHA-256 content hash.
+- **`CacheKey`**: Strongly typed cryptographic identifier derived from canonical JSON computation identity.
+- **`Computation`**: Declarative model containing operation, executable, arguments, inputs, outputs, env, tool identity, platform, and policy.
+- **`InputFile` & `OutputFile`**: Declared inputs with streaming digests and declared required outputs.
+- **`OutputManifest`**: Collection of generated artifacts with validated digests and sizes.
+- **`CacheEntry`**: Immutable metadata record containing computation specification, output manifest, timestamps, and execution metrics.
+- **`CacheMetadata` & `ExecutionMetadata`**: Access times, hit counts, exit codes, and stdout/stderr references.
+- **`CacheResult<T>`**: Strongly typed lookup and execution outcomes (`Hit`, `Miss`, `Bypassed`).
+- **`CachePolicy`**: Execution caching directives (`ReadWrite`, `ReadOnly`, `WriteOnly`, `Bypass`, `ForceRecompute`).
+- **`StructuredEvent`**: High-performance telemetry event taxonomy.
+
+---
+
 ## Workspace Architecture
 
-The project is structured as a modular Cargo workspace across dedicated crates:
-
-- **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `MissReason`, `StructuredEvent`), deterministic normalization, structured logging, and canonical SHA-256 key generation.
+- **[`crates/cache-core`](crates/cache-core)**: Core domain models, deterministic normalization, structured logging, and canonical SHA-256 key generation.
 - **[`crates/cache-storage`](crates/cache-storage)**: Content-Addressed Storage (CAS) with 2-char hex prefix sharding, two-stage atomic writes (`.tmp` $\rightarrow$ `fsync` $\rightarrow$ rename), checksum verification, corrupted object isolation, LRU eviction, and `fs2` multi-process locking.
 - **[`crates/cache-runner`](crates/cache-runner)**: Direct OS process execution, sandboxed output restoration with path-traversal protection, and structured miss explainer.
 - **[`crates/cache-cli`](crates/cache-cli)**: CLI binary (`dcc`) supporting `init`, `run`, `inspect`, `stats`, `verify`, `clean`, `prune`, and `doctor`.
 - **[`crates/cache-integrations`](crates/cache-integrations)**: Developer adapters for code generators, build systems, and tools.
 - **[`crates/cache-test-utils`](crates/cache-test-utils)**: Test harnesses, synthetic workspace generators, and failure injectors.
-
----
-
-## Structured Logging & Telemetry
-
-DCC implements structured events for observability:
-- `cache.lookup`, `cache.hit`, `cache.miss`, `cache.store`, `cache.restore`, `cache.delete`, `cache.verify`
-- `computation.start`, `computation.finish`, `computation.failed`
-- Specification in [docs/logging.md](docs/logging.md).
 
 ---
 
@@ -76,9 +82,11 @@ dcc prune --max-size 10737418240
 
 ---
 
-## Verification & Tests
+## Quality Gates & Verification
 
 ```bash
 cargo check --workspace
 cargo test --workspace
+cargo clippy --workspace --all-targets --all-features
+cargo fmt --all -- --check
 ```

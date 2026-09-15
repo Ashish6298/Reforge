@@ -23,6 +23,28 @@ pub struct OutputManifestItem {
     pub is_executable: Option<bool>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct OutputManifest {
+    pub items: Vec<OutputManifestItem>,
+}
+
+impl OutputManifest {
+    pub fn new(items: Vec<OutputManifestItem>) -> Self {
+        Self { items }
+    }
+
+    pub fn total_size(&self) -> u64 {
+        self.items.iter().map(|i| i.size).sum()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CacheResult<T> {
+    Hit(T),
+    Miss(MissReason),
+    Bypassed,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionMetadata {
     pub exit_code: i32,
