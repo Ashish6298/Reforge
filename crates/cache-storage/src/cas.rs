@@ -273,6 +273,32 @@ impl CasStorage {
             Ok(false)
         }
     }
+
+    /// Inspect storage and collect comprehensive metrics.
+    pub fn stats(&self) -> Result<crate::stats::StorageStats> {
+        crate::stats::StorageStats::collect(self)
+    }
+
+    /// Returns the total number of physical CAS objects currently stored.
+    pub fn count_objects(&self) -> Result<usize> {
+        Ok(self.stats()?.total_objects)
+    }
+
+    /// Returns the total number of cached computation entries currently stored.
+    pub fn count_entries(&self) -> Result<usize> {
+        Ok(self.stats()?.total_entries)
+    }
+
+    /// Returns the total disk space consumed by CAS objects and entry records in bytes.
+    pub fn total_size_bytes(&self) -> Result<u64> {
+        Ok(self.stats()?.total_size_bytes)
+    }
+
+    /// Returns the size in bytes and optional path of the largest stored CAS object.
+    pub fn largest_object(&self) -> Result<(u64, Option<PathBuf>)> {
+        let stats = self.stats()?;
+        Ok((stats.largest_object_size_bytes, stats.largest_object_path))
+    }
 }
 
 fn uuid_like_nonce() -> String {

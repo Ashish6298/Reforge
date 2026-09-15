@@ -127,6 +127,20 @@ DCC validates the cryptographic hash of every CAS object before reading or resto
 
 ---
 
+## Storage Inspection APIs
+
+The storage engine exposes dedicated inspection methods that power `dcc stats` and telemetry:
+
+```rust
+let stats = storage.stats()?;
+let obj_count = storage.count_objects()?;
+let entry_count = storage.count_entries()?;
+let total_bytes = storage.total_size_bytes()?;
+let (largest_size, largest_path) = storage.largest_object()?;
+```
+
+---
+
 ## Workspace Architecture
 
 - **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`), streaming hashing, and canonical key derivation.
