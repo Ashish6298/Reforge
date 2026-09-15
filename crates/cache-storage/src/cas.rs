@@ -391,4 +391,50 @@ mod tests {
         assert_eq!(storage.entry_path(&key), expected_entry_path);
         assert!(expected_entry_path.is_file());
     }
+
+    #[test]
+    fn test_atomic_writes_pipeline() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = StorageConfig {
+            root_dir: temp_dir.path().to_path_buf(),
+            max_size_bytes: None,
+        };
+        let storage = CasStorage::new(config).unwrap();
+
+        // Storing an object should write to tmp, flush, sync, rename, and leave tmp clean
+        let payload = b"atomic write verification content payload";
+        let (digest, size) = storage.store_object_bytes(payload).unwrap();
+        assert_eq!(size, payload.len() as u64);
+
+        let final_obj_path = storage.object_path(&digest);
+        assert!(final_obj_path.is_file());
+
+        // Verify no leftover .tmp files in tmp_dir
+        let mut tmp_entries = fs::read_dir(storage.tmp_dir()).unwrap();
+        assert!(
+            tmp_entries.next().is_none(),
+            "tmp directory must be empty after successful atomic store"
+        );
+
+        // Deduplication test: re-storing identical object does not create temporary or duplicate files
+        let (digest2, _) = storage.store_object_bytes(payload).unwrap();
+        assert_eq!(digest, digest2);
+        assert!(
+            fs::read_dir(storage.tmp_dir()).unwrap().next().is_none(),
+            "tmp directory must remain clean after deduplicated store"
+        );
+
+        // Entry atomic write test
+        let comp = Computation::builder("atomic_test", "echo").build().unwrap();
+        let key = comp.compute_key().unwrap();
+        let entry = CacheEntry::new(key.clone(), comp, Vec::new(), ExecutionMetadata::default());
+        storage.store_entry(&entry).unwrap();
+
+        let final_entry_path = storage.entry_path(&key);
+        assert!(final_entry_path.is_file());
+        assert!(
+            fs::read_dir(storage.tmp_dir()).unwrap().next().is_none(),
+            "tmp directory must remain clean after atomic entry write"
+        );
+    }
 }

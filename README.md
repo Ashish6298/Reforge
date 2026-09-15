@@ -96,6 +96,24 @@ To prevent scalability bottlenecks from storing millions of files in a single fo
 
 ---
 
+## Atomic Writes & Crash Consistency
+
+To guarantee that DCC never leaves partially written or corrupted artifacts in the live cache, all writes follow a strict two-stage atomic pipeline:
+
+```text
+temporary file (.dcc_cache/tmp/*.tmp)
+          ↓
+        write
+          ↓
+        flush
+          ↓
+   sync (fsync / sync_all)
+          ↓
+    atomic rename (.dcc_cache/objects/ab/...)
+```
+
+If an error or process interruption occurs during write or sync, temporary staging files are cleaned up and the live cache remains intact.
+
 ## Workspace Architecture
 
 - **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`), streaming hashing, and canonical key derivation.
