@@ -141,12 +141,15 @@ impl Cache {
             ))
         })?;
 
-        // Verify each output blob
+        // 1. Verify entry identity matches its embedded computation
+        entry.verify_identity()?;
+
+        // 2. Verify each referenced output blob in CAS
         for output in &entry.outputs {
             self.storage.verify_object(&output.digest)?;
         }
 
-        // Verify stdout / stderr blobs if present
+        // 3. Verify stdout / stderr blobs if present
         if let Some(stdout_digest) = &entry.metadata.execution.stdout_digest {
             self.storage.verify_object(stdout_digest)?;
         }
@@ -243,7 +246,7 @@ mod tests {
             .arg("main.rs")
             .build()
             .unwrap();
-        let key = CacheKey::from_bytes(b"test-compile-key");
+        let key = comp.compute_key().unwrap();
 
         let entry = CacheEntry::new(
             key.clone(),
@@ -309,7 +312,7 @@ mod tests {
         let (digest, size) = cache.store_bytes(content).unwrap();
 
         let comp = Computation::builder("test", "echo").build().unwrap();
-        let key = CacheKey::from_bytes(b"corrupt-test-key");
+        let key = comp.compute_key().unwrap();
         let entry = CacheEntry::new(
             key.clone(),
             comp,
@@ -331,5 +334,92 @@ mod tests {
 
         // verify() must now detect integrity failure
         assert!(cache.verify(&key).is_err());
+    }
+
+    #[test]
+    fn test_milestone_2_7_exit_criteria_without_external_commands() {
+        // 1. Create a deterministic computation
+        let input_bytes = b"input source code content";
+        let input_digest = Digest::from_bytes(input_bytes);
+
+        let comp = Computation::builder("compile", "rustc")
+            .arg("--crate-type=lib")
+            .arg("lib.rs")
+            .input("src/lib.rs", input_digest.clone(), input_bytes.len() as u64)
+            .env("RUST_BACKTRACE", "1")
+            .build()
+            .unwrap();
+
+        // 2. Generate a deterministic key
+        let key = comp.compute_key().unwrap();
+        let same_key = comp.compute_key().unwrap();
+        assert_eq!(key, same_key, "Key generation must be deterministic");
+
+        // 3. Create a cache entry referencing CAS blobs
+        let output_bytes = b"compiled rlib binary blob";
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = StorageConfig {
+            root_dir: temp_dir.path().join("cache"),
+            max_size_bytes: None,
+        };
+        let storage = CasStorage::new(config).unwrap();
+        let cache = Cache::new(storage);
+
+        let (out_digest, out_size) = cache.store_bytes(output_bytes).unwrap();
+        let entry = CacheEntry::new(
+            key.clone(),
+            comp,
+            vec![OutputManifestItem {
+                path: "libfoo.rlib".to_string(),
+                digest: out_digest.clone(),
+                size: out_size,
+                is_executable: None,
+            }],
+            ExecutionMetadata {
+                exit_code: 0,
+                execution_time_ms: 85,
+                stdout_digest: None,
+                stderr_digest: None,
+            },
+        );
+
+        cache.store(&entry).unwrap();
+
+        // 4. Retrieve the entry
+        let retrieved = cache
+            .lookup(&key)
+            .unwrap()
+            .expect("Entry must be retrieved");
+        assert_eq!(retrieved.key, key);
+        assert_eq!(retrieved.outputs.len(), 1);
+        assert_eq!(retrieved.outputs[0].digest, out_digest);
+
+        // 5. Verify its identity
+        assert!(retrieved.verify_identity().is_ok());
+        assert!(cache.verify(&key).is_ok());
+
+        // 6. Detect corrupted metadata
+        // A) Corrupt the JSON file on disk
+        let entry_file = cache.storage().entry_path(&key);
+        fs::write(&entry_file, b"{ invalid json metadata payload").unwrap();
+        let lookup_res = cache.lookup(&key);
+        assert!(
+            lookup_res.is_err(),
+            "Corrupted JSON metadata must trigger an error on lookup"
+        );
+
+        // B) Detect identity tampering (modified command in entry but key kept same)
+        let mut tampered_comp = retrieved.computation.clone();
+        tampered_comp.command = "malicious_binary".to_string();
+        let tampered_entry = CacheEntry::new(
+            key.clone(), // Kept old key but changed computation
+            tampered_comp,
+            retrieved.outputs.clone(),
+            ExecutionMetadata::default(),
+        );
+        assert!(
+            tampered_entry.verify_identity().is_err(),
+            "Tampered computation identity must be detected"
+        );
     }
 }

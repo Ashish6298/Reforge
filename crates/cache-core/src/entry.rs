@@ -1,5 +1,6 @@
 use crate::computation::Computation;
 use crate::digest::{CacheKey, Digest};
+use crate::error::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -113,6 +114,26 @@ impl CacheEntry {
 
     pub fn stderr_digest(&self) -> Option<&Digest> {
         self.metadata.execution.stderr_digest.as_ref()
+    }
+
+    /// Compute the canonical cache key derived from the embedded computation specification.
+    pub fn compute_key(&self) -> Result<CacheKey> {
+        let canonical = crate::canonical::CanonicalComputation::from_computation(&self.computation);
+        canonical.compute_key()
+    }
+
+    /// Verify that the entry's declared key exactly matches the key derived canonically
+    /// from its embedded computation. Returns an error if an identity mismatch is detected.
+    pub fn verify_identity(&self) -> Result<()> {
+        let expected_key = self.compute_key()?;
+        if self.key != expected_key {
+            return Err(crate::error::CacheError::IntegrityError {
+                expected: expected_key.as_str().to_string(),
+                actual: self.key.as_str().to_string(),
+                path: format!("entry:{}", self.key),
+            });
+        }
+        Ok(())
     }
 }
 

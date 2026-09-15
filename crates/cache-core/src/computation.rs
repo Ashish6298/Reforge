@@ -105,6 +105,12 @@ impl Computation {
         }
         Ok(())
     }
+
+    /// Compute the deterministic canonical CacheKey for this computation.
+    pub fn compute_key(&self) -> Result<crate::digest::CacheKey> {
+        let canonical = crate::canonical::CanonicalComputation::from_computation(self);
+        canonical.compute_key()
+    }
 }
 
 pub struct ComputationBuilder {
