@@ -1,0 +1,40 @@
+================================================================================
+DCC COMPUTATION KEY GENERATION REPORT — MILESTONE 2.4
+================================================================================
+Generated: 2026-09-15
+Location: D:\DC\docs\report\milestone_2_4_key_generation_report.txt
+Status: DETERMINISTIC CANONICAL KEY PIPELINE FULLY VALIDATED
+
+--------------------------------------------------------------------------------
+1. COMPUTATION KEY GENERATION LIFECYCLE
+--------------------------------------------------------------------------------
+Computation Model
+      ↓
+Normalization (paths '/', sorted inputs/outputs/env)
+      ↓
+Canonical JSON Serialization (Deterministic schema)
+      ↓
+SHA-256 Hashing
+      ↓
+CacheKey (64-char lowercase hex digest)
+
+--------------------------------------------------------------------------------
+2. KEY INVARIANCE & SENSITIVITY TEST MATRIX
+--------------------------------------------------------------------------------
+[x] Same computation -> Same key (test_canonical_key_determinism)
+[x] Map ordering invariance -> Same key (BTreeMap key-sorted encoding)
+[x] Different input content -> Different key (test_differing_inputs_produce_different_keys)
+[x] Different arguments -> Different key (test_differing_arguments_produce_different_keys)
+[x] Different tool version -> Different key (test_differing_tool_versions_produce_different_keys)
+[x] Different relevant environment -> Different key (test_differing_environment_produce_different_keys)
+[x] Content-primary file identity -> Same key across mtime changes
+
+--------------------------------------------------------------------------------
+3. TEST EXECUTION SUMMARY
+--------------------------------------------------------------------------------
+- Unit tests executed in dcc-core: 13 passed, 0 failed.
+- All workspace tests (20 tests across 6 crates) pass with 100% success.
+- Zero warnings under cargo clippy --workspace --all-targets --all-features.
+
+README.md remains synchronized.
+================================================================================
