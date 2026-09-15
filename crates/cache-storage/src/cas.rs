@@ -437,4 +437,55 @@ mod tests {
             "tmp directory must remain clean after atomic entry write"
         );
     }
+
+    #[test]
+    fn test_corruption_detection_and_quarantine() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = StorageConfig {
+            root_dir: temp_dir.path().to_path_buf(),
+            max_size_bytes: None,
+        };
+        let storage = CasStorage::new(config).unwrap();
+
+        let original_data = b"integrity verified payload data";
+        let (digest, _) = storage.store_object_bytes(original_data).unwrap();
+
+        let obj_path = storage.object_path(&digest);
+        assert!(obj_path.is_file());
+        assert!(storage.verify_object(&digest).is_ok());
+
+        // Simulate bitrot / corruption by modifying file content directly
+        fs::write(&obj_path, b"bitrot corrupted payload data").unwrap();
+
+        // Verification must detect the corruption
+        let verify_res = storage.verify_object(&digest);
+        assert!(
+            verify_res.is_err(),
+            "Corrupted object must fail verification"
+        );
+
+        match verify_res {
+            Err(CacheError::IntegrityError {
+                expected, actual, ..
+            }) => {
+                assert_eq!(expected, digest.as_str());
+                assert_ne!(actual, digest.as_str());
+            }
+            other => panic!("Expected IntegrityError, got: {:?}", other),
+        }
+
+        // Must quarantine the corrupted file so it is no longer at the valid object_path
+        assert!(
+            !obj_path.exists(),
+            "Corrupted object must be quarantined from primary path"
+        );
+        let quarantined_path = obj_path.with_extension("corrupted");
+        assert!(
+            quarantined_path.is_file(),
+            "Quarantined file must exist with .corrupted extension"
+        );
+
+        // Attempting to read via get_object_reader should also fail
+        assert!(storage.get_object_reader(&digest).is_err());
+    }
 }

@@ -114,6 +114,19 @@ temporary file (.dcc_cache/tmp/*.tmp)
 
 If an error or process interruption occurs during write or sync, temporary staging files are cleaned up and the live cache remains intact.
 
+---
+
+## Corruption Detection & Quarantining
+
+DCC validates the cryptographic hash of every CAS object before reading or restoring:
+
+- If `expected_digest != actual_digest`:
+  - A structured `CacheError::IntegrityError` is generated.
+  - The corrupted object is immediately isolated and renamed to `*.corrupted`.
+  - The runner engine detects the miss/corruption and automatically falls back to re-executing the computation rather than returning invalid data.
+
+---
+
 ## Workspace Architecture
 
 - **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`), streaming hashing, and canonical key derivation.
