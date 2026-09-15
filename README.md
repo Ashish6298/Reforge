@@ -9,20 +9,19 @@ A high-performance, local-first, content-addressed developer computation caching
 
 ---
 
-## Content Hashing & Streaming Digest System
+## File Identity Model
 
-DCC avoids reading large files entirely into RAM. The [`Digest`](crates/cache-core/src/digest.rs) cryptographic system implements chunked streaming hashing:
+DCC establishes file identity based on **content hashes as the primary source of truth**, rather than fragile file modification timestamps (`mtime`):
 
-- `Digest::hash_bytes(&[u8]) -> Digest`: Cryptographic SHA-256 computation over memory buffers.
-- `Digest::hash_reader(R: Read) -> std::io::Result<Digest>`: 64KB chunk-buffered streaming reader.
-- `Digest::hash_file(Path) -> std::io::Result<Digest>`: Zero-allocation file stream hashing.
-- `Digest::new(&str) -> Result<Digest>`: Validates lowercase 64-character hexadecimal format.
+- **Primary Identity**: `path` (normalized relative path) + `content digest` (cryptographic SHA-256).
+- **Relevant Metadata**: File size and executable permission bit (`is_executable`), which affects script execution semantics.
+- **Timestamp Invariance**: File modification times (`mtime`) can serve as an internal caching optimization, but never cause incorrect cache hits or alter semantic identity.
 
 ---
 
 ## Workspace Architecture
 
-- **[`crates/cache-core`](crates/cache-core)**: Core domain models, streaming SHA-256 digest engine, deterministic canonical serialization, and structured logging.
+- **[`crates/cache-core`](crates/cache-core)**: Core domain models, streaming SHA-256 digest engine, file identity modeling, deterministic canonical serialization, and structured logging.
 - **[`crates/cache-storage`](crates/cache-storage)**: Content-Addressed Storage (CAS) with 2-char hex prefix sharding, two-stage atomic writes (`.tmp` $\rightarrow$ `fsync` $\rightarrow$ rename), checksum verification, corrupted object isolation, LRU eviction, and `fs2` multi-process locking.
 - **[`crates/cache-runner`](crates/cache-runner)**: Direct OS process execution, sandboxed output restoration with path-traversal protection, and structured miss explainer.
 - **[`crates/cache-cli`](crates/cache-cli)**: CLI binary (`dcc`) supporting `init`, `run`, `inspect`, `stats`, `verify`, `clean`, `prune`, and `doctor`.
