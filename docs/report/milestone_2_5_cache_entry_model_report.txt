@@ -1,0 +1,35 @@
+================================================================================
+DCC CACHE ENTRY MODEL REPORT — MILESTONE 2.5
+================================================================================
+Generated: 2026-09-15
+Location: D:\DC\docs\report\milestone_2_5_cache_entry_model_report.txt
+Status: CACHE ENTRY MODEL VERIFIED & TESTS PASSED
+
+--------------------------------------------------------------------------------
+1. CACHE ENTRY MODEL AUDIT
+--------------------------------------------------------------------------------
+The CacheEntry specification in `crates/cache-core/src/entry.rs` models all fields:
+- `key`: Strongly typed CacheKey
+- `schema_version`: Schema migration version (CURRENT_SCHEMA_VERSION = 1)
+- `created_at`: Creation timestamp in UTC
+- `last_accessed_at`: Last accessed timestamp in UTC (updated on lookup)
+- `hit_count`: Monotonically incrementing reuse counter
+- `computation`: Declarative computation specification (inputs, cmd, args, env, tool, platform)
+- `outputs`: Output manifest referencing Content-Addressed Storage (CAS) SHA-256 digests
+- `execution`: ExecutionMetadata (exit code, execution duration ms, stdout_digest, stderr_digest)
+- `integrity`: Optional IntegrityInfo checksum
+
+Rule Verification:
+- Large binary output data is NEVER embedded directly into entry metadata JSON.
+- Metadata strictly references stored CAS objects by SHA-256 digest.
+
+--------------------------------------------------------------------------------
+2. TEST SUITE RESULTS
+--------------------------------------------------------------------------------
+- test entry::tests::test_cache_entry_references_blobs_not_raw_data ... PASSED
+- All 14 unit tests in dcc-core passed.
+- All workspace integration, concurrency, and security tests (21 tests total) passed.
+- All quality gates (fmt, clippy, test) pass with zero warnings.
+
+README.md updated with CacheEntry model documentation.
+================================================================================

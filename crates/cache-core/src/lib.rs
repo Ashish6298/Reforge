@@ -11,8 +11,8 @@ pub use computation::{
 };
 pub use digest::{CacheKey, Digest};
 pub use entry::{
-    CacheEntry, CacheMetadata, CachePolicy, CacheResult, ExecutionMetadata, MissReason,
-    OutputManifest, OutputManifestItem,
+    CacheEntry, CacheMetadata, CachePolicy, CacheResult, ExecutionMetadata, IntegrityInfo,
+    MissReason, OutputManifest, OutputManifestItem,
 };
 pub use error::{CacheError, Result};
 pub use event::{EventKind, EventSubscriber, StructuredEvent};

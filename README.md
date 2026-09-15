@@ -9,19 +9,28 @@ A high-performance, local-first, content-addressed developer computation caching
 
 ---
 
-## File Identity Model
+## Cache Entry Model (`CacheEntry`)
 
-DCC establishes file identity based on **content hashes as the primary source of truth**, rather than fragile file modification timestamps (`mtime`):
+Metadata records never embed raw binary output data directly. Instead, entries reference CAS blobs via cryptographic digests:
 
-- **Primary Identity**: `path` (normalized relative path) + `content digest` (cryptographic SHA-256).
-- **Relevant Metadata**: File size and executable permission bit (`is_executable`), which affects script execution semantics.
-- **Timestamp Invariance**: File modification times (`mtime`) can serve as an internal caching optimization, but never cause incorrect cache hits or alter semantic identity.
+```text
+CacheEntry
+├── key: CacheKey (SHA-256 computation digest)
+├── schema_version: u32
+├── created_at: DateTime<Utc>
+├── last_accessed_at: DateTime<Utc>
+├── hit_count: u64
+├── computation: Computation (operation, command, args, inputs, env, tool, platform)
+├── outputs: Vec<OutputManifestItem> (manifest mapping paths to CAS SHA-256 digests)
+├── execution: ExecutionMetadata (exit code, duration, stdout_digest, stderr_digest)
+└── integrity: Option<IntegrityInfo> (record verification checksum)
+```
 
 ---
 
 ## Workspace Architecture
 
-- **[`crates/cache-core`](crates/cache-core)**: Core domain models, streaming SHA-256 digest engine, file identity modeling, deterministic canonical serialization, and structured logging.
+- **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`), streaming hashing, and canonical key derivation.
 - **[`crates/cache-storage`](crates/cache-storage)**: Content-Addressed Storage (CAS) with 2-char hex prefix sharding, two-stage atomic writes (`.tmp` $\rightarrow$ `fsync` $\rightarrow$ rename), checksum verification, corrupted object isolation, LRU eviction, and `fs2` multi-process locking.
 - **[`crates/cache-runner`](crates/cache-runner)**: Direct OS process execution, sandboxed output restoration with path-traversal protection, and structured miss explainer.
 - **[`crates/cache-cli`](crates/cache-cli)**: CLI binary (`dcc`) supporting `init`, `run`, `inspect`, `stats`, `verify`, `clean`, `prune`, and `doctor`.

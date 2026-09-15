@@ -54,11 +54,19 @@ pub struct ExecutionMetadata {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IntegrityInfo {
+    pub entry_digest: Digest,
+    pub verified_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CacheMetadata {
     pub created_at: DateTime<Utc>,
     pub last_accessed_at: DateTime<Utc>,
     pub hit_count: u64,
     pub execution: ExecutionMetadata,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub integrity: Option<IntegrityInfo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -90,12 +98,21 @@ impl CacheEntry {
                 last_accessed_at: now,
                 hit_count: 0,
                 execution,
+                integrity: None,
             },
         }
     }
 
     pub fn total_output_size(&self) -> u64 {
         self.outputs.iter().map(|o| o.size).sum()
+    }
+
+    pub fn stdout_digest(&self) -> Option<&Digest> {
+        self.metadata.execution.stdout_digest.as_ref()
+    }
+
+    pub fn stderr_digest(&self) -> Option<&Digest> {
+        self.metadata.execution.stderr_digest.as_ref()
     }
 }
 
@@ -177,5 +194,38 @@ impl std::fmt::Display for MissReason {
             Self::CorruptedCache { reason } => write!(f, "Corrupted cache entry: {}", reason),
             Self::ForcedRecompute => write!(f, "Forced recompute requested by policy"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cache_entry_references_blobs_not_raw_data() {
+        let comp = Computation::builder("build", "cargo").build().unwrap();
+        let key = CacheKey::from_bytes(b"key");
+        let item = OutputManifestItem {
+            path: "target/bin".into(),
+            digest: Digest::from_bytes(b"blob data"),
+            size: 1024,
+            is_executable: Some(true),
+        };
+
+        let entry = CacheEntry::new(
+            key,
+            comp,
+            vec![item],
+            ExecutionMetadata {
+                exit_code: 0,
+                execution_time_ms: 50,
+                stdout_digest: Some(Digest::from_bytes(b"stdout content")),
+                stderr_digest: None,
+            },
+        );
+
+        assert_eq!(entry.total_output_size(), 1024);
+        assert!(entry.stdout_digest().is_some());
+        assert!(entry.stderr_digest().is_none());
     }
 }
