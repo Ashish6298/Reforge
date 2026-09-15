@@ -2,7 +2,9 @@ use crate::error::{CacheError, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as Sha256Digest, Sha256};
 use std::fmt;
-use std::io::Read;
+use std::fs::File;
+use std::io::{BufReader, Read};
+use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -22,13 +24,21 @@ impl Digest {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Self {
+        Self::hash_bytes(bytes)
+    }
+
+    pub fn hash_bytes(bytes: &[u8]) -> Self {
         let mut hasher = Sha256::new();
         hasher.update(bytes);
         let result = hasher.finalize();
         Self(hex::encode(result))
     }
 
-    pub fn from_reader<R: Read>(mut reader: R) -> std::io::Result<Self> {
+    pub fn from_reader<R: Read>(reader: R) -> std::io::Result<Self> {
+        Self::hash_reader(reader)
+    }
+
+    pub fn hash_reader<R: Read>(mut reader: R) -> std::io::Result<Self> {
         let mut hasher = Sha256::new();
         let mut buffer = [0u8; 64 * 1024]; // 64KB chunk buffer for streaming
         loop {
@@ -40,6 +50,12 @@ impl Digest {
         }
         let result = hasher.finalize();
         Ok(Self(hex::encode(result)))
+    }
+
+    pub fn hash_file(path: impl AsRef<Path>) -> std::io::Result<Self> {
+        let file = File::open(path)?;
+        let reader = BufReader::new(file);
+        Self::hash_reader(reader)
     }
 
     pub fn prefix(&self, len: usize) -> &str {
@@ -89,6 +105,7 @@ impl fmt::Display for CacheKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     #[test]
     fn test_valid_digest() {
@@ -99,12 +116,37 @@ mod tests {
     }
 
     #[test]
-    fn test_from_bytes() {
-        let d = Digest::from_bytes(b"hello world");
+    fn test_from_bytes_and_hash_bytes() {
+        let d1 = Digest::from_bytes(b"hello world");
+        let d2 = Digest::hash_bytes(b"hello world");
+        assert_eq!(d1, d2);
         assert_eq!(
-            d.as_str(),
+            d1.as_str(),
             "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
         );
+    }
+
+    #[test]
+    fn test_hash_reader_streaming() {
+        let data = b"streaming content for hashing test";
+        let cursor = std::io::Cursor::new(data);
+        let digest = Digest::hash_reader(cursor).unwrap();
+        assert_eq!(digest, Digest::hash_bytes(data));
+    }
+
+    #[test]
+    fn test_hash_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("test_hash.txt");
+        let payload = b"large chunk of test bytes for file hashing verification";
+        {
+            let mut file = File::create(&file_path).unwrap();
+            file.write_all(payload).unwrap();
+        }
+
+        let file_digest = Digest::hash_file(&file_path).unwrap();
+        let memory_digest = Digest::hash_bytes(payload);
+        assert_eq!(file_digest, memory_digest);
     }
 
     #[test]

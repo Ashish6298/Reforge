@@ -1,0 +1,35 @@
+================================================================================
+DCC CRYPTOGRAPHIC DIGEST SYSTEM REPORT — MILESTONE 2.2
+================================================================================
+Generated: 2026-09-15
+Location: D:\DC\docs\report\milestone_2_2_digest_system_report.txt
+Status: STREAMING CRYPTOGRAPHIC HASHING IMPLEMENTED & TESTS PASSED
+
+--------------------------------------------------------------------------------
+1. DIGEST SYSTEM IMPLEMENTATION & STREAMING AUDIT
+--------------------------------------------------------------------------------
+The cryptographic content hashing engine in `crates/cache-core/src/digest.rs` provides:
+1. `Digest::hash_bytes(&[u8]) -> Digest`:
+   - SHA-256 computation over memory byte slices.
+2. `Digest::hash_reader(R: Read) -> std::io::Result<Digest>`:
+   - Chunked streaming hashing using a 64KB internal buffer.
+   - Avoids loading large files or streams into RAM.
+3. `Digest::hash_file(path) -> std::io::Result<Digest>`:
+   - Streaming hash directly from disk files via BufReader.
+4. `Digest::new(&str) -> Result<Digest>`:
+   - Validates 64-character lowercase hex format.
+5. `Digest::prefix(len) -> &str`:
+   - Prefix extraction for CAS directory sharding (e.g. `00`..`ff`).
+
+--------------------------------------------------------------------------------
+2. TEST SUITE RESULTS
+--------------------------------------------------------------------------------
+- test digest::tests::test_valid_digest .............................. PASSED
+- test digest::tests::test_invalid_digest ............................ PASSED
+- test digest::tests::test_from_bytes_and_hash_bytes ................. PASSED
+- test digest::tests::test_hash_reader_streaming ..................... PASSED
+- test digest::tests::test_hash_file ................................. PASSED
+
+All workspace tests (18 tests total across 6 crates) pass with 100% success.
+README.md updated with streaming digest system specifications.
+================================================================================

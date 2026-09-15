@@ -9,26 +9,20 @@ A high-performance, local-first, content-addressed developer computation caching
 
 ---
 
-## Core Domain Models (`cache-core`)
+## Content Hashing & Streaming Digest System
 
-DCC avoids unstructured raw strings by employing strongly typed domain models:
+DCC avoids reading large files entirely into RAM. The [`Digest`](crates/cache-core/src/digest.rs) cryptographic system implements chunked streaming hashing:
 
-- **`Digest`**: Validated 64-character lowercase hexadecimal SHA-256 content hash.
-- **`CacheKey`**: Strongly typed cryptographic identifier derived from canonical JSON computation identity.
-- **`Computation`**: Declarative model containing operation, executable, arguments, inputs, outputs, env, tool identity, platform, and policy.
-- **`InputFile` & `OutputFile`**: Declared inputs with streaming digests and declared required outputs.
-- **`OutputManifest`**: Collection of generated artifacts with validated digests and sizes.
-- **`CacheEntry`**: Immutable metadata record containing computation specification, output manifest, timestamps, and execution metrics.
-- **`CacheMetadata` & `ExecutionMetadata`**: Access times, hit counts, exit codes, and stdout/stderr references.
-- **`CacheResult<T>`**: Strongly typed lookup and execution outcomes (`Hit`, `Miss`, `Bypassed`).
-- **`CachePolicy`**: Execution caching directives (`ReadWrite`, `ReadOnly`, `WriteOnly`, `Bypass`, `ForceRecompute`).
-- **`StructuredEvent`**: High-performance telemetry event taxonomy.
+- `Digest::hash_bytes(&[u8]) -> Digest`: Cryptographic SHA-256 computation over memory buffers.
+- `Digest::hash_reader(R: Read) -> std::io::Result<Digest>`: 64KB chunk-buffered streaming reader.
+- `Digest::hash_file(Path) -> std::io::Result<Digest>`: Zero-allocation file stream hashing.
+- `Digest::new(&str) -> Result<Digest>`: Validates lowercase 64-character hexadecimal format.
 
 ---
 
 ## Workspace Architecture
 
-- **[`crates/cache-core`](crates/cache-core)**: Core domain models, deterministic normalization, structured logging, and canonical SHA-256 key generation.
+- **[`crates/cache-core`](crates/cache-core)**: Core domain models, streaming SHA-256 digest engine, deterministic canonical serialization, and structured logging.
 - **[`crates/cache-storage`](crates/cache-storage)**: Content-Addressed Storage (CAS) with 2-char hex prefix sharding, two-stage atomic writes (`.tmp` $\rightarrow$ `fsync` $\rightarrow$ rename), checksum verification, corrupted object isolation, LRU eviction, and `fs2` multi-process locking.
 - **[`crates/cache-runner`](crates/cache-runner)**: Direct OS process execution, sandboxed output restoration with path-traversal protection, and structured miss explainer.
 - **[`crates/cache-cli`](crates/cache-cli)**: CLI binary (`dcc`) supporting `init`, `run`, `inspect`, `stats`, `verify`, `clean`, `prune`, and `doctor`.
