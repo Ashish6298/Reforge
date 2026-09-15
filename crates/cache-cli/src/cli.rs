@@ -18,7 +18,11 @@ pub struct Cli {
 pub enum Commands {
     #[command(about = "Initialize local cache directory and configuration")]
     Init {
-        #[arg(short, long, help = "Max cache size in bytes (e.g. 10737418240 for 10GB)")]
+        #[arg(
+            short,
+            long,
+            help = "Max cache size in bytes (e.g. 10737418240 for 10GB)"
+        )]
         max_size: Option<u64>,
     },
 
@@ -70,9 +74,17 @@ pub struct RunArgs {
     #[arg(long, help = "Explain cache miss reasons in detail")]
     pub explain: bool,
 
-    #[arg(long, default_value = "read-write", help = "Cache policy: read-write, read-only, write-only, bypass, force-recompute")]
+    #[arg(
+        long,
+        default_value = "read-write",
+        help = "Cache policy: read-write, read-only, write-only, bypass, force-recompute"
+    )]
     pub policy: String,
 
-    #[arg(last = true, required = true, help = "Command and arguments to execute")]
+    #[arg(
+        last = true,
+        required = true,
+        help = "Command and arguments to execute"
+    )]
     pub command: Vec<String>,
 }

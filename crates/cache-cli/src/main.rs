@@ -1,13 +1,11 @@
+use anyhow::{Context, Result};
+use clap::Parser;
+use dcc_core::{CacheKey, CachePolicy, Computation, Digest};
+use dcc_runner::{EngineOptions, ExecutionStatus, RunnerEngine};
+use dcc_storage::{CasStorage, Pruner, StorageConfig, StorageStats};
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
-use anyhow::{Context, Result};
-use clap::Parser;
-use dcc_core::{
-    CacheKey, CachePolicy, Computation, Digest,
-};
-use dcc_runner::{EngineOptions, ExecutionStatus, RunnerEngine};
-use dcc_storage::{CasStorage, Pruner, StorageConfig, StorageStats};
 use walkdir::WalkDir;
 
 mod cli;
@@ -89,8 +87,7 @@ fn handle_run(storage: &CasStorage, args: RunArgs, json: bool) -> Result<()> {
         _ => CachePolicy::ReadWrite,
     };
 
-    let mut comp_builder = Computation::builder(&args.operation, cmd_exe)
-        .args(cmd_args.to_vec());
+    let mut comp_builder = Computation::builder(&args.operation, cmd_exe).args(cmd_args.to_vec());
 
     for input in &args.inputs {
         let dummy_digest = Digest::from_bytes(b"");
@@ -109,7 +106,9 @@ fn handle_run(storage: &CasStorage, args: RunArgs, json: bool) -> Result<()> {
         }
     }
 
-    let computation = comp_builder.build().context("Invalid computation specification")?;
+    let computation = comp_builder
+        .build()
+        .context("Invalid computation specification")?;
 
     let engine = RunnerEngine::new(
         storage,
@@ -127,7 +126,10 @@ fn handle_run(storage: &CasStorage, args: RunArgs, json: bool) -> Result<()> {
     } else {
         match result.status {
             ExecutionStatus::Hit => {
-                println!("[DCC HIT] Restored outputs from cache (key: {})", result.key);
+                println!(
+                    "[DCC HIT] Restored outputs from cache (key: {})",
+                    result.key
+                );
                 if !result.stdout.is_empty() {
                     print!("{}", String::from_utf8_lossy(&result.stdout));
                 }
@@ -178,21 +180,33 @@ fn handle_inspect(storage: &CasStorage, key_str: &str, json: bool) -> Result<()>
                 println!("Arguments:     {:?}", entry.computation.args);
                 println!("Inputs ({}):", entry.computation.inputs.len());
                 for inp in &entry.computation.inputs {
-                    println!("  - {} ({} bytes, sha256:{})", inp.path, inp.size, inp.digest);
+                    println!(
+                        "  - {} ({} bytes, sha256:{})",
+                        inp.path, inp.size, inp.digest
+                    );
                 }
                 println!("Outputs ({}):", entry.outputs.len());
                 for out in &entry.outputs {
-                    println!("  - {} ({} bytes, sha256:{})", out.path, out.size, out.digest);
+                    println!(
+                        "  - {} ({} bytes, sha256:{})",
+                        out.path, out.size, out.digest
+                    );
                 }
                 println!("Created At:    {}", entry.metadata.created_at);
                 println!("Last Accessed: {}", entry.metadata.last_accessed_at);
                 println!("Hit Count:     {}", entry.metadata.hit_count);
-                println!("Execution Time:{} ms", entry.metadata.execution.execution_time_ms);
+                println!(
+                    "Execution Time:{} ms",
+                    entry.metadata.execution.execution_time_ms
+                );
             }
         }
         None => {
             if json {
-                println!("{}", serde_json::json!({ "error": "not_found", "key": key_str }));
+                println!(
+                    "{}",
+                    serde_json::json!({ "error": "not_found", "key": key_str })
+                );
             } else {
                 println!("No cache entry found for key: {}", key_str);
             }
@@ -210,10 +224,22 @@ fn handle_stats(storage: &CasStorage, json: bool) -> Result<()> {
         println!("=== DCC Cache Storage Statistics ===");
         println!("Total Entries:        {}", stats.total_entries);
         println!("Total CAS Objects:    {}", stats.total_objects);
-        println!("Objects Disk Usage:   {:.2} MB", stats.total_object_size_bytes as f64 / (1024.0 * 1024.0));
-        println!("Entries Disk Usage:   {:.2} KB", stats.total_entry_size_bytes as f64 / 1024.0);
-        println!("Total Disk Usage:     {:.2} MB", stats.total_size_bytes as f64 / (1024.0 * 1024.0));
-        println!("Largest Object:       {} bytes", stats.largest_object_size_bytes);
+        println!(
+            "Objects Disk Usage:   {:.2} MB",
+            stats.total_object_size_bytes as f64 / (1024.0 * 1024.0)
+        );
+        println!(
+            "Entries Disk Usage:   {:.2} KB",
+            stats.total_entry_size_bytes as f64 / 1024.0
+        );
+        println!(
+            "Total Disk Usage:     {:.2} MB",
+            stats.total_size_bytes as f64 / (1024.0 * 1024.0)
+        );
+        println!(
+            "Largest Object:       {} bytes",
+            stats.largest_object_size_bytes
+        );
     }
     Ok(())
 }
@@ -232,7 +258,11 @@ fn handle_verify(storage: &CasStorage, json: bool) -> Result<()> {
                         Ok(()) => verified += 1,
                         Err(e) => {
                             corrupted += 1;
-                            eprintln!("Corrupted object found at {}: {}", entry.path().display(), e);
+                            eprintln!(
+                                "Corrupted object found at {}: {}",
+                                entry.path().display(),
+                                e
+                            );
                         }
                     }
                 }
@@ -250,7 +280,10 @@ fn handle_verify(storage: &CasStorage, json: bool) -> Result<()> {
             })
         );
     } else {
-        println!("Integrity check complete: {} verified, {} corrupted.", verified, corrupted);
+        println!(
+            "Integrity check complete: {} verified, {} corrupted.",
+            verified, corrupted
+        );
     }
 
     if corrupted > 0 {
@@ -266,7 +299,10 @@ fn handle_clean(storage: &CasStorage, key_opt: Option<&str>, json: bool) -> Resu
         let key = CacheKey::new(digest);
         let deleted = storage.delete_entry(&key)?;
         if json {
-            println!("{}", serde_json::json!({ "key": key_str, "deleted": deleted }));
+            println!(
+                "{}",
+                serde_json::json!({ "key": key_str, "deleted": deleted })
+            );
         } else {
             println!("Deleted key {}: {}", key_str, deleted);
         }
@@ -294,7 +330,8 @@ fn handle_prune(storage: &CasStorage, max_size: Option<u64>, json: bool) -> Resu
     if json {
         println!("{}", serde_json::to_string_pretty(&result)?);
     } else {
-        println!("Prune complete: deleted {} entries, {} unreferenced objects, freed {:.2} MB.",
+        println!(
+            "Prune complete: deleted {} entries, {} unreferenced objects, freed {:.2} MB.",
             result.deleted_entries,
             result.deleted_objects,
             result.freed_bytes as f64 / (1024.0 * 1024.0)
@@ -322,8 +359,14 @@ fn handle_doctor(storage: &CasStorage, json: bool) -> Result<()> {
     } else {
         println!("=== DCC Doctor Diagnostic ===");
         println!("Cache Directory:    {}", storage.root_dir().display());
-        println!("Directory Writable: {}", if write_ok { "YES" } else { "NO" });
-        println!("Health Status:      {}", if write_ok { "OK" } else { "DEGRADED" });
+        println!(
+            "Directory Writable: {}",
+            if write_ok { "YES" } else { "NO" }
+        );
+        println!(
+            "Health Status:      {}",
+            if write_ok { "OK" } else { "DEGRADED" }
+        );
         println!("Total Objects:      {}", stats.total_objects);
         println!("Total Entries:      {}", stats.total_entries);
     }

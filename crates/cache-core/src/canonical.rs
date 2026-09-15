@@ -1,8 +1,8 @@
-use std::collections::BTreeMap;
-use serde::{Deserialize, Serialize};
 use crate::computation::Computation;
 use crate::digest::{CacheKey, Digest};
 use crate::error::Result;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CanonicalComputation {
@@ -148,8 +148,12 @@ mod tests {
             .build()
             .unwrap();
 
-        let key1 = CanonicalComputation::from_computation(&comp1).compute_key().unwrap();
-        let key2 = CanonicalComputation::from_computation(&comp2).compute_key().unwrap();
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
 
         assert_ne!(key1, key2);
     }
@@ -166,8 +170,12 @@ mod tests {
             .build()
             .unwrap();
 
-        let key1 = CanonicalComputation::from_computation(&comp1).compute_key().unwrap();
-        let key2 = CanonicalComputation::from_computation(&comp2).compute_key().unwrap();
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
 
         assert_ne!(key1, key2);
     }
@@ -184,8 +192,12 @@ mod tests {
             .build()
             .unwrap();
 
-        let key1 = CanonicalComputation::from_computation(&comp1).compute_key().unwrap();
-        let key2 = CanonicalComputation::from_computation(&comp2).compute_key().unwrap();
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
 
         assert_ne!(key1, key2);
     }
@@ -202,8 +214,12 @@ mod tests {
             .build()
             .unwrap();
 
-        let key1 = CanonicalComputation::from_computation(&comp1).compute_key().unwrap();
-        let key2 = CanonicalComputation::from_computation(&comp2).compute_key().unwrap();
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
 
         assert_ne!(key1, key2);
     }

@@ -1,8 +1,8 @@
-use std::path::PathBuf;
+use crate::cas::CasStorage;
 use dcc_core::Result;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use walkdir::WalkDir;
-use crate::cas::CasStorage;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct StorageStats {
@@ -22,7 +22,9 @@ impl StorageStats {
         let entries_dir = storage.entries_dir();
         if entries_dir.exists() {
             for entry in WalkDir::new(entries_dir).into_iter().filter_map(|e| e.ok()) {
-                if entry.file_type().is_file() && entry.path().extension().and_then(|s| s.to_str()) == Some("json") {
+                if entry.file_type().is_file()
+                    && entry.path().extension().and_then(|s| s.to_str()) == Some("json")
+                {
                     stats.total_entries += 1;
                     if let Ok(meta) = entry.metadata() {
                         stats.total_entry_size_bytes += meta.len();

@@ -1,10 +1,10 @@
+use crate::cas::CasStorage;
+use dcc_core::{CacheEntry, Result};
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
-use dcc_core::{CacheEntry, Result};
-use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
-use crate::cas::CasStorage;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EvictionPolicy {
@@ -90,7 +90,11 @@ impl<'a> Pruner<'a> {
                     if let Ok(file) = fs::File::open(file_entry.path()) {
                         if let Ok(entry) = serde_json::from_reader::<_, CacheEntry>(file) {
                             let size = entry.total_output_size();
-                            entries_with_access.push((file_entry.path().to_path_buf(), entry, size));
+                            entries_with_access.push((
+                                file_entry.path().to_path_buf(),
+                                entry,
+                                size,
+                            ));
                         }
                     }
                 }

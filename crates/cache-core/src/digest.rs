@@ -1,8 +1,8 @@
-use std::fmt;
-use std::io::Read;
+use crate::error::{CacheError, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as Sha256Digest, Sha256};
-use crate::error::{CacheError, Result};
+use std::fmt;
+use std::io::Read;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -101,7 +101,10 @@ mod tests {
     #[test]
     fn test_from_bytes() {
         let d = Digest::from_bytes(b"hello world");
-        assert_eq!(d.as_str(), "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9");
+        assert_eq!(
+            d.as_str(),
+            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+        );
     }
 
     #[test]

@@ -1,8 +1,8 @@
-use std::collections::BTreeMap;
-use serde::{Deserialize, Serialize};
 use crate::digest::Digest;
 use crate::entry::CachePolicy;
 use crate::error::{CacheError, Result};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InputFile {
@@ -76,21 +76,31 @@ impl Computation {
 
     pub fn validate(&self) -> Result<()> {
         if self.operation.trim().is_empty() {
-            return Err(CacheError::ValidationError("Operation identifier cannot be empty".into()));
+            return Err(CacheError::ValidationError(
+                "Operation identifier cannot be empty".into(),
+            ));
         }
         if self.command.trim().is_empty() {
-            return Err(CacheError::ValidationError("Command executable cannot be empty".into()));
+            return Err(CacheError::ValidationError(
+                "Command executable cannot be empty".into(),
+            ));
         }
         for out in &self.outputs {
             let p = out.path.replace('\\', "/");
             if p.starts_with('/') || p.starts_with("../") || p.contains("/../") || p == ".." {
-                return Err(CacheError::PathTraversal(format!("Output path contains invalid traversal or absolute path: {}", out.path)));
+                return Err(CacheError::PathTraversal(format!(
+                    "Output path contains invalid traversal or absolute path: {}",
+                    out.path
+                )));
             }
         }
         for inp in &self.inputs {
             let p = inp.path.replace('\\', "/");
             if p.starts_with('/') || p.starts_with("../") || p.contains("/../") || p == ".." {
-                return Err(CacheError::PathTraversal(format!("Input path contains invalid traversal or absolute path: {}", inp.path)));
+                return Err(CacheError::PathTraversal(format!(
+                    "Input path contains invalid traversal or absolute path: {}",
+                    inp.path
+                )));
             }
         }
         Ok(())
@@ -169,7 +179,12 @@ impl ComputationBuilder {
         self
     }
 
-    pub fn tool(mut self, name: impl Into<String>, version: Option<String>, digest: Option<Digest>) -> Self {
+    pub fn tool(
+        mut self,
+        name: impl Into<String>,
+        version: Option<String>,
+        digest: Option<Digest>,
+    ) -> Self {
         self.tool = Some(ToolIdentity {
             name: name.into(),
             version,

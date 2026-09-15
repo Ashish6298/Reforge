@@ -1,9 +1,9 @@
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufReader, BufWriter, Write};
-use std::path::{Path, PathBuf};
 use chrono::Utc;
 use dcc_core::{CacheEntry, CacheError, CacheKey, Digest, Result};
 use serde::{Deserialize, Serialize};
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, BufReader, BufWriter, Write};
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageConfig {
@@ -78,7 +78,9 @@ impl CasStorage {
 
     pub fn entry_path(&self, key: &CacheKey) -> PathBuf {
         let prefix = key.prefix(2);
-        self.entries_dir().join(prefix).join(format!("{}.json", key.as_str()))
+        self.entries_dir()
+            .join(prefix)
+            .join(format!("{}.json", key.as_str()))
     }
 
     pub fn has_object(&self, digest: &Digest) -> bool {
@@ -282,9 +284,9 @@ fn rand_simple() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Read;
     use dcc_core::computation::Computation;
     use dcc_core::entry::ExecutionMetadata;
+    use std::io::Read;
 
     #[test]
     fn test_cas_store_and_verify() {

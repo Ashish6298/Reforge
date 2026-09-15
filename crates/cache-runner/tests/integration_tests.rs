@@ -1,13 +1,15 @@
-use std::fs;
 use dcc_core::{Computation, Digest};
 use dcc_runner::{EngineOptions, ExecutionStatus, RunnerEngine};
 use dcc_test_utils::TestEnv;
+use std::fs;
 
 #[test]
 fn test_cold_miss_then_warm_hit() {
     let env = TestEnv::new().unwrap();
 
-    let input_path = env.create_input_file("data.txt", b"input content A").unwrap();
+    let _input_path = env
+        .create_input_file("data.txt", b"input content A")
+        .unwrap();
 
     // Use a python/cmd/powershell or simple command
     #[cfg(windows)]
@@ -70,7 +72,10 @@ fn test_input_change_causes_cache_miss() {
         ],
     );
     #[cfg(not(windows))]
-    let (cmd, args) = ("cp", vec!["input.txt".to_string(), "output.txt".to_string()]);
+    let (cmd, args) = (
+        "cp",
+        vec!["input.txt".to_string(), "output.txt".to_string()],
+    );
 
     let computation = Computation::builder("diff-test", cmd)
         .args(args)
@@ -91,18 +96,20 @@ fn test_input_change_causes_cache_miss() {
     assert_eq!(res1.status, ExecutionStatus::Miss);
 
     // Change input content
-    env.create_input_file("input.txt", b"version 2 (changed)").unwrap();
+    env.create_input_file("input.txt", b"version 2 (changed)")
+        .unwrap();
 
     let res2 = engine.execute(computation).unwrap();
     assert_eq!(res2.status, ExecutionStatus::Miss);
     assert_ne!(res1.key, res2.key);
-    assert_eq!(env.read_output_file("output.txt").unwrap(), b"version 2 (changed)");
+    assert_eq!(
+        env.read_output_file("output.txt").unwrap(),
+        b"version 2 (changed)"
+    );
 }
 
 #[test]
 fn test_path_traversal_rejection() {
-    let env = TestEnv::new().unwrap();
-
     let invalid_comp = Computation::builder("traversal", "test")
         .output("../../escaped.txt", true)
         .build();

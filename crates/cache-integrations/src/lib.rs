@@ -27,7 +27,11 @@ impl<'a> GenericIntegration<'a> {
         generator_cmd: &str,
         extra_args: &[String],
     ) -> Result<ExecutionResult> {
-        let mut args = vec![schema_path.to_string(), "-o".to_string(), output_path.to_string()];
+        let mut args = vec![
+            schema_path.to_string(),
+            "-o".to_string(),
+            output_path.to_string(),
+        ];
         args.extend_from_slice(extra_args);
 
         let comp = Computation::builder("codegen", generator_cmd)
