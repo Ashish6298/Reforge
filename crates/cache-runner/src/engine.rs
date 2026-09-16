@@ -31,9 +31,18 @@ pub struct ExecutionResult {
     pub miss_reason: Option<MissReason>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FailurePolicy {
+    #[default]
+    DoNotCache,
+    CacheIfExplicit,
+}
+
 #[derive(Debug, Clone)]
 pub struct EngineOptions {
     pub policy: CachePolicy,
+    pub failure_policy: FailurePolicy,
     pub working_dir: PathBuf,
     pub lock_timeout: Duration,
 }
@@ -42,6 +51,7 @@ impl Default for EngineOptions {
     fn default() -> Self {
         Self {
             policy: CachePolicy::ReadWrite,
+            failure_policy: FailurePolicy::DoNotCache,
             working_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             lock_timeout: Duration::from_secs(30),
         }

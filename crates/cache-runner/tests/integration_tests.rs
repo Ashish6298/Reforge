@@ -420,3 +420,72 @@ fn test_cache_miss_lifecycle_and_guarantees() {
     // 9. Return Execution Result
     assert_eq!(result.outputs[0].digest, expected_output_digest);
 }
+
+#[test]
+fn test_failed_computations_are_not_cached_by_default() {
+    let env = TestEnv::new().unwrap();
+
+    env.create_input_file("error_input.txt", b"trigger failure")
+        .unwrap();
+
+    // Command exits with code 1 (failure) and writes error output
+    #[cfg(windows)]
+    let (cmd, args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "[Console]::Error.Write('FATAL COMPILATION ERROR'); exit 42".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd, args) = (
+        "sh",
+        vec![
+            "-c".to_string(),
+            "echo -n 'FATAL COMPILATION ERROR' >&2; exit 42".to_string(),
+        ],
+    );
+
+    let command_spec = dcc_runner::CommandSpec::builder(cmd)
+        .args(args)
+        .current_dir(env.workspace_dir.path())
+        .input_path("error_input.txt")
+        .build()
+        .unwrap();
+
+    let engine = RunnerEngine::new(
+        &env.storage,
+        EngineOptions {
+            working_dir: env.workspace_dir.path().to_path_buf(),
+            ..Default::default()
+        },
+    );
+
+    // First execution: Fails with exit code 42
+    let res1 = engine.execute_command(&command_spec).unwrap();
+    assert_eq!(res1.status, ExecutionStatus::Miss);
+    assert_eq!(res1.exit_code, 42);
+    assert_eq!(
+        String::from_utf8_lossy(&res1.stderr),
+        "FATAL COMPILATION ERROR"
+    );
+
+    // Verify DO NOT STORE invariant: Entry must NOT be written to cache storage
+    let stored_entry = env.storage.get_entry(&res1.key).unwrap();
+    assert!(
+        stored_entry.is_none(),
+        "Failed computations (exit code != 0) must NOT be cached by default"
+    );
+
+    // Second execution: Since nothing was stored, it must run again (MISS), not HIT
+    let res2 = engine.execute_command(&command_spec).unwrap();
+    assert_eq!(res2.status, ExecutionStatus::Miss);
+    assert_eq!(res2.exit_code, 42);
+    assert_eq!(res2.key, res1.key);
+
+    let stored_entry2 = env.storage.get_entry(&res2.key).unwrap();
+    assert!(
+        stored_entry2.is_none(),
+        "Second execution of failed computation must still NOT be cached"
+    );
+}

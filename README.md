@@ -230,6 +230,20 @@ When a computation cannot be resolved from the cache, the engine executes the st
 
 ---
 
+## Failed Computations Policy
+
+To maintain strict correctness, DCC **never caches failed computations by default**:
+
+```text
+exit code != 0  ──►  DO NOT STORE
+```
+
+- If a command process exits with a non-zero exit code, DCC captures the exit code, duration, stdout, and stderr, but skips storing CAS blobs or `CacheEntry` metadata records.
+- Subsequent runs of the same failing computation will always re-execute rather than serving a cached failure.
+- A configurable `FailurePolicy` (`FailurePolicy::DoNotCache` vs `FailurePolicy::CacheIfExplicit`) supports future selective failure caching while preserving conservative defaults in v1.
+
+---
+
 ## Workspace Architecture
 
 - **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`), streaming hashing, and canonical key derivation.

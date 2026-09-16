@@ -1,0 +1,67 @@
+================================================================================
+DCC IMPLEMENTATION REPORT: MILESTONE 4.7 — FAILED COMPUTATIONS
+================================================================================
+Timestamp: 2026-09-16
+Status: SUCCESS / FULLY VERIFIED
+Specification Section: Milestone 4.7 (Failed Computations)
+
+1. OBJECTIVE & REQUIREMENTS
+--------------------------------------------------------------------------------
+The objective of Milestone 4.7 is to enforce the core safety guarantee that
+failed computations are NOT cached by default:
+
+    exit code != 0  ──►  DO NOT STORE
+
+Requirements:
+1. When a child process exits with a non-zero exit code:
+   - No output files or partial artifacts are stored in Content-Addressed Storage.
+   - No metadata `CacheEntry` record is committed to disk.
+   - The execution result is returned immediately with `ExecutionStatus::Miss`,
+     the non-zero exit code, execution time, and captured stdout/stderr.
+2. Subsequent invocations with the identical computation specification will not
+   hit cache and will re-execute the command (remains a MISS).
+3. Support a future extensible policy configuration (`FailurePolicy`) while
+   keeping the default v1 behavior strictly conservative (`FailurePolicy::DoNotCache`).
+
+2. IMPLEMENTATION DETAILS
+--------------------------------------------------------------------------------
+- Policy Configuration:
+  * Defined `FailurePolicy` enum:
+    - `DoNotCache` (Default): Never store outputs or metadata for non-zero exit codes.
+    - `CacheIfExplicit`: Extensibility hook for future selective error caching.
+  * Added `failure_policy` field to `EngineOptions`.
+
+- RunnerEngine Enforcement:
+  * In `RunnerEngine::run_and_store`:
+    - After process execution, checks `proc_output.exit_code != 0`.
+    - If non-zero and `failure_policy == FailurePolicy::DoNotCache`:
+      * Storage ingestion (CAS blobs and `CacheEntry` JSON) is completely skipped.
+      * Returns `ExecutionResult { key, status: ExecutionStatus::Miss, exit_code, execution_time_ms, stdout, stderr, outputs: Vec::new(), miss_reason }`.
+
+3. TEST & VERIFICATION RESULTS
+--------------------------------------------------------------------------------
+- New Dedicated Integration Test:
+  * `test_failed_computations_are_not_cached_by_default`:
+    1. Runs a failing command (process exits with code 42 and writes error log).
+    2. Validates execution result returns `exit_code: 42`, `status: Miss`, and stderr payload.
+    3. Queries storage for the canonical computation key: confirms `get_entry(&key)` is `None`.
+    4. Runs the identical command a second time: confirms it re-executes (status is `Miss`, not `Hit`), and verifies cache remains empty (`None`).
+
+- Workspace Test Suite Summary:
+  * Total tests passed: 39 passed; 0 failed; 0 ignored (100% pass rate).
+  * Linter (`clippy`): 0 warnings (`-D warnings`).
+  * Formatter (`rustfmt`): Clean formatting verified.
+
+4. ARTIFACTS AND MODIFICATIONS
+--------------------------------------------------------------------------------
+- `crates/cache-runner/src/engine.rs`: Added `FailurePolicy` and verified DO NOT STORE enforcement for non-zero exit codes.
+- `crates/cache-runner/src/lib.rs`: Exported `FailurePolicy`.
+- `crates/cache-cli/src/main.rs`: Integrated `FailurePolicy` default in CLI engine setup.
+- `crates/cache-runner/tests/integration_tests.rs`: Added `test_failed_computations_are_not_cached_by_default`.
+- `docs/report/milestone_4_7_failed_computations_report.txt`: Generated Milestone 4.7 report.
+- `README.md`: Updated to document Failed Computations policy and guarantees.
+
+5. CONCLUSION
+--------------------------------------------------------------------------------
+Milestone 4.7 is completely implemented, tested, and verified according to specification.
+================================================================================
