@@ -152,10 +152,13 @@ let spec = CommandSpec::builder("rustc")
     .arg("main.rs")
     .arg("--crate-type=bin")
     .current_dir("./workspace")
-    .env("RUST_LOG", "debug")
+    .input_paths(vec!["src/main.rs", "src/lib.rs", "Cargo.toml"])
     .output("target/main.exe", true)
+    .env("RUST_LOG", "debug")
     .build()?;
 ```
+
+Declared inputs are validated, streamed via 64 KB chunks, and cryptographically hashed (SHA-256) before cache lookup.
 
 ---
 

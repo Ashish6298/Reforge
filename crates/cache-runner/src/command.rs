@@ -129,6 +129,30 @@ impl CommandSpecBuilder {
         self
     }
 
+    /// Declare an input file by relative path. Its cryptographic digest and size will be computed automatically prior to lookup.
+    pub fn input_path(mut self, path: impl Into<String>) -> Self {
+        let dummy = dcc_core::Digest::from_bytes(b"");
+        self.inputs.push(InputFile {
+            path: path.into(),
+            digest: dummy,
+            size: 0,
+            is_executable: None,
+        });
+        self
+    }
+
+    /// Declare multiple input files by relative paths.
+    pub fn input_paths<I, S>(mut self, paths: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        for p in paths {
+            self = self.input_path(p);
+        }
+        self
+    }
+
     pub fn output(mut self, path: impl Into<String>, required: bool) -> Self {
         self.outputs.push(OutputFile {
             path: path.into(),
@@ -198,5 +222,32 @@ mod tests {
     fn test_command_spec_empty_executable_fails() {
         let res = CommandSpec::builder("").build();
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_input_declaration_multiple_paths() {
+        let spec = CommandSpec::builder("cargo")
+            .arg("build")
+            .input_path("src/main.rs")
+            .input_path("src/lib.rs")
+            .input_path("Cargo.toml")
+            .output("target/debug/app.exe", true)
+            .build()
+            .unwrap();
+
+        assert_eq!(spec.inputs.len(), 3);
+        assert_eq!(spec.inputs[0].path, "src/main.rs");
+        assert_eq!(spec.inputs[1].path, "src/lib.rs");
+        assert_eq!(spec.inputs[2].path, "Cargo.toml");
+
+        // Array / iterator convenience helper
+        let spec2 = CommandSpec::builder("cargo")
+            .arg("build")
+            .input_paths(vec!["src/main.rs", "src/lib.rs", "Cargo.toml"])
+            .build()
+            .unwrap();
+
+        assert_eq!(spec2.inputs.len(), 3);
+        assert_eq!(spec.inputs, spec2.inputs);
     }
 }

@@ -1,0 +1,51 @@
+================================================================================
+DCC IMPLEMENTATION & VERIFICATION REPORT - MILESTONE 4.2: INPUT DECLARATION
+================================================================================
+Timestamp: 2026-09-16T12:49:50+05:30
+Milestone: 4.2 Input Declaration & Pre-Lookup Hashing
+Workspace: d:\DC
+Branch: ashish
+Status: PASSED / FULLY VERIFIED
+
+1. OBJECTIVE & REQUIREMENTS:
+--------------------------------------------------------------------------------
+- Allow callers to explicitly declare relevant input files that impact computation output:
+    inputs:
+        src/main.rs
+        src/lib.rs
+        Cargo.toml
+- Guarantee that all declared input files are resolved, validated, and cryptographically
+  hashed (streaming SHA-256) prior to cache lookup.
+- If a declared input does not exist, fail immediately with a descriptive configuration error.
+- Ensure input order invariance through canonical sorting.
+
+2. IMPLEMENTATION DETAILS:
+--------------------------------------------------------------------------------
+- `CommandSpecBuilder` Helpers (`crates/cache-runner/src/command.rs`):
+    * `input_path(path)`: Declares a single input path.
+    * `input_paths(iter)`: Declares multiple input paths in batch.
+- Runner Pre-Lookup Input Ingestion (`RunnerEngine::execute` in `crates/cache-runner/src/engine.rs`):
+    1. Iterates over all declared inputs relative to the working directory.
+    2. Verifies existence (`full_input_path.exists()`).
+    3. Streams content through `Digest::from_reader(BufReader::new(file))` using 64 KB buffers.
+    4. Records exact file size and executable bit.
+    5. Sorts inputs lexicographically to guarantee canonical identity.
+    6. Produces canonical `CacheKey` via SHA-256 before cache lookup.
+
+3. TEST EXECUTION & VERIFICATION:
+--------------------------------------------------------------------------------
+Command: cargo test --workspace
+Results:
+- `command::tests::test_input_declaration_multiple_paths` ... PASSED
+  * Verified batch and sequential input file path declarations.
+- `integration_tests::test_input_change_causes_cache_miss` ... PASSED
+  * Verified that modifying an input file alters the computed key and forces re-execution.
+- Total Workspace Unit & Integration Tests: 44 passed, 0 failed, 0 ignored.
+- Static Analysis (`cargo clippy --workspace --all-targets --all-features -- -D warnings`): PASSED (0 warnings).
+- Code Formatting (`cargo fmt --all -- --check`): PASSED.
+
+4. CONCLUSION:
+--------------------------------------------------------------------------------
+Milestone 4.2 (Input Declaration) is fully implemented, verified, and adheres to
+the content-primary cryptographic identity specification.
+================================================================================
