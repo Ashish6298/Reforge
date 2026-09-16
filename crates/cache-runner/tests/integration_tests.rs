@@ -330,3 +330,93 @@ fn test_cache_hit_lifecycle_and_guarantees() {
         b"BUILD_RESULT_123"
     );
 }
+
+#[test]
+fn test_cache_miss_lifecycle_and_guarantees() {
+    let env = TestEnv::new().unwrap();
+
+    // Setup input file
+    env.create_input_file("source.in", b"RAW_SOURCE_DATA_V1")
+        .unwrap();
+
+    #[cfg(windows)]
+    let (cmd, args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "[System.IO.File]::WriteAllBytes('result.bin', [System.Text.Encoding]::UTF8.GetBytes('TRANSFORMED_DATA')); [Console]::Out.Write('MISS_STDOUT_LOG'); [Console]::Error.Write('MISS_STDERR_LOG')".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd, args) = (
+        "sh",
+        vec![
+            "-c".to_string(),
+            "echo -n 'TRANSFORMED_DATA' > result.bin && echo -n 'MISS_STDOUT_LOG' && echo -n 'MISS_STDERR_LOG' >&2".to_string(),
+        ],
+    );
+
+    let command_spec = dcc_runner::CommandSpec::builder(cmd)
+        .args(args)
+        .current_dir(env.workspace_dir.path())
+        .input_path("source.in")
+        .output_path("result.bin")
+        .build()
+        .unwrap();
+
+    let engine = RunnerEngine::new(
+        &env.storage,
+        EngineOptions {
+            working_dir: env.workspace_dir.path().to_path_buf(),
+            ..Default::default()
+        },
+    );
+
+    // Step 1 - 9 Verification on Cache Miss:
+    // 1. Report reason: NoEntryFound
+    // 2. Execute command
+    // 3. Capture exit code (0)
+    // 4. Capture stdout/stderr ('MISS_STDOUT_LOG' / 'MISS_STDERR_LOG')
+    // 5. Verify outputs ('result.bin' exists on disk)
+    // 6. Hash outputs (computes valid SHA-256 digest)
+    // 7. Store outputs (CAS blobs stored)
+    // 8. Store metadata (CacheEntry committed)
+    // 9. Return ExecutionResult
+    let result = engine.execute_command(&command_spec).unwrap();
+
+    // 1. Report Reason
+    assert_eq!(result.status, ExecutionStatus::Miss);
+    assert_eq!(result.miss_reason, Some(dcc_core::MissReason::NoEntryFound));
+
+    // 3. Exit Code
+    assert_eq!(result.exit_code, 0);
+
+    // 4. Capture stdout / stderr
+    assert_eq!(String::from_utf8_lossy(&result.stdout), "MISS_STDOUT_LOG");
+    assert_eq!(String::from_utf8_lossy(&result.stderr), "MISS_STDERR_LOG");
+
+    // 5. Verify Outputs exist on disk
+    assert!(env.workspace_dir.path().join("result.bin").exists());
+
+    // 6. Hash Outputs & Manifest
+    assert_eq!(result.outputs.len(), 1);
+    assert_eq!(result.outputs[0].path, "result.bin");
+    assert_eq!(result.outputs[0].size, 16); // "TRANSFORMED_DATA".len() == 16
+    let expected_output_digest = Digest::from_bytes(b"TRANSFORMED_DATA");
+    assert_eq!(result.outputs[0].digest, expected_output_digest);
+
+    // 7. Store Outputs in CAS
+    assert!(env.storage.has_object(&expected_output_digest));
+
+    // 8. Store Metadata Entry
+    let stored_entry = env.storage.get_entry(&result.key).unwrap();
+    assert!(stored_entry.is_some());
+    let entry = stored_entry.unwrap();
+    assert_eq!(entry.key, result.key);
+    assert_eq!(entry.outputs[0].digest, expected_output_digest);
+    assert!(entry.metadata.execution.stdout_digest.is_some());
+    assert!(entry.metadata.execution.stderr_digest.is_some());
+
+    // 9. Return Execution Result
+    assert_eq!(result.outputs[0].digest, expected_output_digest);
+}

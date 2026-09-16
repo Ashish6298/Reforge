@@ -214,6 +214,22 @@ When a cache key resolves to an existing valid entry, the engine executes a stri
 
 ---
 
+## Cache Miss Lifecycle
+
+When a computation cannot be resolved from the cache, the engine executes the strict 9-step miss sequence:
+
+1. **Report Reason**: Captures and reports why the miss occurred (`NoEntryFound`, `InputChanged`, `ForcedRecompute`, `CorruptedCache`, etc.).
+2. **Execute Command**: Spawns and executes the child process directly with specified args and environment.
+3. **Capture Exit Code**: Records the integer exit code of the completed child process.
+4. **Capture stdout/stderr**: Captures the complete byte buffers of standard output and standard error.
+5. **Verify Outputs**: Checks that all declared required output files physically exist on disk.
+6. **Hash Outputs**: Streams and hashes verified output files to compute their SHA-256 digests.
+7. **Store Outputs**: Atomically ingests output files and non-empty stdout/stderr streams into CAS blobs.
+8. **Store Metadata**: Constructs and atomically commits an immutable `CacheEntry` JSON record.
+9. **Return Execution Result**: Returns `ExecutionResult` with status `Miss`, execution metadata, manifests, and captured logs.
+
+---
+
 ## Workspace Architecture
 
 - **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`), streaming hashing, and canonical key derivation.

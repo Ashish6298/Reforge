@@ -1,0 +1,104 @@
+================================================================================
+DCC IMPLEMENTATION REPORT: MILESTONE 4.6 — CACHE MISS
+================================================================================
+Timestamp: 2026-09-16
+Status: SUCCESS / FULLY VERIFIED
+Specification Section: Milestone 4.6 (Cache Miss)
+
+1. OBJECTIVE & REQUIREMENTS
+--------------------------------------------------------------------------------
+The objective of Milestone 4.6 is to implement and enforce the exact 9-step
+Cache Miss lifecycle guarantees:
+
+On a cache miss:
+1. Report reason (`MissReason::NoEntryFound`, `InputChanged`, `CorruptedCache`, etc.)
+2. Execute command (direct process execution via `ProcessExecutor::execute`)
+3. Capture exit code
+4. Capture stdout/stderr byte streams
+5. Verify declared outputs exist on disk
+6. Hash outputs (SHA-256)
+7. Store outputs (ingest into Content-Addressed Storage CAS)
+8. Store metadata (atomically commit `CacheEntry` record)
+9. Return execution result (`ExecutionResult` with `status: ExecutionStatus::Miss`)
+
+2. IMPLEMENTATION DETAILS
+--------------------------------------------------------------------------------
+- Step 1: Report Reason
+  * The engine identifies the specific miss condition:
+    - `NoEntryFound`: First execution of this canonical computation key.
+    - `InputChanged`: Input file content SHA-256 mismatch.
+    - `InputAdded` / `InputRemoved`: Input set structure altered.
+    - `CommandChanged` / `ArgumentsChanged`: Command invocation changed.
+    - `EnvironmentChanged`: Declared environment variable values changed.
+    - `ToolChanged` / `PlatformChanged`: Tool version or target platform changed.
+    - `CorruptedCache`: Metadata or blob checksum failure detected.
+    - `ForcedRecompute`: Cache policy explicitly bypassed cache.
+  * The identified reason is embedded in `ExecutionResult.miss_reason` and
+    reported to callers / CLI telemetry.
+
+- Step 2: Execute Command
+  * Direct OS process invocation (`std::process::Command`), avoiding unsafe shell
+    concatenation.
+
+- Step 3: Capture Exit Code
+  * Non-zero exit codes are captured. By default (v1 policy), failed computations
+    are not cached to maintain deterministic safety.
+
+- Step 4: Capture stdout / stderr
+  * Standard output and standard error streams are collected into byte buffers.
+
+- Step 5: Verify Outputs
+  * Every declared output path is checked for physical existence in the working
+    directory.
+  * If any declared required output is missing, `CacheError::MissingOutput` is
+    returned immediately and caching is aborted.
+
+- Step 6: Hash Outputs
+  * Validated output files are hashed via streaming SHA-256 digest calculation.
+
+- Step 7: Store Outputs
+  * Output files are stored in CAS under their SHA-256 digests (`objects/ab/...`).
+  * Non-empty stdout and stderr byte streams are also stored in CAS as blobs.
+
+- Step 8: Store Metadata
+  * An immutable `CacheEntry` is constructed referencing output digests, stdout/stderr
+    digests, exit code, duration, and canonical computation spec.
+  * The entry is committed atomically to `entries/xy/<key>.json` using a two-stage
+    staging and sync pipeline.
+
+- Step 9: Return Execution Result
+  * Returns `ExecutionResult` with status `Miss`, execution metadata, manifests,
+    and captured streams.
+
+3. TEST & VERIFICATION RESULTS
+--------------------------------------------------------------------------------
+- New Dedicated Integration Test:
+  * `test_cache_miss_lifecycle_and_guarantees`:
+    1. Sets up input file and command writing outputs, stdout, and stderr.
+    2. Runs cold execution, verifying all 9 steps:
+       - `miss_reason`: `Some(MissReason::NoEntryFound)`.
+       - `status`: `ExecutionStatus::Miss`.
+       - `exit_code`: 0.
+       - `stdout` & `stderr`: Captured and matched byte-for-byte.
+       - Output validation: `result.bin` verified on disk.
+       - Output hashing: Output manifest contains valid SHA-256 and size.
+       - CAS storage: CAS object verified present in `objects/`.
+       - Metadata storage: `CacheEntry` verified present in `entries/`.
+       - Result return: `ExecutionResult` successfully populated.
+
+- Workspace Test Suite Summary:
+  * Total tests passed: 38 passed; 0 failed; 0 ignored (100% pass rate).
+  * Linter (`clippy`): 0 warnings (`-D warnings`).
+  * Formatter (`rustfmt`): Clean formatting verified.
+
+4. ARTIFACTS AND MODIFICATIONS
+--------------------------------------------------------------------------------
+- `crates/cache-runner/src/engine.rs`: Verified 9-step Cache Miss lifecycle and metadata ingestion.
+- `crates/cache-runner/tests/integration_tests.rs`: Added `test_cache_miss_lifecycle_and_guarantees`.
+- `docs/report/milestone_4_6_cache_miss_report.txt`: Generated Milestone 4.6 report.
+- `README.md`: Updated to document Cache Miss guarantees and lifecycle steps.
+
+5. CONCLUSION
+--------------------------------------------------------------------------------
+Milestone 4.6 is completely implemented, tested, and verified according to specification.
+================================================================================
