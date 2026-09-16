@@ -1,0 +1,51 @@
+================================================================================
+DCC IMPLEMENTATION & VERIFICATION REPORT - MILESTONE 4.1: COMMAND MODEL
+================================================================================
+Timestamp: 2026-09-16T12:47:40+05:30
+Milestone: 4.1 Command Model (Structured Process Specification)
+Workspace: d:\DC
+Branch: ashish
+Status: PASSED / FULLY VERIFIED
+
+1. OBJECTIVE & REQUIREMENTS:
+--------------------------------------------------------------------------------
+- Implement a structured command model (`CommandSpec`) for computation execution and caching.
+- Prevent unsafe shell string concatenation by using direct process execution APIs (`std::process::Command`).
+- Structure command elements explicitly:
+    CommandSpec
+    ├── executable: String
+    ├── arguments: Vec<String>
+    ├── working_directory: PathBuf
+    ├── environment: BTreeMap<String, String>
+    ├── inputs: Vec<InputFile>
+    ├── outputs: Vec<OutputFile>
+    └── cache_policy: CachePolicy
+- Provide a fluent builder (`CommandSpecBuilder`) with validation.
+
+2. IMPLEMENTATION DETAILS:
+--------------------------------------------------------------------------------
+- File: `crates/cache-runner/src/command.rs`
+  * Defined `pub struct CommandSpec` and `pub struct CommandSpecBuilder`.
+  * Validation: Rejects empty or whitespace-only executable paths with `CacheError::ValidationError`.
+  * Computation Mapping: `to_computation(operation)` translates `CommandSpec` to `Computation` for deterministic key calculation.
+- Runner Integration (`crates/cache-runner/src/engine.rs`):
+  * Added `RunnerEngine::execute_command(&self, spec: &CommandSpec) -> Result<ExecutionResult>`.
+- Re-exported in `crates/cache-runner/src/lib.rs`.
+
+3. TEST EXECUTION & VERIFICATION:
+--------------------------------------------------------------------------------
+Command: cargo test --workspace
+Results:
+- `command::tests::test_command_spec_builder` ... PASSED
+  * Verified construction of `executable`, `arguments`, `working_directory`, `environment`, `inputs`, `outputs`, and `cache_policy`.
+- `command::tests::test_command_spec_empty_executable_fails` ... PASSED
+  * Verified validation error on empty executable string.
+- Total Workspace Unit & Integration Tests: 43 passed, 0 failed, 0 ignored.
+- Static Analysis (`cargo clippy --workspace --all-targets --all-features -- -D warnings`): PASSED (0 warnings).
+- Code Formatting (`cargo fmt --all -- --check`): PASSED.
+
+4. CONCLUSION:
+--------------------------------------------------------------------------------
+Milestone 4.1 (Command Model) is fully implemented and verified, establishing safe,
+structured process invocation without shell string construction.
+================================================================================

@@ -58,6 +58,12 @@ impl<'a> RunnerEngine<'a> {
         Self { storage, options }
     }
 
+    /// Execute a command specified via structured CommandSpec.
+    pub fn execute_command(&self, spec: &crate::command::CommandSpec) -> Result<ExecutionResult> {
+        let computation = spec.to_computation("run");
+        self.execute(computation)
+    }
+
     pub fn execute(&self, mut computation: Computation) -> Result<ExecutionResult> {
         computation.validate()?;
 

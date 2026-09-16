@@ -141,6 +141,24 @@ let (largest_size, largest_path) = storage.largest_object()?;
 
 ---
 
+## Structured Command Model (`CommandSpec`)
+
+Computations are specified through structured process definitions rather than unsafe shell string concatenation:
+
+```rust
+use dcc_runner::CommandSpec;
+
+let spec = CommandSpec::builder("rustc")
+    .arg("main.rs")
+    .arg("--crate-type=bin")
+    .current_dir("./workspace")
+    .env("RUST_LOG", "debug")
+    .output("target/main.exe", true)
+    .build()?;
+```
+
+---
+
 ## Workspace Architecture
 
 - **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`), streaming hashing, and canonical key derivation.
