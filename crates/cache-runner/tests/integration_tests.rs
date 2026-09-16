@@ -489,3 +489,98 @@ fn test_failed_computations_are_not_cached_by_default() {
         "Second execution of failed computation must still NOT be cached"
     );
 }
+
+#[test]
+fn test_milestone_5_1_input_changes_comprehensive() {
+    let env = TestEnv::new().unwrap();
+
+    // 1. Initial State: Input A has content X
+    let hash_x_bytes = b"PAYLOAD_CONTENT_HASH_X";
+    env.create_input_file("input_a.txt", hash_x_bytes).unwrap();
+
+    #[cfg(windows)]
+    let (cmd, args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "$content = [System.IO.File]::ReadAllText('input_a.txt'); [System.IO.File]::WriteAllText('output.txt', \"PROCESSED: $content\")".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd, args) = (
+        "sh",
+        vec![
+            "-c".to_string(),
+            "content=$(cat input_a.txt); echo -n \"PROCESSED: $content\" > output.txt".to_string(),
+        ],
+    );
+
+    let command_spec = dcc_runner::CommandSpec::builder(cmd)
+        .args(args)
+        .current_dir(env.workspace_dir.path())
+        .input_path("input_a.txt")
+        .output_path("output.txt")
+        .build()
+        .unwrap();
+
+    let engine = RunnerEngine::new(
+        &env.storage,
+        EngineOptions {
+            working_dir: env.workspace_dir.path().to_path_buf(),
+            ..Default::default()
+        },
+    );
+
+    // Initial Execution with Input A = Hash X
+    let res_x = engine.execute_command(&command_spec).unwrap();
+    assert_eq!(res_x.status, ExecutionStatus::Miss);
+    let key_x = res_x.key;
+    let expected_x_output = format!("PROCESSED: {}", String::from_utf8_lossy(hash_x_bytes));
+    assert_eq!(
+        String::from_utf8_lossy(&env.read_output_file("output.txt").unwrap()).trim(),
+        expected_x_output.trim()
+    );
+
+    // Verify cache hit on unchanged input
+    let res_x_hit = engine.execute_command(&command_spec).unwrap();
+    assert_eq!(res_x_hit.status, ExecutionStatus::Hit);
+    assert_eq!(res_x_hit.key, key_x);
+
+    // 2. Modify Input A: from Hash X to Hash Y
+    let hash_y_bytes = b"PAYLOAD_CONTENT_HASH_Y_DIFFERENT";
+    env.create_input_file("input_a.txt", hash_y_bytes).unwrap();
+
+    // Execute with Input A = Hash Y
+    let res_y = engine.execute_command(&command_spec).unwrap();
+    assert_eq!(res_y.status, ExecutionStatus::Miss);
+    let key_y = res_y.key;
+
+    // Invariant: Key X must differ from Key Y
+    assert_ne!(
+        key_x, key_y,
+        "input A = hash X vs input A = hash Y MUST produce different computation keys"
+    );
+
+    // Verify output reflects new Input Y
+    let expected_y_output = format!("PROCESSED: {}", String::from_utf8_lossy(hash_y_bytes));
+    assert_eq!(
+        String::from_utf8_lossy(&env.read_output_file("output.txt").unwrap()).trim(),
+        expected_y_output.trim()
+    );
+
+    // Verify MissExplainer identifies the exact input change
+    let comp_x = env.storage.get_entry(&key_x).unwrap().unwrap().computation;
+    let comp_y = env.storage.get_entry(&key_y).unwrap().unwrap().computation;
+    let miss_reason = dcc_runner::MissExplainer::explain(&comp_y, Some(&comp_x));
+    match miss_reason {
+        dcc_core::MissReason::InputChanged {
+            path,
+            old_digest,
+            new_digest,
+        } => {
+            assert_eq!(path, "input_a.txt");
+            assert_ne!(old_digest.unwrap(), new_digest);
+        }
+        other => panic!("Expected InputChanged miss reason, got {:?}", other),
+    }
+}

@@ -162,6 +162,124 @@ mod tests {
     }
 
     #[test]
+    fn test_multiple_inputs_single_change_produces_different_key() {
+        let hash_x = Digest::from_bytes(b"HASH_X");
+        let hash_y = Digest::from_bytes(b"HASH_Y");
+        let hash_z = Digest::from_bytes(b"HASH_Z");
+
+        // Set 1: A = hash_x, B = hash_z
+        let comp1 = Computation::builder("build", "compiler")
+            .input("input_a.rs", hash_x, 100)
+            .input("input_b.rs", hash_z.clone(), 200)
+            .build()
+            .unwrap();
+
+        // Set 2: A = hash_y (mutated), B = hash_z (unchanged)
+        let comp2 = Computation::builder("build", "compiler")
+            .input("input_a.rs", hash_y, 100)
+            .input("input_b.rs", hash_z, 200)
+            .build()
+            .unwrap();
+
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
+
+        assert_ne!(
+            key1, key2,
+            "Changing input A from hash X to hash Y must alter computation key"
+        );
+    }
+
+    #[test]
+    fn test_nested_path_input_change_produces_different_key() {
+        let d1 = Digest::from_bytes(b"nested module v1");
+        let d2 = Digest::from_bytes(b"nested module v2");
+
+        let comp1 = Computation::builder("compile", "rustc")
+            .input("src/models/deep/schema.json", d1, 50)
+            .build()
+            .unwrap();
+
+        let comp2 = Computation::builder("compile", "rustc")
+            .input("src/models/deep/schema.json", d2, 50)
+            .build()
+            .unwrap();
+
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
+
+        assert_ne!(key1, key2);
+    }
+
+    #[test]
+    fn test_input_path_rename_with_same_hash_produces_different_key() {
+        let d = Digest::from_bytes(b"shared data content");
+
+        let comp1 = Computation::builder("process", "tool")
+            .input("path_alpha.txt", d.clone(), 100)
+            .build()
+            .unwrap();
+
+        let comp2 = Computation::builder("process", "tool")
+            .input("path_beta.txt", d, 100)
+            .build()
+            .unwrap();
+
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
+
+        assert_ne!(
+            key1, key2,
+            "Input path identity matters even if content hash is identical"
+        );
+    }
+
+    #[test]
+    fn test_input_order_independent_canonicalization() {
+        let d_a = Digest::from_bytes(b"data A");
+        let d_b = Digest::from_bytes(b"data B");
+        let d_c = Digest::from_bytes(b"data C");
+
+        let comp1 = Computation::builder("bundle", "bundler")
+            .input("a.js", d_a.clone(), 10)
+            .input("b.js", d_b.clone(), 20)
+            .input("c.js", d_c.clone(), 30)
+            .build()
+            .unwrap();
+
+        let comp2 = Computation::builder("bundle", "bundler")
+            .input("c.js", d_c, 30)
+            .input("a.js", d_a, 10)
+            .input("b.js", d_b, 20)
+            .build()
+            .unwrap();
+
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
+
+        assert_eq!(
+            key1, key2,
+            "Input order in declaration must be canonically sorted and invariant"
+        );
+    }
+
+    #[test]
     fn test_differing_arguments_produce_different_keys() {
         let comp1 = Computation::builder("fmt", "tool")
             .arg("--fast")

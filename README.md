@@ -244,6 +244,22 @@ exit code != 0  ──►  DO NOT STORE
 
 ---
 
+## Cache Correctness & Input Invalidation
+
+A fast incorrect cache is worse than no cache. DCC strictly guarantees that any alteration to input state invalidates cached computations:
+
+```text
+input A = hash X  ──►  CacheKey 1
+input A = hash Y  ──►  CacheKey 2  (Key 1 ≠ Key 2)
+```
+
+- **Content-Primary Hashing**: Input identity is computed via streaming SHA-256 digests of actual file bytes, invariant across file timestamps (`mtime`).
+- **Path & Permission Sensitivity**: Relative input paths and executable permission bits form part of canonical identity.
+- **Alphabetical Normalization**: Input manifest declarations are canonically sorted by path, making key derivation invariant to input specification order.
+- **Miss Explanation**: When input changes occur, `MissExplainer` pinpoints changed paths along with prior and current digests (`MissReason::InputChanged`).
+
+---
+
 ## Workspace Architecture
 
 - **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`), streaming hashing, and canonical key derivation.
