@@ -106,11 +106,24 @@ impl<'a> RunnerEngine<'a> {
         // 3. Cache lookup
         if self.options.policy != CachePolicy::WriteOnly {
             if let Some(entry) = self.storage.get_entry(&key)? {
-                // Verify all outputs exist in CAS and restore
+                // Step 2: Verify cache metadata identity and integrity
+                if let Err(e) = entry.verify_identity() {
+                    let _ = self.storage.delete_entry(&key);
+                    return self.run_and_store(
+                        key,
+                        computation,
+                        true,
+                        Some(MissReason::CorruptedCache {
+                            reason: e.to_string(),
+                        }),
+                    );
+                }
+
+                // Step 3: Verify all output CAS objects exist and restore outputs safely
                 match OutputRestorer::restore_entry(self.storage, &entry, &self.options.working_dir)
                 {
                     Ok(()) => {
-                        // Restore stdout/stderr if available
+                        // Step 4: Restore metadata (stdout/stderr streams and execution metadata)
                         let stdout =
                             if let Some(out_digest) = &entry.metadata.execution.stdout_digest {
                                 let mut buf = Vec::new();
@@ -133,6 +146,7 @@ impl<'a> RunnerEngine<'a> {
                                 Vec::new()
                             };
 
+                        // Step 5 & 6: Report HIT and return immediately without executing the command
                         return Ok(ExecutionResult {
                             key,
                             status: ExecutionStatus::Hit,
@@ -180,16 +194,41 @@ impl<'a> RunnerEngine<'a> {
             && self.options.policy != CachePolicy::ForceRecompute
         {
             if let Some(entry) = self.storage.get_entry(&key)? {
-                if OutputRestorer::restore_entry(self.storage, &entry, &self.options.working_dir)
+                if entry.verify_identity().is_ok()
+                    && OutputRestorer::restore_entry(
+                        self.storage,
+                        &entry,
+                        &self.options.working_dir,
+                    )
                     .is_ok()
                 {
+                    let stdout = if let Some(out_digest) = &entry.metadata.execution.stdout_digest {
+                        let mut buf = Vec::new();
+                        if let Ok(mut r) = self.storage.get_object_reader(out_digest) {
+                            let _ = std::io::Read::read_to_end(&mut r, &mut buf);
+                        }
+                        buf
+                    } else {
+                        Vec::new()
+                    };
+
+                    let stderr = if let Some(err_digest) = &entry.metadata.execution.stderr_digest {
+                        let mut buf = Vec::new();
+                        if let Ok(mut r) = self.storage.get_object_reader(err_digest) {
+                            let _ = std::io::Read::read_to_end(&mut r, &mut buf);
+                        }
+                        buf
+                    } else {
+                        Vec::new()
+                    };
+
                     return Ok(ExecutionResult {
                         key,
                         status: ExecutionStatus::Hit,
                         exit_code: entry.metadata.execution.exit_code,
                         execution_time_ms: 0,
-                        stdout: Vec::new(),
-                        stderr: Vec::new(),
+                        stdout,
+                        stderr,
                         outputs: entry.outputs,
                         miss_reason: None,
                     });

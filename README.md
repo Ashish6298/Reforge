@@ -201,6 +201,19 @@ restore execute
 
 ---
 
+## Cache Hit Guarantees
+
+When a cache key resolves to an existing valid entry, the engine executes a strict 6-step hit sequence:
+
+1. **Retrieve Metadata**: Reads `CacheEntry` record from storage and updates access statistics.
+2. **Verify Cache Integrity**: Verifies metadata identity (`verify_identity`) and ensures every referenced output CAS blob matches its SHA-256 hash.
+3. **Restore Outputs**: Restores output files/directories atomically to their target workspace locations with verified bitstreams and Unix permissions.
+4. **Restore Metadata**: Replays captured stdout/stderr streams and exit code from previous execution.
+5. **Report HIT**: Emits structured hit telemetry and returns `ExecutionStatus::Hit` with `execution_time_ms = 0`.
+6. **Bypass Execution**: The underlying command process is **never** executed.
+
+---
+
 ## Workspace Architecture
 
 - **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`), streaming hashing, and canonical key derivation.

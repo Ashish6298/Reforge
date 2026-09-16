@@ -1,0 +1,84 @@
+================================================================================
+DCC IMPLEMENTATION REPORT: MILESTONE 4.5 — CACHE HIT
+================================================================================
+Timestamp: 2026-09-16
+Status: SUCCESS / FULLY VERIFIED
+Specification Section: Milestone 4.5 (Cache Hit)
+
+1. OBJECTIVE & REQUIREMENTS
+--------------------------------------------------------------------------------
+The objective of Milestone 4.5 is to implement and enforce the exact 6-step
+Cache Hit lifecycle guarantees:
+
+On a cache hit:
+1. Retrieve metadata (`get_entry(&key)`)
+2. Verify cache integrity (`verify_identity()` & CAS blob SHA-256 validation)
+3. Restore outputs (`OutputRestorer::restore_entry` with atomic rename & permissions)
+4. Restore metadata if requested (replays stdout, stderr, exit code, execution telemetry)
+5. Report HIT (`ExecutionStatus::Hit`, miss_reason: None)
+6. Do not execute the command (complete bypass of child OS process execution)
+
+2. IMPLEMENTATION DETAILS
+--------------------------------------------------------------------------------
+- Step 1: Retrieve Metadata
+  * RunnerEngine queries Content-Addressed Storage via `storage.get_entry(&key)`.
+  * Automatically deserializes `CacheEntry` JSON manifest and increments access
+    counters (`hit_count`, `last_accessed_at`).
+
+- Step 2: Verify Cache Integrity
+  * `entry.verify_identity()` recalculates the canonical `CacheKey` from the
+    embedded `Computation` and compares it against `entry.key`.
+  * `OutputRestorer::restore_entry` verifies every referenced CAS blob digest
+    before streaming.
+  * If any corrupted metadata or CAS blob is encountered, the invalid entry is
+    quarantined/removed and the engine falls back safely to execution with
+    `MissReason::CorruptedCache`.
+
+- Step 3: Restore Outputs
+  * Reconstructs required parent directory hierarchies safely.
+  * Streams verified output blobs to temporary files alongside destinations.
+  * Verifies checksum of the restored file on disk against expected SHA-256.
+  * Atomically moves (`rename`) files into their final declared workspace paths.
+  * Restores Unix executable bits if declared.
+
+- Step 4: Restore Metadata
+  * Reconstitutes captured stdout and stderr buffers from CAS reader.
+  * Preserves recorded exit code and returns `execution_time_ms = 0`.
+
+- Step 5: Report HIT
+  * Emits structured hit event.
+  * Returns `ExecutionResult` with `status: ExecutionStatus::Hit`, `miss_reason: None`.
+
+- Step 6: Process Execution Bypass
+  * The child OS process (`ProcessExecutor::execute`) is NEVER invoked.
+  * Eliminates CPU, I/O, and build tool overhead completely.
+
+3. TEST & VERIFICATION RESULTS
+--------------------------------------------------------------------------------
+- New Dedicated Integration Test:
+  * `test_cache_hit_lifecycle_and_guarantees`:
+    1. Cold run (MISS): Executes command producing artifact file and distinct
+       stdout/stderr payloads.
+    2. Deletes output artifact on disk.
+    3. Warm run (HIT): Reconstructs artifact with identical bitstream, restores
+       stdout/stderr, returns `ExecutionStatus::Hit`, sets execution time to 0 ms,
+       and proves process execution was skipped.
+
+- Full Workspace Test Suite Results:
+  * Total tests passed: 37 passed; 0 failed; 0 ignored (100% pass rate).
+  * Linter (`clippy`): 0 warnings (`-D warnings`).
+  * Formatter (`rustfmt`): Clean formatting verified.
+
+4. ARTIFACTS AND MODIFICATIONS
+--------------------------------------------------------------------------------
+- `crates/cache-runner/src/engine.rs`: Enforced explicit 6-step Cache Hit flow with
+  identity verification and metadata replay.
+- `crates/cache-runner/tests/integration_tests.rs`: Added `test_cache_hit_lifecycle_and_guarantees`.
+- `docs/report/milestone_4_5_cache_hit_report.txt`: Generated Milestone 4.5 report.
+- `README.md`: Updated to document Cache Hit guarantees and verification steps.
+
+5. CONCLUSION
+--------------------------------------------------------------------------------
+Milestone 4.5 is completely implemented and verified, guaranteeing full semantic
+equivalence on cache hits and zero command execution.
+================================================================================

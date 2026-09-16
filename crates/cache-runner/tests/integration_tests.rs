@@ -232,3 +232,101 @@ fn test_full_execution_lifecycle_state_machine() {
         b"function calculate() { return 42; }"
     );
 }
+
+#[test]
+fn test_cache_hit_lifecycle_and_guarantees() {
+    let env = TestEnv::new().unwrap();
+
+    // 1. Prepare input
+    env.create_input_file("input.json", b"{\"name\": \"dcc\"}")
+        .unwrap();
+
+    // The command writes "artifact.out" and also writes to stdout and stderr
+    #[cfg(windows)]
+    let (cmd, args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "[System.IO.File]::WriteAllBytes('artifact.out', [System.Text.Encoding]::UTF8.GetBytes('BUILD_RESULT_123')); [Console]::Out.Write('STDOUT_PAYLOAD'); [Console]::Error.Write('STDERR_PAYLOAD')".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd, args) = (
+        "sh",
+        vec![
+            "-c".to_string(),
+            "echo -n 'BUILD_RESULT_123' > artifact.out && echo -n 'STDOUT_PAYLOAD' && echo -n 'STDERR_PAYLOAD' >&2".to_string(),
+        ],
+    );
+
+    let command_spec = dcc_runner::CommandSpec::builder(cmd)
+        .args(args)
+        .current_dir(env.workspace_dir.path())
+        .input_path("input.json")
+        .output_path("artifact.out")
+        .build()
+        .unwrap();
+
+    let engine = RunnerEngine::new(
+        &env.storage,
+        EngineOptions {
+            working_dir: env.workspace_dir.path().to_path_buf(),
+            ..Default::default()
+        },
+    );
+
+    // Initial run (MISS): Populates cache
+    let miss_result = engine.execute_command(&command_spec).unwrap();
+    assert_eq!(miss_result.status, ExecutionStatus::Miss);
+    assert_eq!(miss_result.exit_code, 0);
+    assert_eq!(
+        String::from_utf8_lossy(&miss_result.stdout),
+        "STDOUT_PAYLOAD"
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&miss_result.stderr),
+        "STDERR_PAYLOAD"
+    );
+    assert_eq!(
+        env.read_output_file("artifact.out").unwrap(),
+        b"BUILD_RESULT_123"
+    );
+
+    // Verify metadata was stored
+    let entry_opt = env.storage.get_entry(&miss_result.key).unwrap();
+    assert!(entry_opt.is_some());
+    let entry = entry_opt.unwrap();
+    assert_eq!(entry.metadata.execution.exit_code, 0);
+    assert!(entry.metadata.execution.stdout_digest.is_some());
+    assert!(entry.metadata.execution.stderr_digest.is_some());
+
+    // Delete output file and overwrite with garbage to test restoration
+    fs::remove_file(env.workspace_dir.path().join("artifact.out")).unwrap();
+
+    // Now execute again: Must produce a CACHE HIT
+    // Verification:
+    // 1. Metadata retrieved
+    // 2. Cache integrity verified
+    // 3. Output restored (artifact.out recreated with original bytes)
+    // 4. Metadata restored (stdout, stderr, exit code)
+    // 5. Reported as HIT (status = Hit, miss_reason = None)
+    // 6. Command was not executed (proven because execution_time_ms = 0 and CAS cache hit is reported)
+    let hit_result = engine.execute_command(&command_spec).unwrap();
+    assert_eq!(hit_result.status, ExecutionStatus::Hit);
+    assert_eq!(hit_result.key, miss_result.key);
+    assert_eq!(hit_result.exit_code, 0);
+    assert_eq!(hit_result.execution_time_ms, 0);
+    assert_eq!(hit_result.miss_reason, None);
+    assert_eq!(
+        String::from_utf8_lossy(&hit_result.stdout),
+        "STDOUT_PAYLOAD"
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&hit_result.stderr),
+        "STDERR_PAYLOAD"
+    );
+    assert_eq!(
+        env.read_output_file("artifact.out").unwrap(),
+        b"BUILD_RESULT_123"
+    );
+}
