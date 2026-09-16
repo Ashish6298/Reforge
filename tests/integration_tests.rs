@@ -109,3 +109,41 @@ fn test_path_traversal_rejection() {
 
     assert!(invalid_comp.is_err());
 }
+
+#[test]
+fn test_missing_declared_output_verification() {
+    let env = TestEnv::new().unwrap();
+
+    // Command exits with 0 but fails to produce declared output file
+    #[cfg(windows)]
+    let (cmd, args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "Write-Output 'completed without producing output'".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd, args) = ("echo", vec!["completed".to_string()]);
+
+    let computation = Computation::builder("missing-out-test", cmd)
+        .args(args)
+        .output("expected_artifact.bin", true) // required output that is never generated
+        .build()
+        .unwrap();
+
+    let engine = RunnerEngine::new(
+        &env.storage,
+        EngineOptions {
+            working_dir: env.workspace_dir.path().to_path_buf(),
+            ..Default::default()
+        },
+    );
+
+    let res = engine.execute(computation);
+    assert!(
+        res.is_err(),
+        "Execution must return an error if a declared required output is missing"
+    );
+    assert!(matches!(res.unwrap_err(), dcc_core::CacheError::MissingOutput(_)));
+}

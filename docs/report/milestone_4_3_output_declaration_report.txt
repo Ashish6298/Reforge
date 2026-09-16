@@ -1,0 +1,53 @@
+================================================================================
+DCC IMPLEMENTATION & VERIFICATION REPORT - MILESTONE 4.3: OUTPUT DECLARATION
+================================================================================
+Timestamp: 2026-09-16T14:20:15+05:30
+Milestone: 4.3 Output Declaration & Post-Execution Verification
+Workspace: d:\DC
+Branch: ashish
+Status: PASSED / FULLY VERIFIED
+
+1. OBJECTIVE & REQUIREMENTS:
+--------------------------------------------------------------------------------
+- Allow callers to explicitly declare expected outputs for computations:
+    outputs:
+        dist/app.js
+        dist/app.js.map
+- Post-Execution Output Verification:
+  * When a command completes successfully (exit code 0), the cache engine must
+    verify that all declared required output files actually exist on disk.
+  * If any declared required output file is missing, the engine must return a
+    structured `CacheError::MissingOutput` error and refuse to cache an incomplete result.
+  * Optional outputs are verified and ingested into CAS only if present on disk.
+
+2. IMPLEMENTATION DETAILS:
+--------------------------------------------------------------------------------
+- `CommandSpecBuilder` Output Methods (`crates/cache-runner/src/command.rs`):
+    * `output(path, required)`: Declares an output with explicit requirement flag.
+    * `output_path(path)`: Convenience helper for a required output (`required: true`).
+    * `output_paths(iter)`: Batch declaration helper for multiple required outputs.
+    * `output_optional(path)`: Helper for optional outputs (`required: false`).
+- Post-Execution Engine Verification (`RunnerEngine::execute` in `crates/cache-runner/src/engine.rs`):
+    * Iterates through `computation.outputs`.
+    * Checks existence: `self.options.working_dir.join(&output.path).exists()`.
+    * If missing and `output.required == true`: returns `Err(CacheError::MissingOutput(...))`.
+    * If present: computes digest and atomically stores into Content-Addressed Storage (`store_object_from_file`).
+
+3. TEST EXECUTION & VERIFICATION:
+--------------------------------------------------------------------------------
+Command: cargo test --workspace
+Results:
+- `command::tests::test_output_declaration_helpers` ... PASSED
+  * Verified builder methods for required, optional, and batch output declarations.
+- `integration_tests::test_missing_declared_output_verification` ... PASSED
+  * Verified that a command returning exit code 0 without generating a declared required
+    output file causes `RunnerEngine` to return `Err(CacheError::MissingOutput)`.
+- Total Workspace Unit & Integration Tests: 45 passed, 0 failed, 0 ignored.
+- Static Analysis (`cargo clippy --workspace --all-targets --all-features -- -D warnings`): PASSED (0 warnings).
+- Code Formatting (`cargo fmt --all -- --check`): PASSED.
+
+4. CONCLUSION:
+--------------------------------------------------------------------------------
+Milestone 4.3 (Output Declaration) is fully implemented and verified, guaranteeing
+that incomplete command executions without declared outputs are never cached.
+================================================================================

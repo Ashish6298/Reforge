@@ -153,12 +153,14 @@ let spec = CommandSpec::builder("rustc")
     .arg("--crate-type=bin")
     .current_dir("./workspace")
     .input_paths(vec!["src/main.rs", "src/lib.rs", "Cargo.toml"])
-    .output("target/main.exe", true)
+    .output_path("target/main.exe")
+    .output_optional("target/main.pdb")
     .env("RUST_LOG", "debug")
     .build()?;
 ```
 
-Declared inputs are validated, streamed via 64 KB chunks, and cryptographically hashed (SHA-256) before cache lookup.
+- **Declared Inputs**: Validated, streamed in 64 KB chunks, and cryptographically hashed (SHA-256) before cache lookup.
+- **Declared Outputs**: Verified for physical existence on disk after command completion. If any required output is missing, an error (`CacheError::MissingOutput`) is returned and caching is aborted.
 
 ---
 

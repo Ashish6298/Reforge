@@ -161,6 +161,36 @@ impl CommandSpecBuilder {
         self
     }
 
+    /// Declare a required output file by relative path.
+    pub fn output_path(mut self, path: impl Into<String>) -> Self {
+        self.outputs.push(OutputFile {
+            path: path.into(),
+            required: true,
+        });
+        self
+    }
+
+    /// Declare multiple required output files by relative paths.
+    pub fn output_paths<I, S>(mut self, paths: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        for p in paths {
+            self = self.output_path(p);
+        }
+        self
+    }
+
+    /// Declare an optional output file by relative path.
+    pub fn output_optional(mut self, path: impl Into<String>) -> Self {
+        self.outputs.push(OutputFile {
+            path: path.into(),
+            required: false,
+        });
+        self
+    }
+
     pub fn policy(mut self, policy: CachePolicy) -> Self {
         self.cache_policy = policy;
         self
@@ -249,5 +279,33 @@ mod tests {
 
         assert_eq!(spec2.inputs.len(), 3);
         assert_eq!(spec.inputs, spec2.inputs);
+    }
+
+    #[test]
+    fn test_output_declaration_helpers() {
+        let spec = CommandSpec::builder("node")
+            .arg("build.js")
+            .output_path("dist/app.js")
+            .output_path("dist/app.js.map")
+            .output_optional("dist/stats.json")
+            .build()
+            .unwrap();
+
+        assert_eq!(spec.outputs.len(), 3);
+        assert_eq!(spec.outputs[0].path, "dist/app.js");
+        assert!(spec.outputs[0].required);
+        assert_eq!(spec.outputs[1].path, "dist/app.js.map");
+        assert!(spec.outputs[1].required);
+        assert_eq!(spec.outputs[2].path, "dist/stats.json");
+        assert!(!spec.outputs[2].required);
+
+        let spec2 = CommandSpec::builder("node")
+            .arg("build.js")
+            .output_paths(vec!["dist/app.js", "dist/app.js.map"])
+            .build()
+            .unwrap();
+
+        assert_eq!(spec2.outputs.len(), 2);
+        assert!(spec2.outputs.iter().all(|o| o.required));
     }
 }
