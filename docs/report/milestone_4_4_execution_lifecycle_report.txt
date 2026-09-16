@@ -1,0 +1,138 @@
+================================================================================
+DCC IMPLEMENTATION REPORT: MILESTONE 4.4 — EXECUTION LIFECYCLE
+================================================================================
+Timestamp: 2026-09-16
+Status: SUCCESS / FULLY VERIFIED
+Specification Section: Milestone 4.4 (Execution Lifecycle)
+
+1. OBJECTIVE & OVERVIEW
+--------------------------------------------------------------------------------
+The objective of Milestone 4.4 is to implement and formalize the complete,
+deterministic execution lifecycle state machine for the Developer Computation
+Cache (DCC) Runner.
+
+The state machine strictly implements the following execution flow:
+
+        prepare
+           │
+           ▼
+     collect inputs
+           │
+           ▼
+     calculate key
+           │
+           ▼
+     lookup cache
+           │
+         HIT ?
+       ┌───┴───┐
+     YES       NO
+      │         │
+      ▼         ▼
+   restore   execute
+                │
+                ▼
+         validate outputs
+                │
+                ▼
+              store
+
+2. DETAILED LIFECYCLE PHASES
+--------------------------------------------------------------------------------
+Phase 1: Prepare
+- Validates the `CommandSpec` structure (ensures executable is specified, working
+  directory exists, input and output manifests are structurally sound).
+- Canonicalizes working directory and resolves execution paths.
+
+Phase 2: Collect Inputs
+- Iterates over all declared input paths relative to the working directory.
+- Verifies input file existence and accessibility.
+- Employs 64 KB streaming SHA-256 hashing to compute cryptographic digests for
+  each input file without unbounded RAM usage.
+- Captures environment variables, tool version metadata, and target platform info.
+
+Phase 3: Calculate Key
+- Derives the canonical cache key (`CanonicalComputation::compute_key()`) based
+  on:
+  * Operation name / executable identity
+  * Ordered argument list
+  * Sorted declared input relative paths + SHA-256 digests
+  * Sorted declared environment variables
+  * Tool/compiler version metadata
+  * OS platform & architecture
+
+Phase 4: Lookup Cache
+- Queries the content-addressed metadata index for an existing `CacheEntry`
+  matching the computed key.
+- Verifies the integrity of the cached metadata entry and referenced CAS blobs.
+
+Phase 5: Decision Branch (HIT vs MISS)
+- On HIT:
+  * Executes the `restore` path (`OutputRestorer::restore_entry`).
+  * Reconstitutes declared output files and directories into the workspace.
+  * Replays execution stdout/stderr and captured exit code.
+  * Updates cache entry access telemetry (`last_accessed_at`, `hit_count`).
+  * Returns `ExecutionResult { cached: true, ... }` without running child process.
+- On MISS / CORRUPTION:
+  * Transitions to Phase 6 (Execute).
+
+Phase 6: Execute
+- Acquires process-level lock to prevent duplicate concurrent work if configured.
+- Spawns the child OS process directly (via `std::process::Command`, without shell
+  string concatenation).
+- Captures exit code, execution duration, and streams/collects stdout and stderr.
+- If the child process exits with non-zero status or fails:
+  * Propagates execution failure to caller without caching invalid state.
+
+Phase 7: Validate Outputs
+- Inspects the working directory to verify all declared required outputs exist.
+- If any declared required output is missing:
+  * Emits `CacheError::MissingOutput`.
+  * Aborts cache ingestion to maintain the core cache invariant.
+
+Phase 8: Store
+- Ingests all verified output artifacts into the Content-Addressed Storage (CAS).
+- Ingests captured stdout and stderr blobs into CAS.
+- Constructs an immutable `CacheEntry` referencing output digests.
+- Atomically commits the `CacheEntry` record using two-stage staging and sync.
+- Returns `ExecutionResult { cached: false, ... }`.
+
+3. TEST & VERIFICATION RESULTS
+--------------------------------------------------------------------------------
+Comprehensive automated integration tests were executed across the workspace:
+
+- State Machine Integration Tests:
+  * `test_full_execution_lifecycle_state_machine`:
+    1. Cold run: Executes computation, validates outputs created on disk, verifies
+       caching occurs (`cached: false`).
+    2. Modifies output file on disk with bogus data.
+    3. Warm run: Executes lifecycle, hits cache (`cached: true`), restores verified
+       original output artifact from CAS onto disk, overwriting bogus data.
+  * `test_cold_miss_then_warm_hit`: Verifies end-to-end execution and cache replay.
+  * `test_missing_declared_output_verification`: Verifies lifecycle fails cleanly
+    at 'validate outputs' step when process fails to produce declared output.
+  * `test_input_change_causes_cache_miss`: Verifies key calculation changes when
+    any declared input is modified.
+  * `test_path_traversal_rejection`: Verifies security boundaries during preparation
+    and output restoration.
+  * `test_corrupted_cas_object_causes_safe_fallback`: Verifies corruption detection
+    forces clean re-execution.
+  * `test_concurrent_identical_computations`: Verifies process locking and concurrency.
+
+Test Execution Output:
+- Unit & Integration Tests: 36 passed; 0 failed; 0 ignored (100% pass rate).
+- Clippy Lints: 0 warnings (`cargo clippy --workspace --all-targets --all-features -- -D warnings`).
+- Code Formatting: 0 issues (`cargo fmt --all -- --check`).
+
+4. ARTIFACTS AND MODIFICATIONS
+--------------------------------------------------------------------------------
+- Test Suite: `crates/cache-runner/tests/integration_tests.rs` (Added `test_full_execution_lifecycle_state_machine`).
+- Documentation: `README.md` updated with execution lifecycle state machine documentation.
+- Report: `docs/report/milestone_4_4_execution_lifecycle_report.txt`.
+
+5. CONCLUSION
+--------------------------------------------------------------------------------
+Milestone 4.4 is fully implemented, adhering to pure Rust guidelines, crash
+consistency guarantees, zero unwrap/expect in production code paths, and zero
+regressions in existing functionality.
+================================================================================

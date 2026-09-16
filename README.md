@@ -164,6 +164,43 @@ let spec = CommandSpec::builder("rustc")
 
 ---
 
+## Execution Lifecycle State Machine
+
+The runner engine coordinates computation execution and cache reuse via an explicit, deterministic state machine:
+
+```text
+prepare
+    ↓
+collect inputs
+    ↓
+calculate key
+    ↓
+lookup cache
+    ↓
+HIT?
+ ┌──┴───┐
+YES    NO
+ ↓      ↓
+restore execute
+        ↓
+     validate outputs
+        ↓
+      store
+```
+
+1. **Prepare**: Validate `CommandSpec`, verify working directory, and prepare child process context.
+2. **Collect Inputs**: Stream and compute SHA-256 digests for all declared input files.
+3. **Calculate Key**: Compute canonical SHA-256 `CacheKey` incorporating executable, args, input hashes, env vars, and tool versions.
+4. **Lookup Cache**: Check CAS metadata index for an existing entry matching the key.
+5. **Branch HIT**: Restore output artifacts and captured stdout/stderr from CAS directly to workspace.
+6. **Branch MISS**:
+   - Acquire execution lock.
+   - Execute child process directly (no shell concatenation).
+   - **Validate Outputs**: Verify all declared required output files physically exist on disk.
+   - **Store**: Ingest output files into CAS and write an immutable `CacheEntry` record atomically.
+
+---
+
 ## Workspace Architecture
 
 - **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`), streaming hashing, and canonical key derivation.

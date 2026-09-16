@@ -156,3 +156,79 @@ fn test_missing_declared_output_verification() {
         dcc_core::CacheError::MissingOutput(_)
     ));
 }
+
+#[test]
+fn test_full_execution_lifecycle_state_machine() {
+    let env = TestEnv::new().unwrap();
+
+    // 1. Prepare inputs on disk
+    let src_path = env
+        .create_input_file("source.txt", b"function calculate() { return 42; }")
+        .unwrap();
+    assert!(src_path.is_file());
+
+    #[cfg(windows)]
+    let (cmd, args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "Copy-Item source.txt -Destination compiled.bin; Write-Output 'Compilation Succeeded'"
+                .to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd, args) = (
+        "sh",
+        vec![
+            "-c".to_string(),
+            "cp source.txt compiled.bin && echo 'Compilation Succeeded'".to_string(),
+        ],
+    );
+
+    let command_spec = dcc_runner::CommandSpec::builder(cmd)
+        .args(args)
+        .current_dir(env.workspace_dir.path())
+        .input_path("source.txt")
+        .output_path("compiled.bin")
+        .build()
+        .unwrap();
+
+    let engine = RunnerEngine::new(
+        &env.storage,
+        EngineOptions {
+            working_dir: env.workspace_dir.path().to_path_buf(),
+            ..Default::default()
+        },
+    );
+
+    // Initial Execution: Lifecycle executes [Prepare -> Collect -> Calculate Key -> Lookup -> MISS -> Execute -> Validate -> Store]
+    let res_miss = engine.execute_command(&command_spec).unwrap();
+    assert_eq!(res_miss.status, ExecutionStatus::Miss);
+    assert_eq!(res_miss.exit_code, 0);
+    assert_eq!(res_miss.outputs.len(), 1);
+    assert_eq!(res_miss.outputs[0].path, "compiled.bin");
+    assert_eq!(
+        env.read_output_file("compiled.bin").unwrap(),
+        b"function calculate() { return 42; }"
+    );
+
+    // Verify metadata entry stored in CAS
+    let stored_entry = env.storage.get_entry(&res_miss.key).unwrap();
+    assert!(stored_entry.is_some());
+    assert_eq!(stored_entry.unwrap().key, res_miss.key);
+
+    // Wipe output file to simulate fresh run
+    fs::remove_file(env.workspace_dir.path().join("compiled.bin")).unwrap();
+    assert!(!env.workspace_dir.path().join("compiled.bin").exists());
+
+    // Second Execution: Lifecycle executes [Prepare -> Collect -> Calculate Key -> Lookup -> HIT -> Restore]
+    let res_hit = engine.execute_command(&command_spec).unwrap();
+    assert_eq!(res_hit.status, ExecutionStatus::Hit);
+    assert_eq!(res_hit.key, res_miss.key);
+    assert_eq!(res_hit.execution_time_ms, 0);
+    assert!(env.workspace_dir.path().join("compiled.bin").exists());
+    assert_eq!(
+        env.read_output_file("compiled.bin").unwrap(),
+        b"function calculate() { return 42; }"
+    );
+}
