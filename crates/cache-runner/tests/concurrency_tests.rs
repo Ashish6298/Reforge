@@ -673,3 +673,310 @@ fn test_milestone_6_4_corrupted_lock_metadata_recovery_in_runner() {
         b"CORRUPTED_LOCK_DATA"
     );
 }
+
+#[test]
+fn test_milestone_6_5_stress_10_concurrent_processes() {
+    use std::sync::Barrier;
+
+    let env = Arc::new(TestEnv::new().unwrap());
+    let num_processes = 10;
+    let barrier = Arc::new(Barrier::new(num_processes));
+    let mut handles = Vec::new();
+
+    for proc_id in 0..num_processes {
+        let env_clone = Arc::clone(&env);
+        let barrier_clone = Arc::clone(&barrier);
+
+        let handle = thread::spawn(move || {
+            let worker_temp = tempfile::tempdir().unwrap();
+            let worker_dir = worker_temp.path().to_path_buf();
+
+            // 5 processes share computation "shared_cluster", 5 have unique computation keys
+            let is_shared = proc_id < 5;
+            let payload = if is_shared {
+                "SHARED_CLUSTER_PAYLOAD".to_string()
+            } else {
+                format!("UNIQUE_PAYLOAD_PROC_{}", proc_id)
+            };
+
+            std::fs::write(worker_dir.join("input.dat"), payload.as_bytes()).unwrap();
+
+            #[cfg(windows)]
+            let (cmd, args) = (
+                "powershell.exe",
+                vec![
+                    "-Command".to_string(),
+                    "Copy-Item input.dat -Destination output.dat; Write-Output 'STRESS_10_OK'"
+                        .to_string(),
+                ],
+            );
+            #[cfg(not(windows))]
+            let (cmd, args) = (
+                "sh",
+                vec![
+                    "-c".to_string(),
+                    "cp input.dat output.dat && echo 'STRESS_10_OK'".to_string(),
+                ],
+            );
+
+            let spec = dcc_runner::CommandSpec::builder(cmd)
+                .args(args)
+                .current_dir(&worker_dir)
+                .input_path("input.dat")
+                .output_path("output.dat")
+                .build()
+                .unwrap();
+
+            let engine = RunnerEngine::new(
+                &env_clone.storage,
+                EngineOptions {
+                    working_dir: worker_dir.clone(),
+                    lock_timeout: std::time::Duration::from_secs(30),
+                    ..Default::default()
+                },
+            );
+
+            // Synchronize launch
+            barrier_clone.wait();
+
+            let res = engine
+                .execute_command(&spec)
+                .unwrap_or_else(|e| panic!("Process {} failed: {}", proc_id, e));
+
+            // Verify output integrity
+            let out_data = std::fs::read(worker_dir.join("output.dat")).unwrap();
+            assert_eq!(out_data, payload.as_bytes());
+
+            res.status
+        });
+        handles.push(handle);
+    }
+
+    let mut misses = 0;
+    let mut hits = 0;
+    for handle in handles {
+        match handle.join().unwrap() {
+            ExecutionStatus::Miss => misses += 1,
+            ExecutionStatus::Hit => hits += 1,
+            _ => {}
+        }
+    }
+
+    // Invariant: 5 unique processes must MISS; 5 shared processes yield 1 MISS and 4 HITS
+    assert_eq!(misses, 6);
+    assert_eq!(hits, 4);
+
+    // Verify storage integrity: tmp directory clean
+    let mut tmp_entries = std::fs::read_dir(env.storage.tmp_dir()).unwrap();
+    assert!(tmp_entries.next().is_none());
+}
+
+#[test]
+fn test_milestone_6_5_stress_50_concurrent_processes() {
+    use std::sync::Barrier;
+
+    let env = Arc::new(TestEnv::new().unwrap());
+    let num_processes = 50;
+    let barrier = Arc::new(Barrier::new(num_processes));
+    let mut handles = Vec::new();
+
+    for proc_id in 0..num_processes {
+        let env_clone = Arc::clone(&env);
+        let barrier_clone = Arc::clone(&barrier);
+
+        let handle = thread::spawn(move || {
+            let worker_temp = tempfile::tempdir().unwrap();
+            let worker_dir = worker_temp.path().to_path_buf();
+
+            // 5 clusters of 5 shared workers (25 shared) + 25 unique workers
+            let cluster_id = if proc_id < 25 {
+                proc_id / 5 // clusters 0..5
+            } else {
+                proc_id // unique keys
+            };
+
+            let payload = format!("CLUSTER_PAYLOAD_DATA_{}", cluster_id);
+            std::fs::write(worker_dir.join("input.dat"), payload.as_bytes()).unwrap();
+
+            #[cfg(windows)]
+            let (cmd, args) = (
+                "powershell.exe",
+                vec![
+                    "-Command".to_string(),
+                    "Copy-Item input.dat -Destination output.dat; [System.IO.File]::WriteAllText('side.txt', 'SIDE_DATA')".to_string(),
+                ],
+            );
+            #[cfg(not(windows))]
+            let (cmd, args) = (
+                "sh",
+                vec![
+                    "-c".to_string(),
+                    "cp input.dat output.dat && echo -n 'SIDE_DATA' > side.txt".to_string(),
+                ],
+            );
+
+            let spec = dcc_runner::CommandSpec::builder(cmd)
+                .args(args)
+                .current_dir(&worker_dir)
+                .input_path("input.dat")
+                .output_path("output.dat")
+                .output_path("side.txt")
+                .build()
+                .unwrap();
+
+            let engine = RunnerEngine::new(
+                &env_clone.storage,
+                EngineOptions {
+                    working_dir: worker_dir.clone(),
+                    lock_timeout: std::time::Duration::from_secs(45),
+                    ..Default::default()
+                },
+            );
+
+            barrier_clone.wait();
+
+            let res = engine
+                .execute_command(&spec)
+                .unwrap_or_else(|e| panic!("Process {} failed: {}", proc_id, e));
+
+            // Verify both outputs
+            let out_data = std::fs::read(worker_dir.join("output.dat")).unwrap();
+            assert_eq!(out_data, payload.as_bytes());
+
+            let side_data = std::fs::read(worker_dir.join("side.txt")).unwrap();
+            assert_eq!(String::from_utf8_lossy(&side_data).trim(), "SIDE_DATA");
+
+            res.status
+        });
+        handles.push(handle);
+    }
+
+    let mut total_results = 0;
+    for handle in handles {
+        let status = handle.join().unwrap();
+        assert!(matches!(
+            status,
+            ExecutionStatus::Hit | ExecutionStatus::Miss
+        ));
+        total_results += 1;
+    }
+
+    assert_eq!(total_results, num_processes);
+
+    // Verify storage integrity: tmp directory clean
+    let mut tmp_entries = std::fs::read_dir(env.storage.tmp_dir()).unwrap();
+    assert!(tmp_entries.next().is_none());
+}
+
+#[test]
+fn test_milestone_6_5_stress_100_concurrent_operations() {
+    use std::sync::Barrier;
+
+    let env = Arc::new(TestEnv::new().unwrap());
+    let num_ops = 100;
+    let barrier = Arc::new(Barrier::new(num_ops));
+    let mut handles = Vec::new();
+
+    for op_id in 0..num_ops {
+        let env_clone = Arc::clone(&env);
+        let barrier_clone = Arc::clone(&barrier);
+
+        let handle = thread::spawn(move || {
+            let worker_temp = tempfile::tempdir().unwrap();
+            let worker_dir = worker_temp.path().to_path_buf();
+
+            // 4 clusters of 10 workers (40 shared operations) + 60 distinct operations
+            let group_id = if op_id < 40 {
+                op_id / 10 // groups 0, 1, 2, 3
+            } else {
+                op_id // distinct
+            };
+
+            let payload = format!("STRESS_100_PAYLOAD_GROUP_{}_{}", group_id, "Z".repeat(1024));
+            std::fs::write(worker_dir.join("source.dat"), payload.as_bytes()).unwrap();
+
+            #[cfg(windows)]
+            let (cmd, args) = (
+                "powershell.exe",
+                vec![
+                    "-Command".to_string(),
+                    "Copy-Item source.dat -Destination result.dat; Write-Output 'OP_SUCCESS'"
+                        .to_string(),
+                ],
+            );
+            #[cfg(not(windows))]
+            let (cmd, args) = (
+                "sh",
+                vec![
+                    "-c".to_string(),
+                    "cp source.dat result.dat && echo 'OP_SUCCESS'".to_string(),
+                ],
+            );
+
+            let spec = dcc_runner::CommandSpec::builder(cmd)
+                .args(args)
+                .current_dir(&worker_dir)
+                .input_path("source.dat")
+                .output_path("result.dat")
+                .build()
+                .unwrap();
+
+            let engine = RunnerEngine::new(
+                &env_clone.storage,
+                EngineOptions {
+                    working_dir: worker_dir.clone(),
+                    lock_timeout: std::time::Duration::from_secs(60),
+                    ..Default::default()
+                },
+            );
+
+            barrier_clone.wait();
+
+            let res = engine
+                .execute_command(&spec)
+                .unwrap_or_else(|e| panic!("Operation {} failed: {}", op_id, e));
+
+            // Verify output integrity
+            let out_data = std::fs::read(worker_dir.join("result.dat")).unwrap();
+            assert_eq!(out_data, payload.as_bytes());
+
+            res.key
+        });
+        handles.push(handle);
+    }
+
+    let mut generated_keys = Vec::new();
+    for handle in handles {
+        let key = handle.join().unwrap();
+        generated_keys.push(key);
+    }
+
+    assert_eq!(generated_keys.len(), num_ops);
+
+    // Full Storage & Metadata Consistency Audit
+    // 1. All generated entries on disk must exist and pass verify_identity
+    for key in &generated_keys {
+        let entry = env
+            .storage
+            .get_entry(key)
+            .unwrap()
+            .expect("Entry must exist in storage");
+        assert_eq!(&entry.key, key);
+        assert!(entry.verify_identity().is_ok());
+
+        // Verify all output CAS objects referenced by the entry
+        for output in &entry.outputs {
+            assert!(env.storage.verify_object(&output.digest).is_ok());
+        }
+    }
+
+    // 2. tmp directory must be completely clean (no leaked temporary files)
+    let mut tmp_entries = std::fs::read_dir(env.storage.tmp_dir()).unwrap();
+    assert!(tmp_entries.next().is_none());
+
+    // 3. Storage stats sanity check
+    let stats = env.storage.stats().unwrap();
+    assert!(stats.total_objects > 0);
+    assert!(stats.total_entries > 0);
+    assert!(stats.total_size_bytes > 0);
+}

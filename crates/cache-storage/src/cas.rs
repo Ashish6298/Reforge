@@ -205,7 +205,17 @@ impl CasStorage {
     pub fn get_object_reader(&self, digest: &Digest) -> Result<BufReader<File>> {
         self.verify_object(digest)?;
         let path = self.object_path(digest);
-        let file = File::open(path)?;
+        let mut attempts = 0;
+        let file = loop {
+            match File::open(&path) {
+                Ok(f) => break f,
+                Err(e) if attempts < 5 && e.kind() == io::ErrorKind::PermissionDenied => {
+                    attempts += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(e) => return Err(CacheError::StorageError(e)),
+            }
+        };
         Ok(BufReader::new(file))
     }
 
@@ -247,7 +257,23 @@ impl CasStorage {
             return Ok(None);
         }
 
-        let file = File::open(&path)?;
+        let mut attempts = 0;
+        let file = loop {
+            match File::open(&path) {
+                Ok(f) => break f,
+                Err(e) if attempts < 5 && e.kind() == io::ErrorKind::PermissionDenied => {
+                    attempts += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(e) => {
+                    if !path.exists() {
+                        return Ok(None);
+                    }
+                    return Err(CacheError::StorageError(e));
+                }
+            }
+        };
+
         let mut entry: CacheEntry = match serde_json::from_reader(BufReader::new(file)) {
             Ok(e) => e,
             Err(e) => {

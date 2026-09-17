@@ -440,6 +440,14 @@ DCC guarantees that abnormal process terminations, crashes, timeouts, or corrupt
 - **Configurable Timeouts**: If a lock is held beyond `lock_timeout`, `acquire` returns `CacheError::LockError` instead of deadlocking indefinitely.
 - **Stale Lock Pruning**: `ComputationLock::clean_stale_locks` safely tests and purges unlocked lock files exceeding a configured age threshold.
 
+### Concurrency Stress Testing (Milestone 6.5)
+
+DCC is verified under heavy concurrent workloads across multiple scales:
+
+- **10 Concurrent Processes**: Mixed workloads of shared clusters and unique tasks with zero lock contention deadlocks and clean deduplicated execution.
+- **50 Concurrent Processes**: 50 simultaneous workers executing multi-artifact builds with secondary side-outputs and verified workspace file integrity.
+- **100 Concurrent Operations**: 100 simultaneous operations dispatched via a synchronized barrier, validated with a complete post-stress storage audit (all CAS objects cryptographically verified, all entries satisfy `verify_identity()`, zero leaked `.tmp` files, and zero corrupted objects).
+
 ---
 
 ## Workspace Architecture
