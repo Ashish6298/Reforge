@@ -368,6 +368,26 @@ MISS: cached output failed integrity verification
 
 ---
 
+## Correctness Test Matrix
+
+DCC enforces an exhaustive 11-dimension correctness test matrix to guarantee that no code path can bypass cache integrity, identity isolation, or invalidation semantics:
+
+| # | Correctness Dimension | Invariant & Verified Behavior |
+|---|------------------------|-------------------------------|
+| 1 | **Same inputs** | Cold run computes & stores; second run reports `Hit` (0 ms exec), skips process execution, and restores output files. |
+| 2 | **Different input contents** | Altering file bytes modifies input digest, yields a different `CacheKey`, reports `Miss`, and computes/stores fresh outputs. |
+| 3 | **Different paths** | Same file bytes at distinct paths derive distinct keys and prevent improper cross-path cache reuse. |
+| 4 | **Different arguments** | Changing flags or arguments produces distinct computation keys and isolated cached entries. |
+| 5 | **Different environment** | Changing declared environment variables alters keys without leaking or fragmenting ambient variables. |
+| 6 | **Different tool version** | Differing compiler/tool versions or executable digests invalidate cache and produce isolated results. |
+| 7 | **Different platform** | Target triple / OS / arch mismatches derive distinct keys and avoid runtime ABI issues. |
+| 8 | **Missing output** | Commands failing to produce declared outputs trigger strict validation errors and reject storage. |
+| 9 | **Modified cached output** | Tampered or bitrotted CAS blobs fail checksum verification, are quarantined to `.corrupted`, report `MissReason::CorruptedCache`, and recompute. |
+| 10 | **Corrupted metadata** | Malformed or identity-mismatched entry JSON is detected, purged, reported as corrupted miss, and self-healed. |
+| 11 | **Partial cache** | Entries with missing CAS object references fail restoration gracefully, report corrupted miss, recompute, and repair storage. |
+
+---
+
 ## Workspace Architecture
 
 - **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`), streaming hashing, and canonical key derivation.

@@ -1203,3 +1203,280 @@ fn test_milestone_5_6_explainable_cache_misses_comprehensive() {
     let msg_corrupted = format!("{}", miss_corrupted);
     assert!(msg_corrupted.contains("Corrupted cache entry"));
 }
+
+#[test]
+fn test_milestone_5_7_correctness_test_matrix_comprehensive() {
+    let env = TestEnv::new().unwrap();
+
+    #[cfg(windows)]
+    let (cmd, base_args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "Copy-Item input.txt -Destination output.txt; Write-Output 'RUN_SUCCESS'".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd, base_args) = (
+        "sh",
+        vec![
+            "-c".to_string(),
+            "cp input.txt output.txt && echo 'RUN_SUCCESS'".to_string(),
+        ],
+    );
+
+    let engine = RunnerEngine::new(
+        &env.storage,
+        EngineOptions {
+            working_dir: env.workspace_dir.path().to_path_buf(),
+            ..Default::default()
+        },
+    );
+
+    // ==========================================
+    // DIMENSION 1: SAME INPUTS -> CACHE HIT
+    // ==========================================
+    env.create_input_file("input.txt", b"BASELINE_PAYLOAD_V1")
+        .unwrap();
+
+    let spec_base = dcc_runner::CommandSpec::builder(cmd)
+        .args(base_args.clone())
+        .current_dir(env.workspace_dir.path())
+        .input_path("input.txt")
+        .output_path("output.txt")
+        .tool_version("compiler", "1.0.0")
+        .env("BUILD_MODE", "debug")
+        .platform(dcc_core::PlatformConstraints::new("linux", "x86_64"))
+        .build()
+        .unwrap();
+
+    let res_base = engine.execute_command(&spec_base).unwrap();
+    assert_eq!(res_base.status, ExecutionStatus::Miss);
+    let key_base = res_base.key;
+
+    // Second run with identical inputs & spec -> HIT
+    fs::remove_file(env.workspace_dir.path().join("output.txt")).unwrap();
+    let res_hit = engine.execute_command(&spec_base).unwrap();
+    assert_eq!(res_hit.status, ExecutionStatus::Hit);
+    assert_eq!(res_hit.key, key_base);
+    assert_eq!(
+        env.read_output_file("output.txt").unwrap(),
+        b"BASELINE_PAYLOAD_V1"
+    );
+
+    // ==========================================
+    // DIMENSION 2: DIFFERENT INPUT CONTENTS -> MISS & DIFFERENT KEY
+    // ==========================================
+    env.create_input_file("input.txt", b"MODIFIED_PAYLOAD_V2")
+        .unwrap();
+    let res_diff_content = engine.execute_command(&spec_base).unwrap();
+    assert_eq!(res_diff_content.status, ExecutionStatus::Miss);
+    assert_ne!(res_diff_content.key, key_base);
+    assert_eq!(
+        env.read_output_file("output.txt").unwrap(),
+        b"MODIFIED_PAYLOAD_V2"
+    );
+
+    // Reset input file to baseline for subsequent comparisons
+    env.create_input_file("input.txt", b"BASELINE_PAYLOAD_V1")
+        .unwrap();
+
+    // ==========================================
+    // DIMENSION 3: DIFFERENT PATHS -> MISS & DIFFERENT KEY
+    // ==========================================
+    env.create_input_file("other_input.txt", b"BASELINE_PAYLOAD_V1")
+        .unwrap();
+    let spec_diff_path = dcc_runner::CommandSpec::builder(cmd)
+        .args(base_args.clone())
+        .current_dir(env.workspace_dir.path())
+        .input_path("other_input.txt")
+        .output_path("output.txt")
+        .tool_version("compiler", "1.0.0")
+        .env("BUILD_MODE", "debug")
+        .platform(dcc_core::PlatformConstraints::new("linux", "x86_64"))
+        .build()
+        .unwrap();
+
+    let res_diff_path = engine.execute_command(&spec_diff_path).unwrap();
+    assert_eq!(res_diff_path.status, ExecutionStatus::Miss);
+    assert_ne!(res_diff_path.key, key_base);
+
+    // ==========================================
+    // DIMENSION 4: DIFFERENT ARGUMENTS -> MISS & DIFFERENT KEY
+    // ==========================================
+    #[cfg(windows)]
+    let diff_args = vec![
+        "-Command".to_string(),
+        "Copy-Item input.txt -Destination output.txt; Write-Output 'RUN_ALT'".to_string(),
+    ];
+    #[cfg(not(windows))]
+    let diff_args = vec![
+        "-c".to_string(),
+        "cp input.txt output.txt && echo 'RUN_ALT'".to_string(),
+    ];
+
+    let spec_diff_args = dcc_runner::CommandSpec::builder(cmd)
+        .args(diff_args)
+        .current_dir(env.workspace_dir.path())
+        .input_path("input.txt")
+        .output_path("output.txt")
+        .tool_version("compiler", "1.0.0")
+        .env("BUILD_MODE", "debug")
+        .platform(dcc_core::PlatformConstraints::new("linux", "x86_64"))
+        .build()
+        .unwrap();
+
+    let res_diff_args = engine.execute_command(&spec_diff_args).unwrap();
+    assert_eq!(res_diff_args.status, ExecutionStatus::Miss);
+    assert_ne!(res_diff_args.key, key_base);
+
+    // ==========================================
+    // DIMENSION 5: DIFFERENT ENVIRONMENT -> MISS & DIFFERENT KEY
+    // ==========================================
+    let spec_diff_env = dcc_runner::CommandSpec::builder(cmd)
+        .args(base_args.clone())
+        .current_dir(env.workspace_dir.path())
+        .input_path("input.txt")
+        .output_path("output.txt")
+        .tool_version("compiler", "1.0.0")
+        .env("BUILD_MODE", "release") // changed from debug
+        .platform(dcc_core::PlatformConstraints::new("linux", "x86_64"))
+        .build()
+        .unwrap();
+
+    let res_diff_env = engine.execute_command(&spec_diff_env).unwrap();
+    assert_eq!(res_diff_env.status, ExecutionStatus::Miss);
+    assert_ne!(res_diff_env.key, key_base);
+
+    // ==========================================
+    // DIMENSION 6: DIFFERENT TOOL VERSION -> MISS & DIFFERENT KEY
+    // ==========================================
+    let spec_diff_tool = dcc_runner::CommandSpec::builder(cmd)
+        .args(base_args.clone())
+        .current_dir(env.workspace_dir.path())
+        .input_path("input.txt")
+        .output_path("output.txt")
+        .tool_version("compiler", "2.0.0") // changed version
+        .env("BUILD_MODE", "debug")
+        .platform(dcc_core::PlatformConstraints::new("linux", "x86_64"))
+        .build()
+        .unwrap();
+
+    let res_diff_tool = engine.execute_command(&spec_diff_tool).unwrap();
+    assert_eq!(res_diff_tool.status, ExecutionStatus::Miss);
+    assert_ne!(res_diff_tool.key, key_base);
+
+    // ==========================================
+    // DIMENSION 7: DIFFERENT PLATFORM -> MISS & DIFFERENT KEY
+    // ==========================================
+    let spec_diff_platform = dcc_runner::CommandSpec::builder(cmd)
+        .args(base_args)
+        .current_dir(env.workspace_dir.path())
+        .input_path("input.txt")
+        .output_path("output.txt")
+        .tool_version("compiler", "1.0.0")
+        .env("BUILD_MODE", "debug")
+        .platform(dcc_core::PlatformConstraints::new("windows", "x86_64")) // changed os
+        .build()
+        .unwrap();
+
+    let res_diff_platform = engine.execute_command(&spec_diff_platform).unwrap();
+    assert_eq!(res_diff_platform.status, ExecutionStatus::Miss);
+    assert_ne!(res_diff_platform.key, key_base);
+
+    // ==========================================
+    // DIMENSION 8: MISSING OUTPUT ON EXECUTION -> STRICT VALIDATION ERROR
+    // ==========================================
+    #[cfg(windows)]
+    let (no_out_cmd, no_out_args) = (
+        "powershell.exe",
+        vec!["-Command".to_string(), "Write-Output 'NOOP'".to_string()],
+    );
+    #[cfg(not(windows))]
+    let (no_out_cmd, no_out_args) = ("echo", vec!["NOOP".to_string()]);
+
+    let spec_missing_out = dcc_runner::CommandSpec::builder(no_out_cmd)
+        .args(no_out_args)
+        .current_dir(env.workspace_dir.path())
+        .input_path("input.txt")
+        .output_path("non_existent_output.txt")
+        .build()
+        .unwrap();
+
+    let err_missing_out = engine.execute_command(&spec_missing_out);
+    assert!(
+        err_missing_out.is_err(),
+        "Command execution omitting required output file must return ValidationError"
+    );
+
+    // ==========================================
+    // DIMENSION 9: MODIFIED CACHED OUTPUT (INTEGRITY FAILURE) -> RECOMPUTE & HEAL
+    // ==========================================
+    // Restore base cache
+    let entry = env.storage.get_entry(&key_base).unwrap().unwrap();
+    let blob_digest = &entry.outputs[0].digest;
+    let blob_path = env.storage.object_path(blob_digest);
+    assert!(blob_path.exists());
+
+    // Tamper with cached CAS object byte
+    fs::write(&blob_path, b"CORRUPTED_CAS_DATA").unwrap();
+
+    // Executing spec_base must detect the corruption, quarantine it, and safely fall back to recomputation
+    fs::remove_file(env.workspace_dir.path().join("output.txt")).unwrap();
+    let res_corrupted_blob = engine.execute_command(&spec_base).unwrap();
+    assert_eq!(res_corrupted_blob.status, ExecutionStatus::Miss);
+    assert!(
+        matches!(
+            res_corrupted_blob.miss_reason,
+            Some(dcc_core::MissReason::CorruptedCache { .. })
+        ),
+        "Expected CorruptedCache miss reason"
+    );
+    assert_eq!(
+        env.read_output_file("output.txt").unwrap(),
+        b"BASELINE_PAYLOAD_V1"
+    );
+
+    // ==========================================
+    // DIMENSION 10: CORRUPTED METADATA -> IDENTITY MISMATCH DETECTION & HEAL
+    // ==========================================
+    // Fetch newly stored entry after recomputation
+    let entry_path = env.storage.entry_path(&key_base);
+    assert!(entry_path.exists());
+
+    // Corrupt entry metadata JSON (e.g. invalidate inner computation tool name)
+    let entry_json = fs::read_to_string(&entry_path).unwrap();
+    let corrupted_json = entry_json.replace("\"compiler\"", "\"tampered_tool\"");
+    assert_ne!(entry_json, corrupted_json);
+    fs::write(&entry_path, corrupted_json).unwrap();
+
+    fs::remove_file(env.workspace_dir.path().join("output.txt")).unwrap();
+    let res_corrupted_meta = engine.execute_command(&spec_base).unwrap();
+    assert_eq!(res_corrupted_meta.status, ExecutionStatus::Miss);
+    assert!(matches!(
+        res_corrupted_meta.miss_reason,
+        Some(dcc_core::MissReason::CorruptedCache { .. })
+    ));
+
+    // ==========================================
+    // DIMENSION 11: PARTIAL CACHE (MISSING CAS OBJECT REFERENCED BY ENTRY)
+    // ==========================================
+    let entry_fresh = env.storage.get_entry(&key_base).unwrap().unwrap();
+    let blob_fresh = &entry_fresh.outputs[0].digest;
+    let blob_fresh_path = env.storage.object_path(blob_fresh);
+    if blob_fresh_path.exists() {
+        fs::remove_file(blob_fresh_path).unwrap();
+    }
+
+    fs::remove_file(env.workspace_dir.path().join("output.txt")).unwrap();
+    let res_partial_cache = engine.execute_command(&spec_base).unwrap();
+    assert_eq!(res_partial_cache.status, ExecutionStatus::Miss);
+    assert!(matches!(
+        res_partial_cache.miss_reason,
+        Some(dcc_core::MissReason::CorruptedCache { .. })
+    ));
+    assert_eq!(
+        env.read_output_file("output.txt").unwrap(),
+        b"BASELINE_PAYLOAD_V1"
+    );
+}
