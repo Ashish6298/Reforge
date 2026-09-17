@@ -37,9 +37,11 @@ fn main() -> Result<()> {
         Commands::Stats => handle_stats(&storage, cli.json)?,
         Commands::Verify => handle_verify(&storage, cli.json)?,
         Commands::Clean { key } => handle_clean(&storage, key.as_deref(), cli.json)?,
-        Commands::Prune { max_size, strategy } => {
-            handle_prune(&storage, max_size.as_deref(), &strategy, cli.json)?
-        }
+        Commands::Prune {
+            max_size,
+            strategy,
+            dry_run,
+        } => handle_prune(&storage, max_size.as_deref(), &strategy, dry_run, cli.json)?,
         Commands::Doctor => handle_doctor(&storage, cli.json)?,
     }
 
@@ -342,6 +344,7 @@ fn handle_prune(
     storage: &CasStorage,
     max_size_str: Option<&str>,
     strategy_str: &str,
+    dry_run: bool,
     json: bool,
 ) -> Result<()> {
     let pruner = Pruner::new(storage);
@@ -360,18 +363,24 @@ fn handle_prune(
             .with_context(|| format!("Invalid max_size value '{}'", s))?;
         pruner.evict_with_strategy(strategy, size.as_bytes())?
     } else {
-        pruner.prune_unreferenced_objects()?
+        pruner.prune_with_options(dry_run)?
     };
 
     if json {
         println!("{}", serde_json::to_string_pretty(&result)?);
     } else {
+        let prefix = if dry_run {
+            "Dry-run prune complete"
+        } else {
+            "Prune complete"
+        };
         let strat_label = result
             .strategy
             .map(|s| format!(" (strategy: {:?})", s))
             .unwrap_or_default();
         println!(
-            "Prune complete{}: deleted {} entries, {} unreferenced objects, freed {:.2} MB.",
+            "{}{}: deleted {} entries, {} unreferenced objects, freed {:.2} MB.",
+            prefix,
             strat_label,
             result.deleted_entries,
             result.deleted_objects,

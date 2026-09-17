@@ -195,6 +195,11 @@ impl Cache {
         Pruner::new(&self.storage)
     }
 
+    /// Convenience method to garbage-collect all unreferenced objects.
+    pub fn prune(&self) -> Result<crate::eviction::EvictionResult> {
+        self.pruner().prune_unreferenced_objects()
+    }
+
     fn sanitize_path(&self, base_dir: &Path, rel_path: &str) -> Result<PathBuf> {
         let norm = rel_path.replace('\\', "/");
         if norm.starts_with('/') || norm.starts_with("../") || norm.contains("/../") || norm == ".."

@@ -55,11 +55,9 @@ impl<'a> Pruner<'a> {
         Self { storage }
     }
 
-    /// Prune CAS objects that are no longer referenced by any active cache entry.
-    pub fn prune_unreferenced_objects(&self) -> Result<EvictionResult> {
-        let mut referenced_digests = HashSet::new();
-
-        // 1. Gather all digests from valid entries
+    /// Collect all digests referenced by valid cache entries (outputs, stdout, stderr).
+    pub fn referenced_digests(&self) -> Result<HashSet<String>> {
+        let mut referenced = HashSet::new();
         let entries_dir = self.storage.entries_dir();
         if entries_dir.exists() {
             for file_entry in WalkDir::new(entries_dir).into_iter().filter_map(|e| e.ok()) {
@@ -69,40 +67,66 @@ impl<'a> Pruner<'a> {
                     if let Ok(file) = fs::File::open(file_entry.path()) {
                         if let Ok(entry) = serde_json::from_reader::<_, CacheEntry>(file) {
                             for out in entry.outputs {
-                                referenced_digests.insert(out.digest.as_str().to_string());
+                                referenced.insert(out.digest.as_str().to_string());
                             }
                             if let Some(stdout_digest) = entry.metadata.execution.stdout_digest {
-                                referenced_digests.insert(stdout_digest.as_str().to_string());
+                                referenced.insert(stdout_digest.as_str().to_string());
                             }
                             if let Some(stderr_digest) = entry.metadata.execution.stderr_digest {
-                                referenced_digests.insert(stderr_digest.as_str().to_string());
+                                referenced.insert(stderr_digest.as_str().to_string());
                             }
                         }
                     }
                 }
             }
         }
+        Ok(referenced)
+    }
 
-        // 2. Scan all objects and delete those not referenced
-        let mut result = EvictionResult::default();
+    /// Identify all unreferenced/orphaned CAS objects without deleting them.
+    /// Returns a list of (digest_str, size_bytes, path).
+    pub fn find_unreferenced_objects(&self) -> Result<Vec<(String, u64, PathBuf)>> {
+        let referenced = self.referenced_digests()?;
+        let mut unreferenced = Vec::new();
         let objects_dir = self.storage.objects_dir();
         if objects_dir.exists() {
             for obj in WalkDir::new(objects_dir).into_iter().filter_map(|e| e.ok()) {
                 if obj.file_type().is_file() {
                     let file_name = obj.file_name().to_string_lossy().to_string();
-                    if !referenced_digests.contains(&file_name) {
-                        if let Ok(meta) = obj.metadata() {
-                            result.freed_bytes += meta.len();
-                        }
-                        if fs::remove_file(obj.path()).is_ok() {
-                            result.deleted_objects += 1;
-                        }
+                    if !referenced.contains(&file_name) {
+                        let size = obj.metadata().map(|m| m.len()).unwrap_or(0);
+                        unreferenced.push((file_name, size, obj.path().to_path_buf()));
                     }
                 }
             }
         }
+        Ok(unreferenced)
+    }
+
+    /// Convenience alias for pruning unreferenced objects.
+    pub fn prune(&self) -> Result<EvictionResult> {
+        self.prune_unreferenced_objects()
+    }
+
+    /// Prune unreferenced objects with dry-run support.
+    pub fn prune_with_options(&self, dry_run: bool) -> Result<EvictionResult> {
+        let unreferenced = self.find_unreferenced_objects()?;
+        let mut result = EvictionResult::default();
+
+        for (_digest, size, path) in unreferenced {
+            result.freed_bytes += size;
+            result.deleted_objects += 1;
+            if !dry_run {
+                let _ = fs::remove_file(path);
+            }
+        }
 
         Ok(result)
+    }
+
+    /// Prune CAS objects that are no longer referenced by any active cache entry.
+    pub fn prune_unreferenced_objects(&self) -> Result<EvictionResult> {
+        self.prune_with_options(false)
     }
 
     /// Enforce a maximum cache size using the default LRU strategy.
@@ -400,5 +424,116 @@ mod tests {
         assert_eq!(res.deleted_entries, 1);
         assert_eq!(res.deleted_objects, 1);
         assert!(storage.get_entry(&key).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_garbage_collection_prune_unreferenced_and_dry_run() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let storage = CasStorage::new(StorageConfig::new(temp_dir.path())).unwrap();
+        let pruner = Pruner::new(&storage);
+
+        // Store 2 CAS objects
+        let (d1, _s1) = storage.store_object_bytes(b"referenced payload 1").unwrap();
+        let (d2, s2) = storage.store_object_bytes(b"orphaned payload 2").unwrap();
+
+        // Create an entry that only references d1
+        let comp = Computation::builder("op", "cmd").build().unwrap();
+        let key = comp.compute_key().unwrap();
+        let entry = CacheEntry::new(
+            key,
+            comp,
+            vec![OutputManifestItem {
+                path: "out1.txt".to_string(),
+                digest: d1.clone(),
+                size: 20,
+                is_executable: Some(false),
+            }],
+            ExecutionMetadata::default(),
+        );
+        storage.store_entry(&entry).unwrap();
+
+        // Verify find_unreferenced_objects finds exactly d2
+        let unref = pruner.find_unreferenced_objects().unwrap();
+        assert_eq!(unref.len(), 1);
+        assert_eq!(unref[0].0, d2.as_str());
+        assert_eq!(unref[0].1, s2);
+
+        // Dry-run prune must not delete d2
+        let dry_res = pruner.prune_with_options(true).unwrap();
+        assert_eq!(dry_res.deleted_objects, 1);
+        assert_eq!(dry_res.freed_bytes, s2);
+        assert!(storage.has_object(&d2));
+
+        // Real prune must delete d2 and keep d1
+        let prune_res = pruner.prune_unreferenced_objects().unwrap();
+        assert_eq!(prune_res.deleted_objects, 1);
+        assert_eq!(prune_res.freed_bytes, s2);
+        assert!(!storage.has_object(&d2));
+        assert!(storage.has_object(&d1));
+    }
+
+    #[test]
+    fn test_garbage_collection_preserves_shared_objects_and_streams() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let storage = CasStorage::new(StorageConfig::new(temp_dir.path())).unwrap();
+        let pruner = Pruner::new(&storage);
+
+        // Shared blob referenced by entry 1 and entry 2
+        let (shared_digest, _) = storage.store_object_bytes(b"shared artifact blob").unwrap();
+        let (stdout_digest, _) = storage.store_object_bytes(b"stdout capture").unwrap();
+
+        // Entry 1
+        let comp1 = Computation::builder("op1", "cmd1").build().unwrap();
+        let key1 = comp1.compute_key().unwrap();
+        let entry1 = CacheEntry::new(
+            key1.clone(),
+            comp1,
+            vec![OutputManifestItem {
+                path: "out.bin".to_string(),
+                digest: shared_digest.clone(),
+                size: 20,
+                is_executable: Some(false),
+            }],
+            ExecutionMetadata {
+                exit_code: 0,
+                execution_time_ms: 10,
+                stdout_digest: Some(stdout_digest.clone()),
+                stderr_digest: None,
+            },
+        );
+        storage.store_entry(&entry1).unwrap();
+
+        // Entry 2
+        let comp2 = Computation::builder("op2", "cmd2").build().unwrap();
+        let key2 = comp2.compute_key().unwrap();
+        let entry2 = CacheEntry::new(
+            key2.clone(),
+            comp2,
+            vec![OutputManifestItem {
+                path: "different_path.bin".to_string(),
+                digest: shared_digest.clone(),
+                size: 20,
+                is_executable: Some(false),
+            }],
+            ExecutionMetadata::default(),
+        );
+        storage.store_entry(&entry2).unwrap();
+
+        // Initial prune: nothing unreferenced
+        let res0 = pruner.prune_unreferenced_objects().unwrap();
+        assert_eq!(res0.deleted_objects, 0);
+
+        // Delete entry 1: shared_digest is still referenced by entry 2! stdout_digest becomes orphaned
+        storage.delete_entry(&key1).unwrap();
+        let res1 = pruner.prune_unreferenced_objects().unwrap();
+        assert_eq!(res1.deleted_objects, 1); // stdout_digest pruned
+        assert!(storage.has_object(&shared_digest));
+        assert!(!storage.has_object(&stdout_digest));
+
+        // Delete entry 2: now shared_digest becomes orphaned and is pruned
+        storage.delete_entry(&key2).unwrap();
+        let res2 = pruner.prune_unreferenced_objects().unwrap();
+        assert_eq!(res2.deleted_objects, 1); // shared_digest pruned
+        assert!(!storage.has_object(&shared_digest));
     }
 }

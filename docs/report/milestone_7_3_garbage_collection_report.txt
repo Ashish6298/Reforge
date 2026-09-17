@@ -1,0 +1,88 @@
+================================================================================
+DEVELOPER COMPUTATION CACHE (DCC) — MILESTONE 7.3 ENGINEERING & VERIFICATION REPORT
+================================================================================
+Date: 2026-09-17
+Milestone: Milestone 7.3 — Garbage Collection (`prune` unreferenced objects)
+Status: COMPLETED & VERIFIED
+Workspace Test Suite: 103 / 103 Passed (100% Pass Rate)
+Zero Warnings Policy: Enforced & Verified (Clippy & Fmt clean)
+================================================================================
+
+1. EXECUTIVE SUMMARY & OBJECTIVE
+--------------------------------------------------------------------------------
+Milestone 7.3 implements the automated Garbage Collection subsystem (`prune`) for the
+Developer Computation Cache (DCC). In a content-addressed storage (CAS) architecture,
+computation metadata records (`CacheEntry`) point to binary blobs by cryptographic digest.
+When entries are deleted, overwritten, or evicted under capacity limits, physical CAS objects
+can become orphaned (unreferenced).
+
+Milestone 7.3 delivers a robust, safe garbage collection mechanism that:
+  - Traverses active computation metadata across all storage shards to construct a complete
+    reachability graph of all referenced object digests.
+  - Automatically identifies all orphaned CAS objects no longer pointed to by any valid entry.
+  - Protects shared deduplicated payloads and execution stream captures (`stdout`/`stderr`).
+  - Supports non-destructive `--dry-run` inspection of unreferenced objects and byte savings.
+  - Safely reclaims storage space while preserving active artifacts.
+
+--------------------------------------------------------------------------------
+2. ARCHITECTURAL DESIGN & IMPLEMENTATION
+--------------------------------------------------------------------------------
+
+1. Reachability & Reference Analysis (`crates/cache-storage/src/eviction.rs`):
+   - `Pruner::referenced_digests(&self) -> Result<HashSet<String>>`:
+     * Traverses all 256 entry shards in `.dcc_cache/entries/`.
+     * Aggregates all output manifest item digests (`entry.outputs[*].digest`).
+     * Aggregates standard output capture digests (`entry.metadata.execution.stdout_digest`).
+     * Aggregates standard error capture digests (`entry.metadata.execution.stderr_digest`).
+   - `Pruner::find_unreferenced_objects(&self) -> Result<Vec<(String, u64, PathBuf)>>`:
+     * Scans all CAS objects in `.dcc_cache/objects/` across 256 shards.
+     * Computes difference between physical files on disk and the active referenced set.
+     * Returns a detailed list of unreferenced object digests, sizes, and file paths.
+
+2. Garbage Collector Execution Engine:
+   - `Pruner::prune_with_options(&self, dry_run: bool) -> Result<EvictionResult>`:
+     * Calculates candidate unreferenced objects and cumulative freed bytes.
+     * If `dry_run == true`, computes metrics without modifying the filesystem.
+     * If `dry_run == false`, removes orphaned object files and safely reclaims disk space.
+   - `Pruner::prune_unreferenced_objects(&self) -> Result<EvictionResult>` / `Pruner::prune(&self)`:
+     * Primary entrypoints for active garbage collection.
+   - Convenience bindings on storage abstractions:
+     * `CasStorage::prune_unreferenced(&self) -> Result<EvictionResult>`
+     * `Cache::prune(&self) -> Result<EvictionResult>`
+
+3. CLI Integration (`crates/cache-cli`):
+   - Extended `dcc prune` with `--dry-run` flag:
+     * `dcc prune`: Purges all unreferenced CAS objects.
+     * `dcc prune --dry-run`: Reports unreferenced objects and reclaimable bytes without deleting.
+     * `dcc prune --max-size "2 GB" --strategy lru`: Combines entry eviction and unreferenced blob GC.
+
+--------------------------------------------------------------------------------
+3. TEST MATRIX & VERIFICATION SUITE
+--------------------------------------------------------------------------------
+
+1. Unit Tests (`crates/cache-storage/src/eviction.rs`):
+   - `test_garbage_collection_prune_unreferenced_and_dry_run`:
+     * Validates `find_unreferenced_objects` against a mix of referenced and orphaned objects.
+     * Verifies `dry_run` reports accurate candidate counts/bytes without removing files.
+     * Verifies active prune deletes orphaned objects while keeping referenced objects 100% intact.
+   - `test_garbage_collection_preserves_shared_objects_and_streams`:
+     * Validates deduplication reference counting: when multiple entries reference the same CAS blob,
+       deleting one entry preserves the shared object.
+     * Verifies that deleting the final referencing entry enables garbage collection to safely reclaim it.
+     * Verifies that stdout/stderr execution stream captures are properly tracked and preserved.
+
+2. Integration Tests (`crates/cache-storage/tests/storage_suite.rs`):
+   - `test_storage_suite_garbage_collection_prune_unreferenced_lifecycle`:
+     * End-to-end multi-stage garbage collection lifecycle covering empty cache, orphan insertion,
+       entry association, dry-run inspection, active GC, entry deletion, and secondary GC.
+
+--------------------------------------------------------------------------------
+4. VERIFICATION COMMANDS & OUTPUT
+--------------------------------------------------------------------------------
+- `cargo test --workspace` -> Passed 103/103 tests (100% pass rate)
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` -> Passed (0 warnings)
+- `cargo fmt --all -- --check` -> Passed (Clean formatting)
+
+================================================================================
+CONCLUSION: Milestone 7.3 Garbage Collection is fully implemented, verified, and ready for production.
+================================================================================

@@ -485,6 +485,20 @@ DCC avoids complex, brittle heuristics in favor of deterministic, understandable
   * `dcc prune --strategy fifo --max-size "1 GB"`
   * `dcc prune --strategy lfu --max-size "500 MB"`
 
+### Garbage Collection (Milestone 7.3)
+
+Automatic and manual removal of CAS objects no longer referenced by valid cache entries:
+
+- **Reachability Graph Analysis**: Traverses all entry shards and aggregates referenced output blobs and execution stream captures (`stdout`/`stderr`).
+- **Orphan Identification**: Discovers all unreferenced physical files in `.dcc_cache/objects/`.
+- **Safe Shared Blob Retention**: Protects deduplicated payloads referenced by other active cache entries.
+- **Dry-Run Inspection**: Allows inspecting reclaimable files and byte counts before performing deletions (`dcc prune --dry-run`).
+- **Convenience API**: `Pruner::prune_unreferenced_objects()`, `CasStorage::prune_unreferenced()`, `Cache::prune()`.
+- **CLI Commands**:
+  * `dcc prune`
+  * `dcc prune --dry-run`
+  * `dcc prune --dry-run --max-size "1 GB"`
+
 ---
 
 ## Workspace Architecture

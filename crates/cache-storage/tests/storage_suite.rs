@@ -505,3 +505,59 @@ fn test_storage_suite_eviction_strategy_lfu_and_policy() {
     assert!(storage.get_entry(&key1).unwrap().is_some());
     assert!(storage.get_entry(&key2).unwrap().is_none());
 }
+
+#[test]
+fn test_storage_suite_garbage_collection_prune_unreferenced_lifecycle() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let storage = CasStorage::new(StorageConfig::new(temp_dir.path())).unwrap();
+    let pruner = Pruner::new(&storage);
+
+    // 1. Initially empty cache has 0 unreferenced objects
+    let res0 = pruner.prune_unreferenced_objects().unwrap();
+    assert_eq!(res0.deleted_objects, 0);
+    assert_eq!(res0.freed_bytes, 0);
+
+    // 2. Put 3 objects directly into CAS (orphaned)
+    let (d1, s1) = storage.store_object_bytes(b"orphan 1").unwrap();
+    let (d2, s2) = storage.store_object_bytes(b"orphan 2").unwrap();
+    let (d3, s3) = storage.store_object_bytes(b"active artifact").unwrap();
+
+    // 3. Create entry referencing only d3
+    let comp = Computation::builder("op", "cmd").build().unwrap();
+    let key = comp.compute_key().unwrap();
+    let entry = CacheEntry::new(
+        key.clone(),
+        comp,
+        vec![dcc_core::OutputManifestItem {
+            path: "active.txt".to_string(),
+            digest: d3.clone(),
+            size: s3,
+            is_executable: Some(false),
+        }],
+        ExecutionMetadata::default(),
+    );
+    storage.store_entry(&entry).unwrap();
+
+    // 4. Dry-run prune identifies d1 and d2 (s1 + s2 bytes)
+    let dry_run = pruner.prune_with_options(true).unwrap();
+    assert_eq!(dry_run.deleted_objects, 2);
+    assert_eq!(dry_run.freed_bytes, s1 + s2);
+    assert!(storage.has_object(&d1));
+    assert!(storage.has_object(&d2));
+    assert!(storage.has_object(&d3));
+
+    // 5. Real prune deletes d1 and d2, keeping d3
+    let gc_res = pruner.prune_unreferenced_objects().unwrap();
+    assert_eq!(gc_res.deleted_objects, 2);
+    assert_eq!(gc_res.freed_bytes, s1 + s2);
+    assert!(!storage.has_object(&d1));
+    assert!(!storage.has_object(&d2));
+    assert!(storage.has_object(&d3));
+
+    // 6. Delete the entry -> d3 becomes unreferenced
+    storage.delete_entry(&key).unwrap();
+    let gc_res2 = storage.prune_unreferenced().unwrap();
+    assert_eq!(gc_res2.deleted_objects, 1);
+    assert_eq!(gc_res2.freed_bytes, s3);
+    assert!(!storage.has_object(&d3));
+}

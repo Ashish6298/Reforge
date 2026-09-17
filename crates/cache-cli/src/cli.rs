@@ -61,6 +61,12 @@ pub enum Commands {
             help = "Eviction strategy: lru (least recently used), fifo (oldest created), lfu (least frequently used)"
         )]
         strategy: String,
+
+        #[arg(
+            long,
+            help = "Perform a dry run without deleting any entries or objects"
+        )]
+        dry_run: bool,
     },
 
     #[command(about = "Diagnose cache health, environment, and permissions")]

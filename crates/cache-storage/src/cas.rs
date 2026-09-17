@@ -360,6 +360,12 @@ impl CasStorage {
         let stats = self.stats()?;
         Ok((stats.largest_object_size_bytes, stats.largest_object_path))
     }
+
+    /// Prune unreferenced objects no longer referenced by any active cache entry.
+    pub fn prune_unreferenced(&self) -> Result<crate::eviction::EvictionResult> {
+        let pruner = crate::eviction::Pruner::new(self);
+        pruner.prune_unreferenced_objects()
+    }
 }
 
 fn uuid_like_nonce() -> String {
