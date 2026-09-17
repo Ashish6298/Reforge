@@ -1,3 +1,79 @@
+//! # DCC Generic Developer Integration API & Contract
+//!
+//! This crate defines the generic developer integration contract for embedding
+//! content-addressed computation caching into custom build systems, code generators,
+//! linters, and data transformation tools.
+//!
+//! ## Integration Contract
+//!
+//! ### 1. How to Declare Inputs
+//! Inputs represent all filesystem dependencies required to produce the computation outputs.
+//! Inputs must be declared with relative paths (or normalized workspace paths) and their content digests:
+//! ```rust,ignore
+//! let comp = Computation::builder()
+//!     .operation("codegen")
+//!     .command("generator")
+//!     .input("schema.json", Digest::hash_file(Path::new("schema.json"))?, file_size)
+//!     // Or automatically hash and resolve file metadata:
+//!     .input_path(Path::new("schema.json"))?
+//!     .build()?;
+//! ```
+//!
+//! ### 2. How to Declare Outputs
+//! Outputs represent files or artifacts that the computation creates or modifies in the workspace:
+//! ```rust,ignore
+//! let comp = Computation::builder()
+//!     .operation("codegen")
+//!     .command("generator")
+//!     .output("models.rs", true) // required output
+//!     .build()?;
+//! ```
+//! When a cache HIT occurs, all declared outputs are atomically restored from the CAS store.
+//!
+//! ### 3. How to Declare Environment
+//! Environment variables that influence the computation must be explicitly declared in the computation model:
+//! ```rust,ignore
+//! let comp = Computation::builder()
+//!     .operation("build")
+//!     .command("compiler")
+//!     .env("TARGET", "x86_64-unknown-linux-gnu")
+//!     // Or capture from the ambient process environment if present:
+//!     .declared_env("RUST_LOG")
+//!     .build()?;
+//! ```
+//! Undeclared environment variables in the host OS do NOT participate in cache key generation,
+//! preventing accidental cache fragmentation.
+//!
+//! ### 4. How Cache Identity Works
+//! Cache keys (`CacheKey`) are computed deterministically from a canonical representation of the computation:
+//! - Canonical JSON serialization with strict alphabetical key ordering.
+//! - SHA-256 cryptographic digest over all declared inputs, command, arguments, environment, platform, and tool identity.
+//! - Path normalization: slashes are converted to forward slashes (`/`), and timestamp-invariance is preserved.
+//!
+//! ### 5. How Errors Work
+//! - **Configuration & Validation Errors**: Detected before execution (e.g. empty command, path traversals).
+//! - **Execution Failures**: Non-zero exit codes fail the execution. By default (`FailurePolicy::DoNotCache`),
+//!   failed computations are NOT cached.
+//! - **Corruption Errors**: If a CAS object fails integrity verification, DCC safely falls back to re-executing
+//!   the computation and quarantines the bad object.
+//!
+//! ### 6. How Cache Misses Work
+//! When a computation key is not found in the cache (or its entry has been evicted), a cold MISS occurs:
+//! 1. The engine executes the process in the workspace.
+//! 2. Declared outputs and stdout/stderr are captured, hashed, and stored into CAS.
+//! 3. A new `CacheEntry` record is atomically written to the `entries/` directory.
+//!
+//! When running with `--explain` or inspecting via `MissExplainer`, the engine details exactly *why* a miss occurred
+//! (e.g., specific input changed, command argument modified, or platform mismatch).
+//!
+//! ### 7. How to Disable or Bypass Caching
+//! Caching can be controlled at runtime via `CachePolicy`:
+//! - `CachePolicy::ReadWrite` (Default): Normal caching (lookup on start, store on miss).
+//! - `CachePolicy::ReadOnly`: Only read from cache; do not store new results.
+//! - `CachePolicy::WriteOnly`: Always execute; overwrite/store new results in cache.
+//! - `CachePolicy::Bypass`: Completely bypass cache lookup and storage.
+//! - `CachePolicy::ForceRecompute`: Force process re-execution but update the cache entry with new results.
+
 pub use dcc_core::{
     ByteSize, CacheEntry, CacheError, CacheKey, CacheMetadata, CachePolicy, CacheResult,
     Computation, ComputationBuilder, Digest, EventKind, EventSubscriber, ExecutionMetadata,

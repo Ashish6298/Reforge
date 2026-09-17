@@ -889,6 +889,50 @@ Each example illustrates:
 
 ---
 
+## Generic Developer Integration Contract
+
+When integrating DCC into custom build systems, compilers, linters, or code generators, adhere to the following contract rules:
+
+### 1. How to Declare Inputs
+- Declare all files whose contents affect the output of the computation.
+- Use relative or normalized workspace paths.
+- Each input requires a cryptographic content digest (`Digest::hash_file`) and byte size. Helpers like `.input_path(path)` compute this automatically.
+
+### 2. How to Declare Outputs
+- Declare all files or directories created or modified by the computation in the workspace.
+- Specify whether the output is strictly required (`required = true`).
+- On a cache **HIT**, DCC guarantees atomic restoration of all declared outputs from CAS.
+
+### 3. How to Declare Environment
+- Explicitly declare only the environment variables that alter the computation result (e.g. `TARGET_ARCH`, `OPTIMIZATION_LEVEL`, `DEBUG`).
+- Use `.declared_env("VAR_NAME")` to capture ambient variables if present.
+- Undeclared system environment variables are excluded from the canonical identity, preventing unnecessary cache fragmentation.
+
+### 4. How Cache Identity Works
+- Computation identity (`CacheKey`) is computed deterministically by canonical JSON serialization and SHA-256 hashing.
+- Path representations are normalized to `/` across all operating systems.
+- Input order and environment map order are sorted canonically, making key generation invariant to declaration sequence.
+
+### 5. How Errors Work
+- **Validation Errors**: Malformed configurations (empty command/operation, directory traversal outside workspace) return `CacheError::ValidationError` or `CacheError::PathTraversal` prior to execution.
+- **Execution Failures**: If a command exits with a non-zero code, DCC by default (`FailurePolicy::DoNotCache`) avoids caching the failed state.
+- **Integrity & Quarantine**: If stored CAS blobs fail checksum verification, DCC automatically marks the object as quarantined and safely re-computes the result.
+
+### 6. How Cache Misses Work
+- When no entry matches the `CacheKey`, DCC runs the computation command in the working directory.
+- Upon successful execution (exit code 0), DCC captures outputs and stdout/stderr into CAS, and records a new `CacheEntry`.
+- Use `--explain` or `MissExplainer` to inspect why a cache miss occurred (e.g., input modified, arguments altered, platform change).
+
+### 7. How to Disable or Bypass Caching
+- Configure the runtime `CachePolicy`:
+  * `CachePolicy::ReadWrite`: Default normal caching (lookup then store).
+  * `CachePolicy::ReadOnly`: Lookup cached results, but do not write new ones.
+  * `CachePolicy::WriteOnly`: Always execute, overwrite cache entries with fresh outputs.
+  * `CachePolicy::Bypass`: Completely skip cache lookups and writes.
+  * `CachePolicy::ForceRecompute`: Force process re-execution but update the cache with new results.
+
+---
+
 ## Quality Gates & Verification
 
 ```bash
