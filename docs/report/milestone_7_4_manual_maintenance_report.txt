@@ -1,0 +1,81 @@
+================================================================================
+DEVELOPER COMPUTATION CACHE (DCC) — MILESTONE 7.4 ENGINEERING & VERIFICATION REPORT
+================================================================================
+Date: 2026-09-17
+Milestone: Milestone 7.4 — Manual Maintenance (`clean`, `prune`, `verify`, `stats`)
+Status: COMPLETED & VERIFIED
+Workspace Test Suite: 104 / 104 Passed (100% Pass Rate)
+Zero Warnings Policy: Enforced & Verified (Clippy & Fmt clean)
+================================================================================
+
+1. EXECUTIVE SUMMARY & OBJECTIVE
+--------------------------------------------------------------------------------
+Milestone 7.4 delivers a comprehensive suite of manual and automated maintenance
+operations for the Developer Computation Cache (DCC). A production-grade developer
+tooling cache must give engineers and CI pipelines granular control over:
+  - `cache clean`: Clearing the entire cache or deleting specific computation keys.
+  - `cache prune`: Garbage collecting unreferenced CAS objects and enforcing size limits.
+  - `cache verify`: Cryptographically auditing physical CAS objects and metadata records.
+  - `cache stats`: Inspecting real-time storage metrics, object counts, and disk footprint.
+
+Milestone 7.4 ensures these operations are accessible both programmatically via the
+library API (`Cache`, `CasStorage`, `Pruner`) and via the CLI (`dcc cache <op>` and `dcc <op>`).
+
+--------------------------------------------------------------------------------
+2. ARCHITECTURAL DESIGN & IMPLEMENTATION
+--------------------------------------------------------------------------------
+
+1. Maintenance Operation Suite:
+
+   a. `clean` (`Cache::clean_all()`, `Cache::remove(&key)`, `CasStorage::clean_all()`):
+      - Removes all objects, metadata entries, and temporary directories.
+      - Reinitializes fresh sharded directory structures ready for immediate use.
+      - Supports selective removal of single computation keys by SHA-256 digest.
+
+   b. `prune` (`Cache::prune()`, `CasStorage::prune_unreferenced()`, `Pruner`):
+      - Traverses metadata entries across all 256 shards to construct reachability graph.
+      - Purges orphaned objects not referenced by any active computation.
+      - Supports dry-run analysis and LRU/FIFO/LFU capacity limits.
+
+   c. `verify` (`Cache::verify_all()`, `CasStorage::verify_all()`):
+      - Audits 100% of stored CAS objects by re-computing SHA-256 digests.
+      - Automatically quarantines corrupted objects with `.corrupted` extension.
+      - Validates JSON deserialization and metadata integrity for all cache entries.
+      - Returns structured `VerifyResult` with verified and corrupted counts.
+
+   d. `stats` (`Cache::stats()`, `StorageStats::collect()`):
+      - Aggregates total entries, total CAS objects, object bytes, and entry bytes.
+      - Identifies largest stored object and returns human-readable / JSON statistics.
+
+2. CLI Command Structure (`crates/cache-cli`):
+   - Dual interface support:
+     * `dcc cache clean [--key <key>]` and `dcc clean [--key <key>]`
+     * `dcc cache prune [--max-size <limit>] [--strategy <strat>] [--dry-run]` and `dcc prune ...`
+     * `dcc cache verify` and `dcc verify`
+     * `dcc cache stats` and `dcc stats`
+   - Both interfaces share identical logic, JSON output options, and error exit codes.
+
+--------------------------------------------------------------------------------
+3. TEST MATRIX & VERIFICATION SUITE
+--------------------------------------------------------------------------------
+
+1. Integration Tests (`crates/cache-storage/tests/storage_suite.rs`):
+   - `test_storage_suite_manual_maintenance_operations`:
+     * Step 1: Validates initial `stats` and `verify_all` on empty cache.
+     * Step 2: Populates cache with multi-entry computations and verifies storage.
+     * Step 3: Validates populated `stats` matching exact byte footprints.
+     * Step 4: Validates `verify_all` confirming 100% healthy objects and entries.
+     * Step 5: Inserts orphaned CAS object and executes `prune()`, confirming orphan removal while preserving active blobs.
+     * Step 6: Executes selective `remove(&key)`, verifying isolated key deletion.
+     * Step 7: Executes `clean_all()`, verifying complete wipe and directory reinitialization.
+
+--------------------------------------------------------------------------------
+4. VERIFICATION COMMANDS & OUTPUT
+--------------------------------------------------------------------------------
+- `cargo test --workspace` -> Passed 104/104 tests (100% pass rate)
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` -> Passed (0 warnings)
+- `cargo fmt --all -- --check` -> Passed (Clean formatting)
+
+================================================================================
+CONCLUSION: Milestone 7.4 Manual Maintenance is fully implemented, verified, and ready for production.
+================================================================================

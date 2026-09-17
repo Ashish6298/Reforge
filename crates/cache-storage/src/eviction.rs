@@ -113,11 +113,18 @@ impl<'a> Pruner<'a> {
         let unreferenced = self.find_unreferenced_objects()?;
         let mut result = EvictionResult::default();
 
-        for (_digest, size, path) in unreferenced {
-            result.freed_bytes += size;
-            result.deleted_objects += 1;
-            if !dry_run {
-                let _ = fs::remove_file(path);
+        for (digest_str, size, _path) in unreferenced {
+            if let Ok(digest) = dcc_core::Digest::new(&digest_str) {
+                if dry_run {
+                    result.freed_bytes += size;
+                    result.deleted_objects += 1;
+                } else {
+                    // Coordinate deletion with ObjectLock (non-blocking: skip if currently in use by an active reader)
+                    if self.storage.delete_object_safe(&digest, None)? {
+                        result.freed_bytes += size;
+                        result.deleted_objects += 1;
+                    }
+                }
             }
         }
 
@@ -189,17 +196,18 @@ impl<'a> Pruner<'a> {
 
         let mut current_size: u64 = entries_list.iter().map(|(_, _, s)| *s).sum();
 
-        for (path, _, size) in entries_list {
+        for (_path, entry, size) in entries_list {
             if current_size <= max_size_bytes {
                 break;
             }
-            if fs::remove_file(&path).is_ok() {
+            // Safely delete entry coordinating with its ComputationLock
+            if self.storage.delete_entry(&entry.key)? {
                 result.deleted_entries += 1;
                 current_size = current_size.saturating_sub(size);
             }
         }
 
-        // Clean unreferenced objects freed by entry removal
+        // Clean unreferenced objects freed by entry removal (with safe deletion locking)
         let unreferenced = self.prune_unreferenced_objects()?;
         result.deleted_objects += unreferenced.deleted_objects;
         result.freed_bytes += unreferenced.freed_bytes;

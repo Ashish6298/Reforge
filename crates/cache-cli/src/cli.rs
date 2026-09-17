@@ -71,6 +71,49 @@ pub enum Commands {
 
     #[command(about = "Diagnose cache health, environment, and permissions")]
     Doctor,
+
+    #[command(about = "Manage and maintain local computation cache (clean, prune, verify, stats)")]
+    Cache {
+        #[command(subcommand)]
+        command: CacheCommands,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CacheCommands {
+    #[command(about = "Clean entire cache or delete specific keys")]
+    Clean {
+        #[arg(short, long, help = "Specific computation key to delete")]
+        key: Option<String>,
+    },
+
+    #[command(about = "Prune unreferenced objects or enforce max cache size")]
+    Prune {
+        #[arg(
+            long,
+            help = "Enforce max size (e.g. '500 MB', '2 GB', '10 GB' or raw bytes)"
+        )]
+        max_size: Option<String>,
+
+        #[arg(
+            long,
+            default_value = "lru",
+            help = "Eviction strategy: lru (least recently used), fifo (oldest created), lfu (least frequently used)"
+        )]
+        strategy: String,
+
+        #[arg(
+            long,
+            help = "Perform a dry run without deleting any entries or objects"
+        )]
+        dry_run: bool,
+    },
+
+    #[command(about = "Verify integrity of stored objects")]
+    Verify,
+
+    #[command(about = "Display cache statistics and storage metrics")]
+    Stats,
 }
 
 #[derive(Args, Debug)]

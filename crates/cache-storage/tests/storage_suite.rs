@@ -561,3 +561,137 @@ fn test_storage_suite_garbage_collection_prune_unreferenced_lifecycle() {
     assert_eq!(gc_res2.freed_bytes, s3);
     assert!(!storage.has_object(&d3));
 }
+
+#[test]
+fn test_storage_suite_manual_maintenance_operations() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let storage = CasStorage::new(StorageConfig::new(temp_dir.path())).unwrap();
+    let cache = dcc_storage::Cache::new(storage.clone());
+
+    // 1. Initial Maintenance State: Stats & Verify on empty cache
+    let initial_stats = cache.stats().unwrap();
+    assert_eq!(initial_stats.total_objects, 0);
+    assert_eq!(initial_stats.total_entries, 0);
+
+    let initial_verify = cache.verify_all().unwrap();
+    assert_eq!(initial_verify.total_objects, 0);
+    assert_eq!(initial_verify.corrupted_objects, 0);
+    assert_eq!(initial_verify.total_entries, 0);
+
+    // 2. Populate Cache with 2 Computations and 2 Artifacts
+    let comp1 = Computation::builder("op1", "cmd1").build().unwrap();
+    let key1 = comp1.compute_key().unwrap();
+    let (d1, s1) = cache.store_bytes(b"artifact payload 1").unwrap();
+    let entry1 = CacheEntry::new(
+        key1.clone(),
+        comp1,
+        vec![dcc_core::OutputManifestItem {
+            path: "out1.txt".to_string(),
+            digest: d1.clone(),
+            size: s1,
+            is_executable: Some(false),
+        }],
+        ExecutionMetadata::default(),
+    );
+    cache.store(&entry1).unwrap();
+
+    let comp2 = Computation::builder("op2", "cmd2").build().unwrap();
+    let key2 = comp2.compute_key().unwrap();
+    let (d2, s2) = cache.store_bytes(b"artifact payload 2").unwrap();
+    let entry2 = CacheEntry::new(
+        key2.clone(),
+        comp2,
+        vec![dcc_core::OutputManifestItem {
+            path: "out2.txt".to_string(),
+            digest: d2.clone(),
+            size: s2,
+            is_executable: Some(false),
+        }],
+        ExecutionMetadata::default(),
+    );
+    cache.store(&entry2).unwrap();
+
+    // 3. Maintenance Op: Stats
+    let stats = cache.stats().unwrap();
+    assert_eq!(stats.total_entries, 2);
+    assert_eq!(stats.total_objects, 2);
+    assert_eq!(stats.total_object_size_bytes, s1 + s2);
+
+    // 4. Maintenance Op: Verify
+    let verify = cache.verify_all().unwrap();
+    assert_eq!(verify.total_objects, 2);
+    assert_eq!(verify.verified_objects, 2);
+    assert_eq!(verify.corrupted_objects, 0);
+    assert_eq!(verify.total_entries, 2);
+    assert_eq!(verify.valid_entries, 2);
+    assert_eq!(verify.corrupted_entries, 0);
+
+    // 5. Maintenance Op: Prune (with orphaned object)
+    let (d_orphan, _) = cache.store_bytes(b"orphaned data").unwrap();
+    assert_eq!(cache.stats().unwrap().total_objects, 3);
+    let prune_res = cache.prune().unwrap();
+    assert_eq!(prune_res.deleted_objects, 1);
+    assert!(!cache.contains_blob(&d_orphan));
+    assert!(cache.contains_blob(&d1));
+    assert!(cache.contains_blob(&d2));
+
+    // 6. Maintenance Op: Clean Specific Key
+    let removed = cache.remove(&key1).unwrap();
+    assert!(removed);
+    assert!(cache.lookup(&key1).unwrap().is_none());
+    assert!(cache.lookup(&key2).unwrap().is_some());
+
+    // 7. Maintenance Op: Clean All
+    cache.clean_all().unwrap();
+    assert_eq!(cache.stats().unwrap().total_entries, 0);
+    assert_eq!(cache.stats().unwrap().total_objects, 0);
+    assert_eq!(cache.verify_all().unwrap().total_objects, 0);
+}
+
+#[test]
+fn test_storage_suite_safe_deletion_coordination() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let storage = CasStorage::new(StorageConfig::new(temp_dir.path())).unwrap();
+    let cache = dcc_storage::Cache::new(storage.clone());
+
+    // 1. Store test blob in CAS
+    let data = b"active stream computation artifact payload";
+    let (digest, size) = cache.store_bytes(data).unwrap();
+    assert_eq!(size, data.len() as u64);
+    assert!(cache.contains_blob(&digest));
+
+    // 2. Simulate an active reader process acquiring a shared lock on the object
+    let reader_lock = cache
+        .lock_object(&digest, std::time::Duration::from_secs(2))
+        .unwrap();
+
+    // 3. Attempt to prune unreferenced objects:
+    // Because reader_lock is actively held, safe deletion skips deleting this object
+    let prune_res = cache.prune().unwrap();
+    assert_eq!(prune_res.deleted_objects, 0);
+    assert_eq!(prune_res.freed_bytes, 0);
+    assert!(
+        cache.contains_blob(&digest),
+        "Object must not be deleted while active reader holds shared lock"
+    );
+
+    // 4. Also verify non-blocking delete_object_safe returns false without deleting
+    let delete_attempt = storage.delete_object_safe(&digest, None).unwrap();
+    assert!(
+        !delete_attempt,
+        "delete_object_safe must return false and preserve object when reader is active"
+    );
+    assert!(cache.contains_blob(&digest));
+
+    // 5. Release / drop reader lock
+    drop(reader_lock);
+
+    // 6. Prune again: now that reader lock is released, pruning successfully deletes the unreferenced object
+    let prune_res2 = cache.prune().unwrap();
+    assert_eq!(prune_res2.deleted_objects, 1);
+    assert_eq!(prune_res2.freed_bytes, size);
+    assert!(
+        !cache.contains_blob(&digest),
+        "Object must be cleanly deleted once reader lock is released"
+    );
+}

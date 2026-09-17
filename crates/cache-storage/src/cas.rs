@@ -325,7 +325,16 @@ impl CasStorage {
         Ok(Some(entry))
     }
 
+    /// Delete a cache entry by key, coordinating deletion with its computation lock.
+    ///
+    /// Ensures that if a process is actively computing/writing this entry, it is not
+    /// deleted underneath it.
     pub fn delete_entry(&self, key: &CacheKey) -> Result<bool> {
+        let _lock = crate::lock::ComputationLock::acquire(
+            &self.locks_dir(),
+            key,
+            std::time::Duration::from_secs(5),
+        )?;
         let path = self.entry_path(key);
         if path.is_file() {
             fs::remove_file(path)?;
@@ -333,6 +342,40 @@ impl CasStorage {
         } else {
             Ok(false)
         }
+    }
+
+    /// Safely delete a CAS object by digest, coordinating with ObjectLock.
+    ///
+    /// If `block` is false (e.g. during background pruning/eviction), attempts to acquire
+    /// an exclusive lock without blocking and skips the object if it is currently being read.
+    /// If `block` is true, waits up to `timeout` to acquire exclusive deletion lock.
+    pub fn delete_object_safe(
+        &self,
+        digest: &Digest,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<bool> {
+        let _lock = match timeout {
+            Some(t) => crate::lock::ObjectLock::acquire_exclusive(&self.locks_dir(), digest, t)?,
+            None => {
+                match crate::lock::ObjectLock::try_acquire_exclusive(&self.locks_dir(), digest)? {
+                    Some(l) => l,
+                    None => return Ok(false), // Object currently in use by an active reader; skip deletion
+                }
+            }
+        };
+
+        let path = self.object_path(digest);
+        if path.is_file() {
+            fs::remove_file(path)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Delete a CAS object by digest safely with exclusive lock.
+    pub fn delete_object(&self, digest: &Digest) -> Result<bool> {
+        self.delete_object_safe(digest, Some(std::time::Duration::from_secs(5)))
     }
 
     /// Inspect storage and collect comprehensive metrics.
@@ -366,6 +409,78 @@ impl CasStorage {
         let pruner = crate::eviction::Pruner::new(self);
         pruner.prune_unreferenced_objects()
     }
+
+    /// Verify integrity of all stored CAS objects and cache entries.
+    pub fn verify_all(&self) -> Result<VerifyResult> {
+        let mut res = VerifyResult::default();
+
+        // 1. Verify all CAS objects
+        let objects_dir = self.objects_dir();
+        if objects_dir.exists() {
+            for entry in walkdir::WalkDir::new(objects_dir)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
+                if entry.file_type().is_file() {
+                    let name = entry.file_name().to_string_lossy();
+                    if let Ok(digest) = Digest::new(name.as_ref()) {
+                        res.total_objects += 1;
+                        if self.verify_object(&digest).is_ok() {
+                            res.verified_objects += 1;
+                        } else {
+                            res.corrupted_objects += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Verify all metadata entries
+        let entries_dir = self.entries_dir();
+        if entries_dir.exists() {
+            for entry in walkdir::WalkDir::new(entries_dir)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
+                if entry.file_type().is_file()
+                    && entry.path().extension().and_then(|s| s.to_str()) == Some("json")
+                {
+                    res.total_entries += 1;
+                    if let Ok(file) = File::open(entry.path()) {
+                        if serde_json::from_reader::<_, CacheEntry>(file).is_ok() {
+                            res.valid_entries += 1;
+                        } else {
+                            res.corrupted_entries += 1;
+                        }
+                    } else {
+                        res.corrupted_entries += 1;
+                    }
+                }
+            }
+        }
+
+        Ok(res)
+    }
+
+    /// Clean the entire cache by purging all cached objects and entries, then reinitializing directories.
+    pub fn clean_all(&self) -> Result<()> {
+        let _ = fs::remove_dir_all(self.objects_dir());
+        let _ = fs::remove_dir_all(self.entries_dir());
+        let _ = fs::remove_dir_all(self.tmp_dir());
+        self.init_dirs()?;
+        Ok(())
+    }
+}
+
+/// Results of a full storage and entry verification check.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VerifyResult {
+    pub total_objects: usize,
+    pub verified_objects: usize,
+    pub corrupted_objects: usize,
+    pub total_entries: usize,
+    pub valid_entries: usize,
+    pub corrupted_entries: usize,
 }
 
 fn uuid_like_nonce() -> String {

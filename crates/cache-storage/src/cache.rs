@@ -180,6 +180,20 @@ impl Cache {
         self.storage.verify_object(digest)
     }
 
+    /// Safely delete a specific blob in CAS, coordinating with its ObjectLock.
+    pub fn delete_blob(&self, digest: &Digest) -> Result<bool> {
+        self.storage.delete_object(digest)
+    }
+
+    /// Acquire a shared read lock on a CAS object.
+    pub fn lock_object(
+        &self,
+        digest: &Digest,
+        timeout: Duration,
+    ) -> Result<crate::lock::ObjectLock> {
+        crate::lock::ObjectLock::acquire_shared(&self.storage.locks_dir(), digest, timeout)
+    }
+
     /// Acquire a computation concurrency lock for a key.
     pub fn lock(&self, key: &CacheKey, timeout: Duration) -> Result<ComputationLock> {
         ComputationLock::acquire(&self.storage.locks_dir(), key, timeout)
@@ -198,6 +212,16 @@ impl Cache {
     /// Convenience method to garbage-collect all unreferenced objects.
     pub fn prune(&self) -> Result<crate::eviction::EvictionResult> {
         self.pruner().prune_unreferenced_objects()
+    }
+
+    /// Clean the entire cache by deleting all stored objects and metadata entries.
+    pub fn clean_all(&self) -> Result<()> {
+        self.storage.clean_all()
+    }
+
+    /// Verify integrity of all stored CAS objects and entry records.
+    pub fn verify_all(&self) -> Result<crate::cas::VerifyResult> {
+        self.storage.verify_all()
     }
 
     fn sanitize_path(&self, base_dir: &Path, rel_path: &str) -> Result<PathBuf> {

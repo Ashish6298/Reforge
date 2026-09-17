@@ -65,13 +65,7 @@ impl Storage for crate::cas::CasStorage {
     }
 
     fn delete(&self, digest: &Digest) -> Result<bool> {
-        let path = self.object_path(digest);
-        if path.is_file() {
-            std::fs::remove_file(path)?;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+        self.delete_object(digest)
     }
 
     fn metadata(&self, digest: &Digest) -> Result<Option<BlobMetadata>> {

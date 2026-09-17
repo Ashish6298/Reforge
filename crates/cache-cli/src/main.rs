@@ -9,7 +9,7 @@ use std::time::Duration;
 use walkdir::WalkDir;
 
 mod cli;
-use cli::{Cli, Commands, RunArgs};
+use cli::{CacheCommands, Cli, Commands, RunArgs};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -43,6 +43,16 @@ fn main() -> Result<()> {
             dry_run,
         } => handle_prune(&storage, max_size.as_deref(), &strategy, dry_run, cli.json)?,
         Commands::Doctor => handle_doctor(&storage, cli.json)?,
+        Commands::Cache { command } => match command {
+            CacheCommands::Clean { key } => handle_clean(&storage, key.as_deref(), cli.json)?,
+            CacheCommands::Prune {
+                max_size,
+                strategy,
+                dry_run,
+            } => handle_prune(&storage, max_size.as_deref(), &strategy, dry_run, cli.json)?,
+            CacheCommands::Verify => handle_verify(&storage, cli.json)?,
+            CacheCommands::Stats => handle_stats(&storage, cli.json)?,
+        },
     }
 
     Ok(())

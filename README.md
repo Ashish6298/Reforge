@@ -499,14 +499,45 @@ Automatic and manual removal of CAS objects no longer referenced by valid cache 
   * `dcc prune --dry-run`
   * `dcc prune --dry-run --max-size "1 GB"`
 
+### Manual Maintenance (Milestone 7.4)
+
+Granular maintenance operations available via CLI and library APIs:
+
+- **`cache clean` / `dcc clean`**: Wipe all cached data (`clean_all()`) or delete specific computation keys (`--key <key>`).
+- **`cache prune` / `dcc prune`**: Garbage-collect unreferenced objects (`prune()`) and enforce size limits (`--max-size`) with dry-run inspection (`--dry-run`).
+- **`cache verify` / `dcc verify`**: Complete cryptographic integrity audit (`verify_all()`) of all CAS objects and metadata records with automatic corruption quarantine.
+- **`cache stats` / `dcc stats`**: Real-time storage telemetry (`stats()`), reporting total entries, object counts, disk usage, and largest object footprint.
+- **CLI Commands**:
+  * `dcc cache clean` or `dcc clean --key <key>`
+  * `dcc cache prune --dry-run` or `dcc prune --max-size "2 GB"`
+  * `dcc cache verify` or `dcc verify`
+  * `dcc cache stats` or `dcc stats`
+
+### Safe Deletion (Milestone 7.5)
+
+To prevent race conditions and data corruption across concurrent processes, objects currently being read or used are **never deleted**:
+
+- **Reader-Writer Coordination (`ObjectLock`)**:
+  * Active consumers acquire shared read locks (`ObjectLock::acquire_shared`) when reading or streaming CAS objects.
+  * Pruning, eviction, and blob deletion routines acquire exclusive deletion locks (`ObjectLock::try_acquire_exclusive` / `ObjectLock::acquire_exclusive`) before removing objects.
+- **Non-Blocking Eviction Safety**:
+  * During automated garbage collection and size eviction, unreferenced objects actively held by readers are safely skipped rather than torn down mid-stream (`delete_object_safe(&digest, None)`).
+  * Once readers finish and drop their locks, subsequent GC passes cleanly purge orphaned objects.
+- **Computation Entry Lock Coordination**:
+  * Cache entry deletions (`delete_entry(&key)`) acquire exclusive `ComputationLock` before removing metadata records, preventing deletion of entries currently being computed or committed.
+- **Programmatic APIs**:
+  * `Cache::lock_object(&digest, timeout)`
+  * `Cache::delete_blob(&digest)`
+  * `CasStorage::delete_object_safe(&digest, timeout_opt)`
+
 ---
 
 ## Workspace Architecture
 
 - **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`, `ByteSize`), streaming hashing, and canonical key derivation.
-- **[`crates/cache-storage`](crates/cache-storage)**: Content-Addressed Storage (CAS) with 2-char hex prefix sharding, two-stage atomic writes (`.tmp` $\rightarrow$ `fsync` $\rightarrow$ rename), checksum verification, corrupted object isolation, multi-strategy eviction (`Pruner` supporting LRU/FIFO/LFU), and `fs2` multi-process locking.
+- **[`crates/cache-storage`](crates/cache-storage)**: Content-Addressed Storage (CAS) with 2-char hex prefix sharding, two-stage atomic writes (`.tmp` $\rightarrow$ `fsync` $\rightarrow$ rename), checksum verification, corrupted object isolation, multi-strategy eviction (`Pruner` supporting LRU/FIFO/LFU), maintenance suite (`clean`, `prune`, `verify`, `stats`), and `fs2` multi-process locking.
 - **[`crates/cache-runner`](crates/cache-runner)**: Direct OS process execution, sandboxed output restoration with path-traversal protection, and structured miss explainer.
-- **[`crates/cache-cli`](crates/cache-cli)**: CLI binary (`dcc`) supporting `init`, `run`, `inspect`, `stats`, `verify`, `clean`, `prune`, and `doctor`.
+- **[`crates/cache-cli`](crates/cache-cli)**: CLI binary (`dcc`) supporting `init`, `run`, `inspect`, `stats`, `verify`, `clean`, `prune`, `doctor`, and nested `cache` maintenance subcommands.
 - **[`crates/cache-integrations`](crates/cache-integrations)**: Developer adapters for code generators, build systems, and tools.
 - **[`crates/cache-test-utils`](crates/cache-test-utils)**: Test harnesses, synthetic workspace generators, and failure injectors.
 
@@ -540,19 +571,23 @@ dcc run --input src/schema.json --output generated/models.rs -- generator src/sc
 dcc run --explain --input src/schema.json --output generated/models.rs -- generator src/schema.json
 
 # View cache storage statistics
-dcc stats
+dcc cache stats  # or: dcc stats
 
 # Inspect a specific computation by key
 dcc inspect <key>
 
 # Verify storage integrity
-dcc verify
+dcc cache verify # or: dcc verify
+
+# Prune unreferenced objects and enforce max size limit
+dcc cache prune --max-size "500 MB" --dry-run
+
+# Clean specific key or entire cache
+dcc cache clean --key <key>
+dcc cache clean
 
 # Run health diagnostics
 dcc doctor
-
-# Prune unreferenced objects and enforce max size limit
-dcc prune --max-size "500 MB"
 ```
 
 ---
