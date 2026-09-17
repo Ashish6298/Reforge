@@ -31,13 +31,13 @@ fn main() -> Result<()> {
     let storage = CasStorage::new(config)?;
 
     match cli.command {
-        Commands::Init { max_size } => handle_init(&storage, max_size, cli.json)?,
+        Commands::Init { max_size } => handle_init(&storage, max_size.as_deref(), cli.json)?,
         Commands::Run(args) => handle_run(&storage, args, cli.json)?,
         Commands::Inspect { key } => handle_inspect(&storage, &key, cli.json)?,
         Commands::Stats => handle_stats(&storage, cli.json)?,
         Commands::Verify => handle_verify(&storage, cli.json)?,
         Commands::Clean { key } => handle_clean(&storage, key.as_deref(), cli.json)?,
-        Commands::Prune { max_size } => handle_prune(&storage, max_size, cli.json)?,
+        Commands::Prune { max_size } => handle_prune(&storage, max_size.as_deref(), cli.json)?,
         Commands::Doctor => handle_doctor(&storage, cli.json)?,
     }
 
@@ -51,19 +51,35 @@ fn dirs_base() -> PathBuf {
     PathBuf::from(".")
 }
 
-fn handle_init(storage: &CasStorage, max_size: Option<u64>, json: bool) -> Result<()> {
+fn handle_init(storage: &CasStorage, max_size_str: Option<&str>, json: bool) -> Result<()> {
+    let max_size = if let Some(s) = max_size_str {
+        Some(
+            dcc_core::ByteSize::parse(s)
+                .with_context(|| format!("Invalid max_size value '{}'", s))?,
+        )
+    } else {
+        None
+    };
     storage.init_dirs()?;
+    let limit_bytes = max_size
+        .map(|s| s.as_bytes())
+        .unwrap_or(10 * 1024 * 1024 * 1024);
     if json {
         println!(
             "{}",
             serde_json::json!({
                 "status": "initialized",
                 "cache_dir": storage.root_dir(),
-                "max_size_bytes": max_size.unwrap_or(10 * 1024 * 1024 * 1024)
+                "max_size_bytes": limit_bytes,
+                "max_size_human": dcc_core::ByteSize::bytes(limit_bytes).to_human_readable()
             })
         );
     } else {
         println!("DCC cache initialized at: {}", storage.root_dir().display());
+        println!(
+            "Max Cache Size: {}",
+            dcc_core::ByteSize::bytes(limit_bytes).to_human_readable()
+        );
         println!("Objects: {}", storage.objects_dir().display());
         println!("Entries: {}", storage.entries_dir().display());
     }
@@ -320,10 +336,12 @@ fn handle_clean(storage: &CasStorage, key_opt: Option<&str>, json: bool) -> Resu
     Ok(())
 }
 
-fn handle_prune(storage: &CasStorage, max_size: Option<u64>, json: bool) -> Result<()> {
+fn handle_prune(storage: &CasStorage, max_size_str: Option<&str>, json: bool) -> Result<()> {
     let pruner = Pruner::new(storage);
-    let result = if let Some(limit) = max_size {
-        pruner.enforce_max_size(limit)?
+    let result = if let Some(s) = max_size_str {
+        let size = dcc_core::ByteSize::parse(s)
+            .with_context(|| format!("Invalid max_size value '{}'", s))?;
+        pruner.enforce_max_size(size.as_bytes())?
     } else {
         pruner.prune_unreferenced_objects()?
     };

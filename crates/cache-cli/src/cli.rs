@@ -21,9 +21,9 @@ pub enum Commands {
         #[arg(
             short,
             long,
-            help = "Max cache size in bytes (e.g. 10737418240 for 10GB)"
+            help = "Max cache size (e.g. '500 MB', '2 GB', '10 GB' or raw bytes)"
         )]
-        max_size: Option<u64>,
+        max_size: Option<String>,
     },
 
     #[command(about = "Execute a computation with caching")]
@@ -49,8 +49,11 @@ pub enum Commands {
 
     #[command(about = "Prune unreferenced objects or enforce max cache size")]
     Prune {
-        #[arg(long, help = "Enforce max size in bytes")]
-        max_size: Option<u64>,
+        #[arg(
+            long,
+            help = "Enforce max size (e.g. '500 MB', '2 GB', '10 GB' or raw bytes)"
+        )]
+        max_size: Option<String>,
     },
 
     #[command(about = "Diagnose cache health, environment, and permissions")]

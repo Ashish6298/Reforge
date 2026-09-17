@@ -1,5 +1,5 @@
 use chrono::Utc;
-use dcc_core::{CacheEntry, CacheError, CacheKey, Digest, Result};
+use dcc_core::{ByteSize, CacheEntry, CacheError, CacheKey, Digest, Result, SizeParseError};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Write};
@@ -9,6 +9,33 @@ use std::path::{Path, PathBuf};
 pub struct StorageConfig {
     pub root_dir: PathBuf,
     pub max_size_bytes: Option<u64>,
+}
+
+impl StorageConfig {
+    pub fn new(root_dir: impl Into<PathBuf>) -> Self {
+        Self {
+            root_dir: root_dir.into(),
+            max_size_bytes: Some(10 * 1024 * 1024 * 1024), // 10 GB default
+        }
+    }
+
+    pub fn with_max_size(mut self, size: impl Into<ByteSize>) -> Self {
+        self.max_size_bytes = Some(size.into().as_bytes());
+        self
+    }
+
+    pub fn with_max_size_str(
+        mut self,
+        size_str: &str,
+    ) -> std::result::Result<Self, SizeParseError> {
+        let bs = ByteSize::parse(size_str)?;
+        self.max_size_bytes = Some(bs.as_bytes());
+        Ok(self)
+    }
+
+    pub fn max_size(&self) -> Option<ByteSize> {
+        self.max_size_bytes.map(ByteSize::bytes)
+    }
 }
 
 impl Default for StorageConfig {
@@ -41,6 +68,14 @@ impl CasStorage {
         let storage = Self { config };
         storage.init_dirs()?;
         Ok(storage)
+    }
+
+    pub fn config(&self) -> &StorageConfig {
+        &self.config
+    }
+
+    pub fn max_size(&self) -> Option<ByteSize> {
+        self.config.max_size()
     }
 
     pub fn root_dir(&self) -> &Path {
@@ -539,5 +574,41 @@ mod tests {
 
         // Attempting to read via get_object_reader should also fail
         assert!(storage.get_object_reader(&digest).is_err());
+    }
+
+    #[test]
+    fn test_storage_config_max_size_support() {
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // 1. Default config has 10 GB max_size
+        let default_cfg = StorageConfig::default();
+        assert_eq!(default_cfg.max_size_bytes, Some(10 * 1024 * 1024 * 1024));
+        assert_eq!(
+            default_cfg.max_size().unwrap().as_bytes(),
+            10 * 1024 * 1024 * 1024
+        );
+        assert_eq!(
+            default_cfg.max_size().unwrap().to_human_readable(),
+            "10.00 GB"
+        );
+
+        // 2. Custom config with 500 MB
+        let cfg_500mb = StorageConfig::new(temp_dir.path())
+            .with_max_size_str("500 MB")
+            .unwrap();
+        assert_eq!(cfg_500mb.max_size_bytes, Some(500 * 1024 * 1024));
+        assert_eq!(cfg_500mb.max_size().unwrap().as_bytes(), 500 * 1024 * 1024);
+
+        // 3. Custom config with 2 GB
+        let cfg_2gb = StorageConfig::new(temp_dir.path()).with_max_size(ByteSize::gb(2));
+        assert_eq!(cfg_2gb.max_size_bytes, Some(2 * 1024 * 1024 * 1024));
+        assert_eq!(
+            cfg_2gb.max_size().unwrap().as_bytes(),
+            2 * 1024 * 1024 * 1024
+        );
+
+        // 4. CasStorage reflects configured max_size
+        let storage = CasStorage::new(cfg_500mb).unwrap();
+        assert_eq!(storage.max_size().unwrap().to_human_readable(), "500.00 MB");
     }
 }

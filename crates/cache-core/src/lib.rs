@@ -4,6 +4,7 @@ pub mod digest;
 pub mod entry;
 pub mod error;
 pub mod event;
+pub mod size;
 
 pub use canonical::CanonicalComputation;
 pub use computation::{
@@ -16,3 +17,4 @@ pub use entry::{
 };
 pub use error::{CacheError, Result};
 pub use event::{EventKind, EventSubscriber, StructuredEvent};
+pub use size::{ByteSize, SizeParseError};

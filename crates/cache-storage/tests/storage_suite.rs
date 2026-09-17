@@ -1,5 +1,5 @@
-use dcc_core::{CacheError, Digest};
-use dcc_storage::{CasStorage, StorageConfig};
+use dcc_core::{ByteSize, CacheEntry, CacheError, Computation, Digest, ExecutionMetadata};
+use dcc_storage::{CasStorage, Pruner, StorageConfig};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::sync::Arc;
@@ -292,4 +292,107 @@ fn test_storage_suite_binary_files() {
     let mut read_back = Vec::new();
     reader.read_to_end(&mut read_back).unwrap();
     assert_eq!(read_back, binary_data);
+}
+
+#[test]
+fn test_storage_suite_max_size_limits_and_parsing() {
+    let temp_dir = tempfile::tempdir().unwrap();
+
+    // Verify 500 MB, 2 GB, 10 GB configurations
+    let cfg1 = StorageConfig::new(temp_dir.path())
+        .with_max_size_str("500 MB")
+        .unwrap();
+    assert_eq!(cfg1.max_size_bytes, Some(500 * 1024 * 1024));
+    assert_eq!(cfg1.max_size().unwrap(), ByteSize::mb(500));
+
+    let cfg2 = StorageConfig::new(temp_dir.path())
+        .with_max_size_str("2 GB")
+        .unwrap();
+    assert_eq!(cfg2.max_size_bytes, Some(2 * 1024 * 1024 * 1024));
+    assert_eq!(cfg2.max_size().unwrap(), ByteSize::gb(2));
+
+    let cfg3 = StorageConfig::new(temp_dir.path())
+        .with_max_size_str("10 GB")
+        .unwrap();
+    assert_eq!(cfg3.max_size_bytes, Some(10 * 1024 * 1024 * 1024));
+    assert_eq!(cfg3.max_size().unwrap(), ByteSize::gb(10));
+
+    let storage = CasStorage::new(cfg1).unwrap();
+    assert_eq!(storage.max_size().unwrap().to_human_readable(), "500.00 MB");
+}
+
+#[test]
+fn test_storage_suite_max_size_enforcement_lru() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let storage = CasStorage::new(StorageConfig::new(temp_dir.path())).unwrap();
+    let pruner = Pruner::new(&storage);
+
+    // Create 3 entries with distinct outputs
+    // Entry 1: 100 bytes (oldest)
+    let comp1 = Computation::builder("op1", "cmd1").build().unwrap();
+    let key1 = comp1.compute_key().unwrap();
+    let (d1, s1) = storage.store_object_bytes(&[1u8; 100]).unwrap();
+    let out1 = dcc_core::OutputManifestItem {
+        path: "out1.dat".to_string(),
+        digest: d1,
+        size: s1,
+        is_executable: Some(false),
+    };
+    let mut entry1 = CacheEntry::new(
+        key1.clone(),
+        comp1,
+        vec![out1],
+        ExecutionMetadata::default(),
+    );
+    entry1.metadata.last_accessed_at = chrono::DateTime::from_timestamp(1000, 0).unwrap();
+    storage.store_entry(&entry1).unwrap();
+
+    // Entry 2: 100 bytes (middle)
+    let comp2 = Computation::builder("op2", "cmd2").build().unwrap();
+    let key2 = comp2.compute_key().unwrap();
+    let (d2, s2) = storage.store_object_bytes(&[2u8; 100]).unwrap();
+    let out2 = dcc_core::OutputManifestItem {
+        path: "out2.dat".to_string(),
+        digest: d2,
+        size: s2,
+        is_executable: Some(false),
+    };
+    let mut entry2 = CacheEntry::new(
+        key2.clone(),
+        comp2,
+        vec![out2],
+        ExecutionMetadata::default(),
+    );
+    entry2.metadata.last_accessed_at = chrono::DateTime::from_timestamp(2000, 0).unwrap();
+    storage.store_entry(&entry2).unwrap();
+
+    // Entry 3: 100 bytes (newest)
+    let comp3 = Computation::builder("op3", "cmd3").build().unwrap();
+    let key3 = comp3.compute_key().unwrap();
+    let (d3, s3) = storage.store_object_bytes(&[3u8; 100]).unwrap();
+    let out3 = dcc_core::OutputManifestItem {
+        path: "out3.dat".to_string(),
+        digest: d3,
+        size: s3,
+        is_executable: Some(false),
+    };
+    let mut entry3 = CacheEntry::new(
+        key3.clone(),
+        comp3,
+        vec![out3],
+        ExecutionMetadata::default(),
+    );
+    entry3.metadata.last_accessed_at = chrono::DateTime::from_timestamp(3000, 0).unwrap();
+    storage.store_entry(&entry3).unwrap();
+
+    // Total size of cache outputs is 300 bytes. Enforce max size of 150 bytes.
+    let prune_res = pruner.enforce_max_size(150).unwrap();
+    // It should evict entry1 (100b) and entry2 (100b) leaving entry3 (100b <= 150b)
+    assert_eq!(prune_res.deleted_entries, 2);
+    assert_eq!(prune_res.deleted_objects, 2);
+    assert_eq!(prune_res.freed_bytes, 200);
+
+    assert!(storage.get_entry(&key1).unwrap().is_none());
+    assert!(storage.get_entry(&key2).unwrap().is_none());
+    assert!(storage.get_entry(&key3).unwrap().is_some());
 }

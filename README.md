@@ -450,10 +450,33 @@ DCC is verified under heavy concurrent workloads across multiple scales:
 
 ---
 
+## Cache Lifecycle & Eviction (Milestone 7)
+
+A cache that grows indefinitely is not production quality. DCC enforces lifecycle policies and disk usage limits to ensure predictable, bounded footprint.
+
+### Cache Size Limits (`max_size`) (Milestone 7.1)
+
+DCC provides first-class support for configuring cache size limits via the `ByteSize` type and human-readable string expressions:
+
+- **Supported Formats**:
+  * `500 MB`, `500MB`, `500MiB`
+  * `2 GB`, `2GB`, `2 GiB`
+  * `10 GB`, `10GB`, `10 GiB`
+  * `1024 KB`, `4096 B`, raw byte counts (e.g. `10737418240`)
+  * Fractional representations (e.g. `1.5 GB`, `0.5 MB`)
+- **Storage Configuration**:
+  * Default limit: `10 GB`
+  * Programmatic builders: `StorageConfig::new(root).with_max_size_str("2 GB")?` or `with_max_size(ByteSize::gb(2))`
+- **CLI Commands**:
+  * `dcc init --max-size "2 GB"`
+  * `dcc prune --max-size "500 MB"`
+
+---
+
 ## Workspace Architecture
 
-- **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`), streaming hashing, and canonical key derivation.
-- **[`crates/cache-storage`](crates/cache-storage)**: Content-Addressed Storage (CAS) with 2-char hex prefix sharding, two-stage atomic writes (`.tmp` $\rightarrow$ `fsync` $\rightarrow$ rename), checksum verification, corrupted object isolation, LRU eviction, and `fs2` multi-process locking.
+- **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`, `ByteSize`), streaming hashing, and canonical key derivation.
+- **[`crates/cache-storage`](crates/cache-storage)**: Content-Addressed Storage (CAS) with 2-char hex prefix sharding, two-stage atomic writes (`.tmp` $\rightarrow$ `fsync` $\rightarrow$ rename), checksum verification, corrupted object isolation, LRU eviction (`Pruner`), and `fs2` multi-process locking.
 - **[`crates/cache-runner`](crates/cache-runner)**: Direct OS process execution, sandboxed output restoration with path-traversal protection, and structured miss explainer.
 - **[`crates/cache-cli`](crates/cache-cli)**: CLI binary (`dcc`) supporting `init`, `run`, `inspect`, `stats`, `verify`, `clean`, `prune`, and `doctor`.
 - **[`crates/cache-integrations`](crates/cache-integrations)**: Developer adapters for code generators, build systems, and tools.
@@ -479,8 +502,8 @@ DCC is verified under heavy concurrent workloads across multiple scales:
 ## CLI Usage
 
 ```bash
-# Initialize local cache directory
-dcc init
+# Initialize local cache directory with custom max size
+dcc init --max-size "2 GB"
 
 # Execute a computation with caching
 dcc run --input src/schema.json --output generated/models.rs -- generator src/schema.json
@@ -500,8 +523,8 @@ dcc verify
 # Run health diagnostics
 dcc doctor
 
-# Prune unreferenced objects and enforce max size
-dcc prune --max-size 10737418240
+# Prune unreferenced objects and enforce max size limit
+dcc prune --max-size "500 MB"
 ```
 
 ---

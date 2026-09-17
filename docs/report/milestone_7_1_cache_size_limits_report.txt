@@ -1,0 +1,83 @@
+================================================================================
+DEVELOPER COMPUTATION CACHE (DCC) — MILESTONE 7.1 ENGINEERING & VERIFICATION REPORT
+================================================================================
+Date: 2026-09-17
+Milestone: Milestone 7.1 — Cache Size Limits (max_size configuration & parsing)
+Status: COMPLETED & VERIFIED
+Workspace Test Suite: 96 / 96 Passed (100% Pass Rate)
+Zero Warnings Policy: Enforced & Verified (Clippy & Fmt clean)
+================================================================================
+
+1. EXECUTIVE SUMMARY & OBJECTIVE
+--------------------------------------------------------------------------------
+Milestone 7 addresses the lifecycle management and bounded growth of the Developer
+Computation Cache (DCC). Milestone 7.1 specifically establishes flexible, robust,
+and human-friendly Cache Size Limit configurations (`max_size`).
+
+A production-quality developer cache must never grow unbounded until it exhausts host
+disk space. It must support ergonomic, human-readable size limits such as:
+  - 500 MB
+  - 2 GB
+  - 10 GB
+  - Custom byte specifications and fractional units (e.g. 1.5 GB, 512 KiB)
+
+--------------------------------------------------------------------------------
+2. ARCHITECTURAL DESIGN & IMPLEMENTATION
+--------------------------------------------------------------------------------
+
+1. Human-Readable Size Parsing Engine (`crates/cache-core/src/size.rs`):
+   - Introduced the `ByteSize` type representing byte quantities with robust parsing,
+     formatting, and serde capabilities.
+   - Supports standard binary and decimal suffixes:
+     * Bytes: `B`, `bytes`, `byte`, raw integers (e.g., `1048576`)
+     * Kilobytes: `KB`, `KiB`, `kbytes`, `k` (1024 B)
+     * Megabytes: `MB`, `MiB`, `mbytes`, `m` (1024^2 B)
+     * Gigabytes: `GB`, `GiB`, `gbytes`, `g` (1024^3 B)
+     * Terabytes: `TB`, `TiB`, `tbytes`, `t` (1024^4 B)
+   - Supports flexible whitespace, case-insensitivity, and fractional values (e.g. `1.5 GB`, `0.5 MB`).
+   - Implements `Display`, `FromStr`, `From<u64>`, `From<ByteSize> for u64`, and custom
+     `Serialize`/`Deserialize` to seamlessly handle both numeric JSON and string configuration formats.
+
+2. Storage Configuration Integration (`crates/cache-storage/src/cas.rs`):
+   - Enhanced `StorageConfig` with builder and accessor helpers:
+     * `StorageConfig::new(root_dir)`
+     * `with_max_size(impl Into<ByteSize>)`
+     * `with_max_size_str(&str) -> Result<Self, SizeParseError>`
+     * `max_size(&self) -> Option<ByteSize>`
+   - Default cache size limit is set to 10 GB (`10 * 1024 * 1024 * 1024` bytes).
+   - Exposed `CasStorage::config(&self)` and `CasStorage::max_size(&self)`.
+
+3. CLI Integration (`crates/cache-cli/src/cli.rs` & `crates/cache-cli/src/main.rs`):
+   - `dcc init --max-size <SIZE>`: Accepts human-readable strings (e.g. `--max-size "2 GB"` or `--max-size 500MB`).
+   - `dcc prune --max-size <SIZE>`: Enables manual or automated LRU eviction down to the specified size.
+   - Formatted diagnostic and JSON output includes both raw bytes and formatted human-readable representations.
+
+--------------------------------------------------------------------------------
+3. TEST MATRIX & VERIFICATION SUITE
+--------------------------------------------------------------------------------
+
+1. Unit Tests (`crates/cache-core/src/size.rs`):
+   - `test_bytesize_constants`: Verifies byte multipliers (B, KB, MB, GB, TB).
+   - `test_bytesize_constructors`: Verifies typed constructors (`ByteSize::mb(500)`, `ByteSize::gb(2)`, etc.).
+   - `test_bytesize_parse_examples`: Verifies parsing of "500 MB", "2 GB", "10 GB", "500MiB", "2gb", "1024 KB", raw bytes.
+   - `test_bytesize_parse_fractions`: Verifies parsing of "1.5 GB", "0.5 MB".
+   - `test_bytesize_parse_errors`: Verifies rejection of empty strings, non-numeric inputs, unknown units, and negative sizes.
+   - `test_bytesize_formatting_and_serde`: Verifies human-readable string formatting and JSON serialization/deserialization.
+
+2. Storage Configuration Tests (`crates/cache-storage/src/cas.rs`):
+   - `test_storage_config_max_size_support`: Verifies default 10 GB limit, 500 MB string configuration, 2 GB typed configuration, and reflection on `CasStorage`.
+
+3. Integration Tests (`crates/cache-storage/tests/storage_suite.rs`):
+   - `test_storage_suite_max_size_limits_and_parsing`: End-to-end verification of `500 MB`, `2 GB`, and `10 GB` configurations.
+   - `test_storage_suite_max_size_enforcement_lru`: Verifies that `Pruner::enforce_max_size` correctly calculates storage footprint and evicts older entries (LRU order) while preserving newer entries to keep total usage below the threshold.
+
+--------------------------------------------------------------------------------
+4. VERIFICATION COMMANDS & OUTPUT
+--------------------------------------------------------------------------------
+- `cargo test --workspace` -> Passed 96/96 tests
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` -> Passed (0 warnings)
+- `cargo fmt --all -- --check` -> Passed (Clean formatting)
+
+================================================================================
+CONCLUSION: Milestone 7.1 Cache Size Limits is fully implemented, verified, and ready for production.
+================================================================================
