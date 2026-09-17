@@ -47,11 +47,34 @@ pub enum CacheResult<T> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct TimingMetrics {
+    #[serde(default)]
+    pub execution_time_ms: u64,
+    #[serde(default)]
+    pub lookup_time_ms: u64,
+    #[serde(default)]
+    pub restore_time_ms: u64,
+    #[serde(default)]
+    pub store_time_ms: u64,
+}
+
+impl TimingMetrics {
+    /// Calculate estimated wall-clock time saved by cache hit:
+    /// time_saved = execution_time_ms - (lookup_time_ms + restore_time_ms)
+    pub fn calculate_time_saved_ms(&self) -> u64 {
+        let hit_overhead = self.lookup_time_ms.saturating_add(self.restore_time_ms);
+        self.execution_time_ms.saturating_sub(hit_overhead)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ExecutionMetadata {
     pub exit_code: i32,
     pub execution_time_ms: u64,
     pub stdout_digest: Option<Digest>,
     pub stderr_digest: Option<Digest>,
+    #[serde(default)]
+    pub timings: TimingMetrics,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -242,11 +265,34 @@ mod tests {
                 execution_time_ms: 50,
                 stdout_digest: Some(Digest::from_bytes(b"stdout content")),
                 stderr_digest: None,
+                timings: TimingMetrics {
+                    execution_time_ms: 50,
+                    lookup_time_ms: 2,
+                    restore_time_ms: 3,
+                    store_time_ms: 5,
+                },
             },
         );
 
         assert_eq!(entry.total_output_size(), 1024);
         assert!(entry.stdout_digest().is_some());
         assert!(entry.stderr_digest().is_none());
+        assert_eq!(
+            entry.metadata.execution.timings.calculate_time_saved_ms(),
+            45
+        );
+    }
+
+    #[test]
+    fn test_timing_metrics_calculation() {
+        let timings = TimingMetrics {
+            execution_time_ms: 1000,
+            lookup_time_ms: 10,
+            restore_time_ms: 40,
+            store_time_ms: 25,
+        };
+
+        // time saved = execution_time (1000) - overhead (10 + 40) = 950ms
+        assert_eq!(timings.calculate_time_saved_ms(), 950);
     }
 }

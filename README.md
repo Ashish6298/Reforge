@@ -708,6 +708,17 @@ Tracks quantitative cache activity across all computations:
 
 Viewable via `dcc stats` and `dcc stats --json`.
 
+### Timing Metrics & Time Saved (Milestone 9.2)
+
+DCC tracks granular lifecycle timings for both cache misses and cache hits:
+
+- **`computation execution time` (`execution_time_ms`)**: Time spent executing the actual compiler, generator, or tool process.
+- **`cache lookup time` (`lookup_time_ms`)**: Time spent querying the CAS entry index and locating cached records.
+- **`cache restore time` (`restore_time_ms`)**: Time spent restoring output files and directories from CAS blobs to disk.
+- **`cache store time` (`store_time_ms`)**: Time spent hashing outputs, committing CAS objects, and saving entry metadata.
+- **`time saved` (`time_saved_ms`)**: Net time saved on a cache hit, calculated as:
+  $$\text{Time Saved} = \text{Execution Time} - (\text{Lookup Time} + \text{Restore Time})$$
+
 ---
 
 ## CLI Usage

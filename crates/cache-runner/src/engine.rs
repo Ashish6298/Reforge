@@ -29,6 +29,8 @@ pub struct ExecutionResult {
     pub stderr: Vec<u8>,
     pub outputs: Vec<OutputManifestItem>,
     pub miss_reason: Option<MissReason>,
+    #[serde(default)]
+    pub timings: dcc_core::TimingMetrics,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -106,17 +108,32 @@ impl<'a> RunnerEngine<'a> {
 
         // Check cache policy
         if self.options.policy == CachePolicy::Bypass {
-            return self.run_and_store(key, computation, false, Some(MissReason::ForcedRecompute));
+            return self.run_and_store(
+                key,
+                computation,
+                false,
+                Some(MissReason::ForcedRecompute),
+                0,
+            );
         }
 
         if self.options.policy == CachePolicy::ForceRecompute {
-            return self.run_and_store(key, computation, true, Some(MissReason::ForcedRecompute));
+            return self.run_and_store(
+                key,
+                computation,
+                true,
+                Some(MissReason::ForcedRecompute),
+                0,
+            );
         }
 
         // 3. Cache lookup
+        let lookup_start = std::time::Instant::now();
         if self.options.policy != CachePolicy::WriteOnly {
             match self.storage.get_entry(&key) {
                 Ok(Some(entry)) => {
+                    let lookup_time_ms = lookup_start.elapsed().as_millis() as u64;
+
                     // Step 2: Verify cache metadata identity and integrity
                     if let Err(e) = entry.verify_identity() {
                         let _ = self.storage.delete_entry(&key);
@@ -127,16 +144,20 @@ impl<'a> RunnerEngine<'a> {
                             Some(MissReason::CorruptedCache {
                                 reason: e.to_string(),
                             }),
+                            lookup_time_ms,
                         );
                     }
 
                     // Step 3: Verify all output CAS objects exist and restore outputs safely
+                    let restore_start = std::time::Instant::now();
                     match OutputRestorer::restore_entry(
                         self.storage,
                         &entry,
                         &self.options.working_dir,
                     ) {
                         Ok(()) => {
+                            let restore_time_ms = restore_start.elapsed().as_millis() as u64;
+
                             // Step 4: Restore metadata (stdout/stderr streams and execution metadata)
                             let stdout =
                                 if let Some(out_digest) = &entry.metadata.execution.stdout_digest {
@@ -160,7 +181,14 @@ impl<'a> RunnerEngine<'a> {
                                     Vec::new()
                                 };
 
-                            // Step 5 & 6: Report HIT and return immediately without executing the command
+                            // Step 5 & 6: Report HIT with timing breakdown
+                            let timings = dcc_core::TimingMetrics {
+                                execution_time_ms: entry.metadata.execution.execution_time_ms,
+                                lookup_time_ms,
+                                restore_time_ms,
+                                store_time_ms: entry.metadata.execution.timings.store_time_ms,
+                            };
+
                             return Ok(ExecutionResult {
                                 key,
                                 status: ExecutionStatus::Hit,
@@ -170,6 +198,7 @@ impl<'a> RunnerEngine<'a> {
                                 stderr,
                                 outputs: entry.outputs,
                                 miss_reason: None,
+                                timings,
                             });
                         }
                         Err(e) => {
@@ -182,12 +211,14 @@ impl<'a> RunnerEngine<'a> {
                                 Some(MissReason::CorruptedCache {
                                     reason: e.to_string(),
                                 }),
+                                lookup_time_ms,
                             );
                         }
                     }
                 }
                 Ok(None) => {}
                 Err(e) => {
+                    let lookup_time_ms = lookup_start.elapsed().as_millis() as u64;
                     let _ = self.storage.delete_entry(&key);
                     return self.run_and_store(
                         key,
@@ -196,13 +227,22 @@ impl<'a> RunnerEngine<'a> {
                         Some(MissReason::CorruptedCache {
                             reason: e.to_string(),
                         }),
+                        lookup_time_ms,
                     );
                 }
             }
         }
 
+        let lookup_time_ms = lookup_start.elapsed().as_millis() as u64;
+
         // Cache MISS -> Acquire lock and execute
-        self.run_and_store(key, computation, true, Some(MissReason::NoEntryFound))
+        self.run_and_store(
+            key,
+            computation,
+            true,
+            Some(MissReason::NoEntryFound),
+            lookup_time_ms,
+        )
     }
 
     fn run_and_store(
@@ -211,6 +251,7 @@ impl<'a> RunnerEngine<'a> {
         computation: Computation,
         should_store: bool,
         miss_reason: Option<MissReason>,
+        lookup_time_ms: u64,
     ) -> Result<ExecutionResult> {
         // Concurrency Lock
         let _lock =
@@ -249,6 +290,13 @@ impl<'a> RunnerEngine<'a> {
                         Vec::new()
                     };
 
+                    let timings = dcc_core::TimingMetrics {
+                        execution_time_ms: entry.metadata.execution.execution_time_ms,
+                        lookup_time_ms,
+                        restore_time_ms: 0,
+                        store_time_ms: entry.metadata.execution.timings.store_time_ms,
+                    };
+
                     return Ok(ExecutionResult {
                         key,
                         status: ExecutionStatus::Hit,
@@ -258,6 +306,7 @@ impl<'a> RunnerEngine<'a> {
                         stderr,
                         outputs: entry.outputs,
                         miss_reason: None,
+                        timings,
                     });
                 }
             }
@@ -273,6 +322,13 @@ impl<'a> RunnerEngine<'a> {
 
         if proc_output.exit_code != 0 {
             // By default, do not cache failed computations
+            let timings = dcc_core::TimingMetrics {
+                execution_time_ms: proc_output.execution_time_ms,
+                lookup_time_ms,
+                restore_time_ms: 0,
+                store_time_ms: 0,
+            };
+
             return Ok(ExecutionResult {
                 key,
                 status: ExecutionStatus::Miss,
@@ -282,6 +338,7 @@ impl<'a> RunnerEngine<'a> {
                 stderr: proc_output.stderr,
                 outputs: Vec::new(),
                 miss_reason,
+                timings,
             });
         }
 
@@ -321,6 +378,7 @@ impl<'a> RunnerEngine<'a> {
             None
         };
 
+        let store_start = std::time::Instant::now();
         if should_store && self.options.policy != CachePolicy::ReadOnly {
             let entry = CacheEntry::new(
                 key.clone(),
@@ -331,10 +389,24 @@ impl<'a> RunnerEngine<'a> {
                     execution_time_ms: proc_output.execution_time_ms,
                     stdout_digest,
                     stderr_digest,
+                    timings: dcc_core::TimingMetrics {
+                        execution_time_ms: proc_output.execution_time_ms,
+                        lookup_time_ms,
+                        restore_time_ms: 0,
+                        store_time_ms: 0,
+                    },
                 },
             );
             self.storage.store_entry(&entry)?;
         }
+        let store_time_ms = store_start.elapsed().as_millis() as u64;
+
+        let timings = dcc_core::TimingMetrics {
+            execution_time_ms: proc_output.execution_time_ms,
+            lookup_time_ms,
+            restore_time_ms: 0,
+            store_time_ms,
+        };
 
         Ok(ExecutionResult {
             key,
@@ -345,6 +417,7 @@ impl<'a> RunnerEngine<'a> {
             stderr: proc_output.stderr,
             outputs: manifest_items,
             miss_reason,
+            timings,
         })
     }
 }

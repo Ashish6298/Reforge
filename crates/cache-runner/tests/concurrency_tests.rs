@@ -103,6 +103,7 @@ fn test_milestone_6_1_concurrent_reads_cas_objects_and_entries() {
             execution_time_ms: 42,
             stdout_digest: Some(digest.clone()),
             stderr_digest: None,
+            timings: Default::default(),
         },
     );
     env.storage.store_entry(&entry).unwrap();
@@ -394,6 +395,7 @@ fn test_milestone_6_2_concurrent_entry_writes_atomic_safety() {
                     execution_time_ms: 10 + writer_id as u64,
                     stdout_digest: None,
                     stderr_digest: None,
+                    timings: Default::default(),
                 },
             );
             env_clone.storage.store_entry(&entry).unwrap();
