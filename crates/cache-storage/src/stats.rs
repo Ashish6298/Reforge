@@ -16,9 +16,13 @@ pub struct StorageStats {
     pub total_size_bytes: u64,
     pub largest_object_size_bytes: u64,
     pub largest_object_path: Option<PathBuf>,
+    pub total_requests: u64,
     pub total_hits: u64,
     pub total_misses: u64,
     pub hit_ratio: f64,
+    pub execution_count: u64,
+    pub cache_restore_count: u64,
+    pub cache_store_count: u64,
     pub bytes_restored: u64,
     pub bytes_stored: u64,
     pub estimated_time_saved_ms: u64,
@@ -50,8 +54,11 @@ impl StorageStats {
                             let exec_duration_ms = cache_entry.metadata.execution.execution_time_ms;
 
                             stats.total_hits += hits;
-                            // Each stored entry represents 1 initial execution (miss)
+                            // Each stored entry represents 1 initial execution (miss) and 1 store event
                             stats.total_misses += 1;
+                            stats.execution_count += 1;
+                            stats.cache_store_count += 1;
+                            stats.cache_restore_count += hits;
                             stats.bytes_stored += entry_output_size;
                             stats.bytes_restored += entry_output_size * hits;
                             stats.estimated_time_saved_ms += exec_duration_ms * hits;
@@ -61,9 +68,9 @@ impl StorageStats {
             }
         }
 
-        let total_lookups = stats.total_hits + stats.total_misses;
-        if total_lookups > 0 {
-            stats.hit_ratio = stats.total_hits as f64 / total_lookups as f64;
+        stats.total_requests = stats.total_hits + stats.total_misses;
+        if stats.total_requests > 0 {
+            stats.hit_ratio = stats.total_hits as f64 / stats.total_requests as f64;
         }
 
         let objects_dir = storage.objects_dir();
@@ -157,9 +164,13 @@ mod tests {
         assert_eq!(stats.total_entries, 1);
         assert_eq!(stats.total_object_size_bytes, small_size + large_size);
         assert_eq!(stats.largest_object_size_bytes, large_size);
+        assert_eq!(stats.total_requests, 1);
         assert_eq!(stats.total_misses, 1);
         assert_eq!(stats.total_hits, 0);
         assert_eq!(stats.hit_ratio, 0.0);
+        assert_eq!(stats.execution_count, 1);
+        assert_eq!(stats.cache_store_count, 1);
+        assert_eq!(stats.cache_restore_count, 0);
         assert_eq!(stats.bytes_stored, small_size + large_size);
         assert_eq!(stats.bytes_restored, 0);
 
@@ -170,9 +181,13 @@ mod tests {
         storage.store_entry(&entry_with_hits).unwrap();
 
         let stats_after_hits = storage.stats().unwrap();
+        assert_eq!(stats_after_hits.total_requests, 4);
         assert_eq!(stats_after_hits.total_hits, 3);
         assert_eq!(stats_after_hits.total_misses, 1);
         assert!((stats_after_hits.hit_ratio - 0.75).abs() < 1e-6);
+        assert_eq!(stats_after_hits.execution_count, 1);
+        assert_eq!(stats_after_hits.cache_store_count, 1);
+        assert_eq!(stats_after_hits.cache_restore_count, 3);
         assert_eq!(stats_after_hits.bytes_stored, small_size + large_size);
         assert_eq!(
             stats_after_hits.bytes_restored,

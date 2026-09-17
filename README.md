@@ -690,6 +690,26 @@ DCC implements documented, stable exit codes for deterministic process orchestra
 
 ---
 
+## Observability & Cache Explanation (Milestone 9)
+
+Provides full visibility into cache efficiency, telemetry, and execution performance.
+
+### Hit / Miss Metrics (Milestone 9.1)
+
+Tracks quantitative cache activity across all computations:
+
+- **`total requests`**: Total computation cache queries processed (`hits + misses`).
+- **`hits`**: Number of requests resolved directly from cache without recomputation.
+- **`misses`**: Number of computations that resulted in a cache miss.
+- **`hit ratio`**: Cache reuse ratio percentage (`hits / total requests`).
+- **`execution count`**: Number of external command executions performed.
+- **`cache restore count`**: Number of output restoration events from CAS storage.
+- **`cache store count`**: Number of completed computations stored into CAS.
+
+Viewable via `dcc stats` and `dcc stats --json`.
+
+---
+
 ## CLI Usage
 
 ```bash
