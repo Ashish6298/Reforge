@@ -576,6 +576,15 @@ The Developer Computation Cache engine is exposed through a polished, robust com
 | `dcc config` | Inspect active storage configuration and path layout | `--get <max_size/cache_dir>`, `--json` |
 | `dcc doctor` | Perform comprehensive environment and health diagnostics | `--json` |
 
+### `dcc init` (Milestone 8.2)
+
+Creates and validates the local cache environment:
+- **Determine Default Cache Directory**: Automatically checks `DCC_CACHE_DIR`, system user home directories (`USERPROFILE` / `HOME`), and fallbacks.
+- **Create Required Hierarchy**: Ensures `objects/`, `entries/`, `locks/`, and `tmp/` directories exist with sharded partitioning.
+- **Create Local Configuration**: Persists active cache settings to `.dcc_cache/config.json`.
+- **Validate Storage**: Performs an atomic probe to confirm filesystem writability and storage integrity.
+- **Print Configuration Summary**: Outputs clear, human-readable layout summary or structured JSON (`--json`).
+
 ### Stable Exit Codes
 - `0`: Success / Cache HIT
 - `1`: Computation failed / Cache entry not found

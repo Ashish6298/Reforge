@@ -75,10 +75,34 @@ fn handle_init(storage: &CasStorage, max_size_str: Option<&str>, json: bool) -> 
     } else {
         None
     };
-    storage.init_dirs()?;
+
+    // 1. Determine directories and create required hierarchy
+    storage
+        .init_dirs()
+        .context("Failed to initialize cache directory structure")?;
+
+    // 2. Validate storage writability with a transient probe
+    let probe_nonce = format!(".probe_{}", std::process::id());
+    let probe_path = storage.tmp_dir().join(&probe_nonce);
+    fs::write(&probe_path, b"storage_write_probe")
+        .context("Storage validation failed: unable to write to cache directory")?;
+    let _ = fs::remove_file(&probe_path);
+
     let limit_bytes = max_size
         .map(|s| s.as_bytes())
         .unwrap_or(10 * 1024 * 1024 * 1024);
+
+    // 3. Persist local configuration file (config.json)
+    let config_path = storage.root_dir().join("config.json");
+    let config_payload = serde_json::json!({
+        "version": "1.0.0",
+        "cache_dir": storage.root_dir(),
+        "max_size_bytes": limit_bytes,
+        "max_size_human": dcc_core::ByteSize::bytes(limit_bytes).to_human_readable()
+    });
+    let _ = fs::write(&config_path, serde_json::to_string_pretty(&config_payload)?);
+
+    // 4. Print configuration summary
     if json {
         println!(
             "{}",
@@ -86,7 +110,13 @@ fn handle_init(storage: &CasStorage, max_size_str: Option<&str>, json: bool) -> 
                 "status": "initialized",
                 "cache_dir": storage.root_dir(),
                 "max_size_bytes": limit_bytes,
-                "max_size_human": dcc_core::ByteSize::bytes(limit_bytes).to_human_readable()
+                "max_size_human": dcc_core::ByteSize::bytes(limit_bytes).to_human_readable(),
+                "config_file": config_path,
+                "storage_valid": true,
+                "objects_dir": storage.objects_dir(),
+                "entries_dir": storage.entries_dir(),
+                "locks_dir": storage.locks_dir(),
+                "tmp_dir": storage.tmp_dir()
             })
         );
     } else {
@@ -95,8 +125,12 @@ fn handle_init(storage: &CasStorage, max_size_str: Option<&str>, json: bool) -> 
             "Max Cache Size: {}",
             dcc_core::ByteSize::bytes(limit_bytes).to_human_readable()
         );
-        println!("Objects: {}", storage.objects_dir().display());
-        println!("Entries: {}", storage.entries_dir().display());
+        println!("Configuration:  {}", config_path.display());
+        println!("Objects:        {}", storage.objects_dir().display());
+        println!("Entries:        {}", storage.entries_dir().display());
+        println!("Locks:          {}", storage.locks_dir().display());
+        println!("Temporary:      {}", storage.tmp_dir().display());
+        println!("Storage Status: Valid & Writable");
     }
     Ok(())
 }
@@ -536,6 +570,11 @@ mod tests {
 
         // 1. handle_init
         assert!(handle_init(&storage, Some("500 MB"), false).is_ok());
+        assert!(storage.root_dir().join("config.json").is_file());
+        assert!(storage.objects_dir().is_dir());
+        assert!(storage.entries_dir().is_dir());
+        assert!(storage.locks_dir().is_dir());
+        assert!(storage.tmp_dir().is_dir());
         assert!(handle_init(&storage, None, true).is_ok());
 
         // 2. handle_config
