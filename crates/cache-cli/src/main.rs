@@ -288,19 +288,31 @@ fn handle_stats(storage: &CasStorage, json: bool) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&stats)?);
     } else {
         println!("=== DCC Cache Storage Statistics ===");
-        println!("Total Entries:        {}", stats.total_entries);
-        println!("Total CAS Objects:    {}", stats.total_objects);
+        println!("Entries:              {}", stats.total_entries);
+        println!("Objects:              {}", stats.total_objects);
         println!(
-            "Objects Disk Usage:   {:.2} MB",
-            stats.total_object_size_bytes as f64 / (1024.0 * 1024.0)
-        );
-        println!(
-            "Entries Disk Usage:   {:.2} KB",
+            "Disk Usage:           {:.2} MB (Objects: {:.2} MB, Entries: {:.2} KB)",
+            stats.total_size_bytes as f64 / (1024.0 * 1024.0),
+            stats.total_object_size_bytes as f64 / (1024.0 * 1024.0),
             stats.total_entry_size_bytes as f64 / 1024.0
         );
+        println!("Hits:                 {}", stats.total_hits);
+        println!("Misses:               {}", stats.total_misses);
+        println!("Hit Ratio:            {:.1}%", stats.hit_ratio * 100.0);
         println!(
-            "Total Disk Usage:     {:.2} MB",
-            stats.total_size_bytes as f64 / (1024.0 * 1024.0)
+            "Bytes Restored:       {} ({:.2} MB)",
+            stats.bytes_restored,
+            stats.bytes_restored as f64 / (1024.0 * 1024.0)
+        );
+        println!(
+            "Bytes Stored:         {} ({:.2} MB)",
+            stats.bytes_stored,
+            stats.bytes_stored as f64 / (1024.0 * 1024.0)
+        );
+        println!(
+            "Estimated Time Saved: {} ms ({:.2} s)",
+            stats.estimated_time_saved_ms,
+            stats.estimated_time_saved_ms as f64 / 1000.0
         );
         println!(
             "Largest Object:       {} bytes",

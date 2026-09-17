@@ -613,6 +613,27 @@ calculate key
 5. **Validate**: Confirms all declared required output files exist and are intact.
 6. **Store**: Hashes outputs into CAS objects, writes `CacheEntry` JSON atomically, and records execution metadata.
 
+### `dcc stats` (Milestone 8.4)
+
+Displays comprehensive cache storage metrics, efficiency metrics, and cumulative time savings:
+
+```bash
+dcc stats
+dcc stats --json
+```
+
+Output Metrics:
+- **`entries`**: Total number of registered computation metadata records.
+- **`objects`**: Total physical CAS objects stored.
+- **`disk usage`**: Combined disk usage formatted in human-readable units (with breakdown of objects vs entries).
+- **`hits`**: Cumulative cache hit count across all entries.
+- **`misses`**: Cumulative cache miss count (initial executions).
+- **`hit ratio`**: Aggregate hit ratio percentage (`hits / (hits + misses)`).
+- **`bytes restored`**: Total byte volume restored during cache hits without recomputation.
+- **`bytes stored`**: Total output byte volume stored in CAS.
+- **`estimated time saved`**: Total estimated execution time saved by serving hits from cache.
+- **`largest object`**: Size in bytes of the largest stored CAS blob.
+
 ### Stable Exit Codes
 - `0`: Success / Cache HIT
 - `1`: Computation failed / Cache entry not found
