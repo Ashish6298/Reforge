@@ -75,10 +75,10 @@
 //! - `CachePolicy::ForceRecompute`: Force process re-execution but update the cache entry with new results.
 
 pub use dcc_core::{
-    ByteSize, CacheEntry, CacheError, CacheKey, CacheMetadata, CachePolicy, CacheResult,
-    Computation, ComputationBuilder, Digest, EventKind, EventSubscriber, ExecutionMetadata,
-    InputFile, OutputFile, OutputManifest, OutputManifestItem, PlatformConstraints, Result,
-    StructuredEvent, TimingMetrics, ToolIdentity,
+    BuildAction, BuildActionBuilder, ByteSize, CacheEntry, CacheError, CacheKey, CacheMetadata,
+    CachePolicy, CacheResult, Computation, ComputationBuilder, Digest, EventKind, EventSubscriber,
+    ExecutionMetadata, InputFile, OutputFile, OutputManifest, OutputManifestItem,
+    PlatformConstraints, Result, StructuredEvent, TimingMetrics, ToolIdentity,
 };
 pub use dcc_runner::{
     CommandSpec, CommandSpecBuilder, EngineOptions, ExecutionResult, ExecutionStatus,
@@ -115,6 +115,12 @@ impl<'a> GenericIntegration<'a> {
 
     pub fn execute(&self, computation: Computation) -> Result<ExecutionResult> {
         self.engine.execute(computation)
+    }
+
+    /// Execute a compiler `BuildAction` model using the caching runner engine.
+    pub fn execute_build_action(&self, action: BuildAction) -> Result<ExecutionResult> {
+        let comp = action.to_computation()?;
+        self.engine.execute(comp)
     }
 
     pub fn run_codegen(
@@ -217,5 +223,69 @@ mod tests {
             std::fs::read(&out_file).unwrap(),
             b"sample data for codegen"
         );
+    }
+
+    #[test]
+    fn test_milestone_11_1_build_action_integration() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache_dir = temp_dir.path().join(".cache");
+        let ws_dir = temp_dir.path().join("ws");
+        std::fs::create_dir_all(&ws_dir).unwrap();
+
+        let cache = Cache::open(&cache_dir).unwrap();
+        let integration = GenericIntegration::from_cache(&cache, &ws_dir);
+
+        let src_file = ws_dir.join("main.rs");
+        let dep_file = ws_dir.join("libcore.rlib");
+        let out_file = ws_dir.join("app.exe");
+
+        std::fs::write(&src_file, b"fn main() { println!(\"hello\"); }").unwrap();
+        std::fs::write(&dep_file, b"libcore_binary_data").unwrap();
+
+        #[cfg(windows)]
+        let (cmd, args) = (
+            "powershell.exe",
+            vec![
+                "-Command".to_string(),
+                format!(
+                    "Set-Content -Path '{}' -Value 'binary_executable_output'",
+                    out_file.display()
+                ),
+            ],
+        );
+        #[cfg(not(windows))]
+        let (cmd, args) = (
+            "sh",
+            vec![
+                "-c".to_string(),
+                format!("echo 'binary_executable_output' > '{}'", out_file.display()),
+            ],
+        );
+
+        let action = BuildAction::builder()
+            .compiler(cmd)
+            .arguments(args)
+            .source_input("main.rs", Digest::hash_file(&src_file).unwrap(), 34)
+            .dependency_input("libcore.rlib", Digest::hash_file(&dep_file).unwrap(), 19)
+            .compiler_version("1.80.0")
+            .target("x86_64-pc-windows-msvc")
+            .env("OPT_LEVEL", "3")
+            .output("app.exe", true)
+            .build()
+            .unwrap();
+
+        // 1. Cold Build Action MISS
+        let res1 = integration.execute_build_action(action.clone()).unwrap();
+        assert_eq!(res1.status, ExecutionStatus::Miss);
+        assert!(out_file.is_file());
+
+        // Delete compiled binary
+        std::fs::remove_file(&out_file).unwrap();
+        assert!(!out_file.exists());
+
+        // 2. Warm Build Action HIT
+        let res2 = integration.execute_build_action(action).unwrap();
+        assert_eq!(res2.status, ExecutionStatus::Hit);
+        assert!(out_file.is_file());
     }
 }
