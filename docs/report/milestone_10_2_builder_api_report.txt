@@ -1,0 +1,70 @@
+================================================================================
+DCC VERIFICATION REPORT: MILESTONE 10.2 — BUILDER API
+================================================================================
+Date: 2026-09-17
+Workspace: D:\DC
+Report Path: D:\DC\docs\report\milestone_10_2_builder_api_report.txt
+
+1. OBJECTIVE & REQUIREMENTS
+--------------------------------------------------------------------------------
+Milestone 10.2 requires implementing an ergonomic Builder API for `Computation`:
+- Provide zero-argument builder entry point: `Computation::builder()`
+- Fluent method chaining:
+  * .operation(...)
+  * .command(...)
+  * .args(...) and .arg(...)
+  * .input(...), .inputs(...), .input_file(...), .input_path(...)
+  * .output(...), .outputs(...), .output_file(...), .output_path(...)
+  * .env(...), .envs(...), .declared_env(...), .declared_envs(...)
+  * .tool(...), .tool_identity(...)
+  * .platform(...)
+  * .policy(...)
+  * .meta(...)
+  * .working_dir(...)
+  * .build() -> Result<Computation>
+- Pre-execution validation:
+  * Validate that operation is non-empty
+  * Validate that command is non-empty
+  * Validate that input and output paths do not perform path traversals or absolute path escapes
+  * Enforce canonical path sorting on inputs and outputs
+- Ensure backwards compatibility with existing workspace components and preserve CLI/UI stability.
+
+2. IMPLEMENTATION SUMMARY
+--------------------------------------------------------------------------------
+- Modified `crates/cache-core/src/computation.rs`:
+  * Added `Computation::builder() -> ComputationBuilder`
+  * Retained `Computation::builder_with(operation, command) -> ComputationBuilder`
+  * Added fluent builder methods: `.operation()`, `.command()`, `.args()`, `.arg()`, `.input()`, `.input_file()`, `.inputs()`, `.input_path()`, `.output()`, `.output_file()`, `.outputs()`, `.output_path()`, `.env()`, `.envs()`, `.declared_env()`, `.declared_envs()`, `.tool()`, `.tool_identity()`, `.platform()`, `.policy()`, `.meta()`, `.working_dir()`, `.build()`
+  * Added validation in `.build()` verifying non-empty operations, non-empty commands, and rejecting path traversals on input and output paths.
+  * Added unit tests:
+    - `test_milestone_10_2_fluent_builder_api`
+    - `test_milestone_10_2_builder_validation_empty_operation`
+    - `test_milestone_10_2_builder_validation_empty_command`
+    - `test_milestone_10_2_builder_validation_path_traversal`
+- Updated integration points across `crates/cache-cli`, `crates/cache-integrations`, `crates/cache-runner`, and `crates/cache-storage`.
+- Updated `README.md` with full Builder API documentation and usage examples.
+
+3. TEST EXECUTION RESULTS
+--------------------------------------------------------------------------------
+Workspace Test Matrix Summary:
+- dcc-core: 41 unit tests passed (0 failed)
+- dcc-integrations: 1 unit test passed (0 failed)
+- dcc-runner: 4 unit tests passed (0 failed)
+- dcc-storage: 23 unit tests passed (0 failed)
+- dcc-cli: 5 unit tests passed (0 failed)
+- Concurrency test suite: 12 tests passed (0 failed)
+- Integration test suite: 15 tests passed (0 failed)
+- Security test suite: 1 test passed (0 failed)
+- Storage test suite: 18 tests passed (0 failed)
+- Documentation tests: Passed
+
+Code Quality & Style:
+- `cargo check --workspace`: PASSED
+- `cargo test --workspace`: PASSED (120 total tests across workspace)
+- `cargo clippy --workspace --all-targets --all-features`: PASSED (0 warnings)
+- `cargo fmt --all -- --check`: PASSED (clean formatting)
+
+4. CONCLUSION
+--------------------------------------------------------------------------------
+Milestone 10.2 (Builder API) is fully implemented, verified, and integrated without regressions.
+================================================================================

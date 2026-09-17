@@ -329,7 +329,7 @@ fn test_storage_suite_max_size_enforcement_lru() {
 
     // Create 3 entries with distinct outputs
     // Entry 1: 100 bytes (oldest)
-    let comp1 = Computation::builder("op1", "cmd1").build().unwrap();
+    let comp1 = Computation::builder_with("op1", "cmd1").build().unwrap();
     let key1 = comp1.compute_key().unwrap();
     let (d1, s1) = storage.store_object_bytes(&[1u8; 100]).unwrap();
     let out1 = dcc_core::OutputManifestItem {
@@ -348,7 +348,7 @@ fn test_storage_suite_max_size_enforcement_lru() {
     storage.store_entry(&entry1).unwrap();
 
     // Entry 2: 100 bytes (middle)
-    let comp2 = Computation::builder("op2", "cmd2").build().unwrap();
+    let comp2 = Computation::builder_with("op2", "cmd2").build().unwrap();
     let key2 = comp2.compute_key().unwrap();
     let (d2, s2) = storage.store_object_bytes(&[2u8; 100]).unwrap();
     let out2 = dcc_core::OutputManifestItem {
@@ -367,7 +367,7 @@ fn test_storage_suite_max_size_enforcement_lru() {
     storage.store_entry(&entry2).unwrap();
 
     // Entry 3: 100 bytes (newest)
-    let comp3 = Computation::builder("op3", "cmd3").build().unwrap();
+    let comp3 = Computation::builder_with("op3", "cmd3").build().unwrap();
     let key3 = comp3.compute_key().unwrap();
     let (d3, s3) = storage.store_object_bytes(&[3u8; 100]).unwrap();
     let out3 = dcc_core::OutputManifestItem {
@@ -404,7 +404,7 @@ fn test_storage_suite_eviction_strategy_fifo_vs_lru() {
     let pruner = Pruner::new(&storage);
 
     // Entry A: created at t=100, accessed at t=900 (recent access), size 100
-    let comp_a = Computation::builder("opA", "cmdA").build().unwrap();
+    let comp_a = Computation::builder_with("opA", "cmdA").build().unwrap();
     let key_a = comp_a.compute_key().unwrap();
     let (da, sa) = storage.store_object_bytes(&[10u8; 100]).unwrap();
     let mut entry_a = CacheEntry::new(
@@ -423,7 +423,7 @@ fn test_storage_suite_eviction_strategy_fifo_vs_lru() {
     storage.store_entry(&entry_a).unwrap();
 
     // Entry B: created at t=500, accessed at t=600 (older access), size 100
-    let comp_b = Computation::builder("opB", "cmdB").build().unwrap();
+    let comp_b = Computation::builder_with("opB", "cmdB").build().unwrap();
     let key_b = comp_b.compute_key().unwrap();
     let (db, sb) = storage.store_object_bytes(&[20u8; 100]).unwrap();
     let mut entry_b = CacheEntry::new(
@@ -458,7 +458,7 @@ fn test_storage_suite_eviction_strategy_lfu_and_policy() {
     let pruner = Pruner::new(&storage);
 
     // Entry 1: hits = 50, size 100
-    let comp1 = Computation::builder("op1", "cmd1").build().unwrap();
+    let comp1 = Computation::builder_with("op1", "cmd1").build().unwrap();
     let key1 = comp1.compute_key().unwrap();
     let (d1, s1) = storage.store_object_bytes(&[1u8; 100]).unwrap();
     let mut entry1 = CacheEntry::new(
@@ -476,7 +476,7 @@ fn test_storage_suite_eviction_strategy_lfu_and_policy() {
     storage.store_entry(&entry1).unwrap();
 
     // Entry 2: hits = 2, size 100
-    let comp2 = Computation::builder("op2", "cmd2").build().unwrap();
+    let comp2 = Computation::builder_with("op2", "cmd2").build().unwrap();
     let key2 = comp2.compute_key().unwrap();
     let (d2, s2) = storage.store_object_bytes(&[2u8; 100]).unwrap();
     let mut entry2 = CacheEntry::new(
@@ -523,7 +523,7 @@ fn test_storage_suite_garbage_collection_prune_unreferenced_lifecycle() {
     let (d3, s3) = storage.store_object_bytes(b"active artifact").unwrap();
 
     // 3. Create entry referencing only d3
-    let comp = Computation::builder("op", "cmd").build().unwrap();
+    let comp = Computation::builder_with("op", "cmd").build().unwrap();
     let key = comp.compute_key().unwrap();
     let entry = CacheEntry::new(
         key.clone(),
@@ -579,7 +579,7 @@ fn test_storage_suite_manual_maintenance_operations() {
     assert_eq!(initial_verify.total_entries, 0);
 
     // 2. Populate Cache with 2 Computations and 2 Artifacts
-    let comp1 = Computation::builder("op1", "cmd1").build().unwrap();
+    let comp1 = Computation::builder_with("op1", "cmd1").build().unwrap();
     let key1 = comp1.compute_key().unwrap();
     let (d1, s1) = cache.store_bytes(b"artifact payload 1").unwrap();
     let entry1 = CacheEntry::new(
@@ -595,7 +595,7 @@ fn test_storage_suite_manual_maintenance_operations() {
     );
     cache.store(&entry1).unwrap();
 
-    let comp2 = Computation::builder("op2", "cmd2").build().unwrap();
+    let comp2 = Computation::builder_with("op2", "cmd2").build().unwrap();
     let key2 = comp2.compute_key().unwrap();
     let (d2, s2) = cache.store_bytes(b"artifact payload 2").unwrap();
     let entry2 = CacheEntry::new(

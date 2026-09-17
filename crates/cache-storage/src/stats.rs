@@ -132,7 +132,7 @@ mod tests {
         assert_eq!(found_largest_path, Some(storage.object_path(&large_digest)));
 
         // Store a CacheEntry
-        let comp = Computation::builder("inspect", "cmd").build().unwrap();
+        let comp = Computation::builder_with("inspect", "cmd").build().unwrap();
         let key = comp.compute_key().unwrap();
         let entry = CacheEntry::new(
             key.clone(),

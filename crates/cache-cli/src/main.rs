@@ -152,7 +152,10 @@ fn handle_run(storage: &CasStorage, args: RunArgs, json: bool) -> Result<()> {
         _ => CachePolicy::ReadWrite,
     };
 
-    let mut comp_builder = Computation::builder(&args.operation, cmd_exe).args(cmd_args.to_vec());
+    let mut comp_builder = Computation::builder()
+        .operation(&args.operation)
+        .command(cmd_exe)
+        .args(cmd_args.to_vec());
 
     for input in &args.inputs {
         let dummy_digest = Digest::from_bytes(b"");
@@ -650,7 +653,9 @@ mod tests {
 
         // 3. Populate an entry and verify
         let (d, s) = storage.store_object_bytes(b"cli test artifact").unwrap();
-        let comp = Computation::builder("cli_test", "echo").build().unwrap();
+        let comp = Computation::builder_with("test_op", "test_cmd")
+            .build()
+            .unwrap();
         let key = comp.compute_key().unwrap();
         let entry = CacheEntry::new(
             key.clone(),
@@ -773,7 +778,9 @@ mod tests {
 
         // 5. Populate and test dcc inspect <key> --json
         let (digest, size) = storage.store_object_bytes(b"json payload").unwrap();
-        let comp = Computation::builder("json_op", "cmd").build().unwrap();
+        let comp = Computation::builder_with("json_op", "json_cmd")
+            .build()
+            .unwrap();
         let key = comp.compute_key().unwrap();
         let entry = CacheEntry::new(
             key.clone(),

@@ -300,7 +300,7 @@ mod tests {
         let pruner = Pruner::new(&storage);
 
         // Entry 1: created at t=1000, last accessed at t=5000, size 100
-        let comp1 = Computation::builder("op1", "cmd1").build().unwrap();
+        let comp1 = Computation::builder_with("op1", "cmd1").build().unwrap();
         let key1 = comp1.compute_key().unwrap();
         let (d1, s1) = storage.store_object_bytes(&[1u8; 100]).unwrap();
         let mut entry1 = CacheEntry::new(
@@ -319,7 +319,7 @@ mod tests {
         storage.store_entry(&entry1).unwrap();
 
         // Entry 2: created at t=3000, last accessed at t=2000, size 100
-        let comp2 = Computation::builder("op2", "cmd2").build().unwrap();
+        let comp2 = Computation::builder_with("op2", "cmd2").build().unwrap();
         let key2 = comp2.compute_key().unwrap();
         let (d2, s2) = storage.store_object_bytes(&[2u8; 100]).unwrap();
         let mut entry2 = CacheEntry::new(
@@ -356,7 +356,7 @@ mod tests {
         let pruner = Pruner::new(&storage);
 
         // Entry 1: hits = 10, size 100
-        let comp1 = Computation::builder("op1", "cmd1").build().unwrap();
+        let comp1 = Computation::builder_with("op1", "cmd1").build().unwrap();
         let key1 = comp1.compute_key().unwrap();
         let (d1, s1) = storage.store_object_bytes(&[1u8; 100]).unwrap();
         let mut entry1 = CacheEntry::new(
@@ -374,7 +374,7 @@ mod tests {
         storage.store_entry(&entry1).unwrap();
 
         // Entry 2: hits = 1, size 100
-        let comp2 = Computation::builder("op2", "cmd2").build().unwrap();
+        let comp2 = Computation::builder_with("op2", "cmd2").build().unwrap();
         let key2 = comp2.compute_key().unwrap();
         let (d2, s2) = storage.store_object_bytes(&[2u8; 100]).unwrap();
         let mut entry2 = CacheEntry::new(
@@ -409,7 +409,7 @@ mod tests {
         let storage = CasStorage::new(StorageConfig::new(temp_dir.path())).unwrap();
         let pruner = Pruner::new(&storage);
 
-        let comp = Computation::builder("op", "cmd").build().unwrap();
+        let comp = Computation::builder_with("op", "cmd").build().unwrap();
         let key = comp.compute_key().unwrap();
         let (d, s) = storage.store_object_bytes(&[42u8; 50]).unwrap();
         let mut entry = CacheEntry::new(
@@ -445,7 +445,7 @@ mod tests {
         let (d2, s2) = storage.store_object_bytes(b"orphaned payload 2").unwrap();
 
         // Create an entry that only references d1
-        let comp = Computation::builder("op", "cmd").build().unwrap();
+        let comp = Computation::builder_with("op", "cmd").build().unwrap();
         let key = comp.compute_key().unwrap();
         let entry = CacheEntry::new(
             key,
@@ -491,7 +491,7 @@ mod tests {
         let (stdout_digest, _) = storage.store_object_bytes(b"stdout capture").unwrap();
 
         // Entry 1
-        let comp1 = Computation::builder("op1", "cmd1").build().unwrap();
+        let comp1 = Computation::builder_with("op1", "cmd1").build().unwrap();
         let key1 = comp1.compute_key().unwrap();
         let entry1 = CacheEntry::new(
             key1.clone(),
@@ -513,7 +513,7 @@ mod tests {
         storage.store_entry(&entry1).unwrap();
 
         // Entry 2
-        let comp2 = Computation::builder("op2", "cmd2").build().unwrap();
+        let comp2 = Computation::builder_with("op2", "cmd2").build().unwrap();
         let key2 = comp2.compute_key().unwrap();
         let entry2 = CacheEntry::new(
             key2.clone(),

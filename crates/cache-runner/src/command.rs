@@ -26,7 +26,9 @@ impl CommandSpec {
 
     /// Convert the CommandSpec into a Computation model for key generation and caching.
     pub fn to_computation(&self, operation: impl Into<String>) -> dcc_core::Computation {
-        let mut comp = dcc_core::Computation::builder(operation, &self.executable)
+        let mut comp = dcc_core::Computation::builder()
+            .operation(operation.into())
+            .command(&self.executable)
             .args(self.arguments.clone())
             .policy(self.cache_policy);
 

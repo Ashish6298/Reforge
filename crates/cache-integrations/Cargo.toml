@@ -12,3 +12,20 @@ dcc-runner = { path = "../cache-runner" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[[example]]
+name = "cached_codegen"
+path = "../../examples/cached_codegen.rs"
+
+[[example]]
+name = "cached_analysis"
+path = "../../examples/cached_analysis.rs"
+
+[[example]]
+name = "cached_transform"
+path = "../../examples/cached_transform.rs"
+

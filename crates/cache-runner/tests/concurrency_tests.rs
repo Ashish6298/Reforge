@@ -30,7 +30,7 @@ fn test_concurrent_identical_computations() {
                 vec!["shared.txt".to_string(), "shared_out.txt".to_string()],
             );
 
-            let computation = Computation::builder("concurrent-op", cmd)
+            let computation = Computation::builder_with("concurrent-op", cmd)
                 .args(args)
                 .input("shared.txt", Digest::from_bytes(b""), 0)
                 .output("shared_out.txt", true)
@@ -84,7 +84,7 @@ fn test_milestone_6_1_concurrent_reads_cas_objects_and_entries() {
     assert_eq!(size, payload.len() as u64);
 
     // 2. Create and store a valid CacheEntry
-    let comp = Computation::builder("op_read", "test_cmd")
+    let comp = Computation::builder_with("op_read", "test_cmd")
         .arg("--parallel")
         .build()
         .unwrap();
@@ -371,7 +371,7 @@ fn test_milestone_6_2_concurrent_writes_distinct_objects_throughput() {
 fn test_milestone_6_2_concurrent_entry_writes_atomic_safety() {
     let env = Arc::new(TestEnv::new().unwrap());
 
-    let comp = Computation::builder("atomic_concurrent_op", "compiler")
+    let comp = Computation::builder_with("atomic_concurrent_op", "compiler")
         .arg("--opt")
         .build()
         .unwrap();
@@ -568,7 +568,7 @@ fn test_milestone_6_4_crashed_process_lock_release_and_recovery() {
         .unwrap();
 
     let key = {
-        let comp = dcc_core::Computation::builder("op", cmd)
+        let comp = dcc_core::Computation::builder_with("op", cmd)
             .args(args)
             .build()
             .unwrap();
@@ -647,7 +647,7 @@ fn test_milestone_6_4_corrupted_lock_metadata_recovery_in_runner() {
 
     // Compute key in advance to plant corrupted lockfile
     let key = {
-        let comp = dcc_core::Computation::builder("op", cmd)
+        let comp = dcc_core::Computation::builder_with("op", cmd)
             .args(args)
             .build()
             .unwrap();

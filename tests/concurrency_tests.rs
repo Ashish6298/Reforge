@@ -26,7 +26,7 @@ fn test_concurrent_identical_computations() {
             #[cfg(not(windows))]
             let (cmd, args) = ("cp", vec!["shared.txt".to_string(), "shared_out.txt".to_string()]);
 
-            let computation = Computation::builder("concurrent-op", cmd)
+            let computation = Computation::builder_with("concurrent-op", cmd)
                 .args(args)
                 .input("shared.txt", Digest::from_bytes(b""), 0)
                 .output("shared_out.txt", true)

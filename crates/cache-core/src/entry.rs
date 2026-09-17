@@ -319,7 +319,7 @@ mod tests {
 
     #[test]
     fn test_cache_entry_references_blobs_not_raw_data() {
-        let comp = Computation::builder("build", "cargo").build().unwrap();
+        let comp = Computation::builder().build().unwrap();
         let key = CacheKey::from_bytes(b"key");
         let item = OutputManifestItem {
             path: "target/bin".into(),

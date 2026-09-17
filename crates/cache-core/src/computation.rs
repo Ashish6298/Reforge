@@ -166,7 +166,26 @@ pub struct Computation {
 impl Computation {
     pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 
-    pub fn builder(operation: impl Into<String>, command: impl Into<String>) -> ComputationBuilder {
+    /// Ergonomic 0-argument builder entry point:
+    /// ```rust,ignore
+    /// Computation::builder()
+    ///     .operation("codegen")
+    ///     .command("generator")
+    ///     .args(...)
+    ///     .input(...)
+    ///     .output(...)
+    ///     .env(...)
+    ///     .build()
+    /// ```
+    pub fn builder() -> ComputationBuilder {
+        ComputationBuilder::default()
+    }
+
+    /// Builder entry point with explicit operation and command identifiers:
+    pub fn builder_with(
+        operation: impl Into<String>,
+        command: impl Into<String>,
+    ) -> ComputationBuilder {
         ComputationBuilder::new(operation, command)
     }
 
@@ -224,6 +243,25 @@ pub struct ComputationBuilder {
     working_dir: Option<String>,
 }
 
+impl Default for ComputationBuilder {
+    fn default() -> Self {
+        Self {
+            schema_version: Computation::CURRENT_SCHEMA_VERSION,
+            operation: "default_op".to_string(),
+            command: "default_cmd".to_string(),
+            args: Vec::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            env: BTreeMap::new(),
+            platform: PlatformConstraints::default(),
+            tool: None,
+            policy: CachePolicy::ReadWrite,
+            metadata: BTreeMap::new(),
+            working_dir: None,
+        }
+    }
+}
+
 impl ComputationBuilder {
     pub fn new(operation: impl Into<String>, command: impl Into<String>) -> Self {
         Self {
@@ -240,6 +278,16 @@ impl ComputationBuilder {
             metadata: BTreeMap::new(),
             working_dir: None,
         }
+    }
+
+    pub fn operation(mut self, op: impl Into<String>) -> Self {
+        self.operation = op.into();
+        self
+    }
+
+    pub fn command(mut self, cmd: impl Into<String>) -> Self {
+        self.command = cmd.into();
+        self
     }
 
     pub fn args<I, S>(mut self, args: I) -> Self
@@ -267,11 +315,69 @@ impl ComputationBuilder {
         self
     }
 
+    pub fn input_file(mut self, input: InputFile) -> Self {
+        let mut inp = input;
+        inp.path = inp.path.replace('\\', "/");
+        self.inputs.push(inp);
+        self
+    }
+
+    pub fn inputs<I>(mut self, inputs: I) -> Self
+    where
+        I: IntoIterator<Item = InputFile>,
+    {
+        for inp in inputs {
+            self = self.input_file(inp);
+        }
+        self
+    }
+
+    pub fn input_path(mut self, path: impl AsRef<std::path::Path>) -> Result<Self> {
+        let p = path.as_ref();
+        let digest = Digest::hash_file(p)?;
+        let meta = std::fs::metadata(p)?;
+        let size = meta.len();
+        let norm_path = p.to_string_lossy().replace('\\', "/");
+        self.inputs.push(InputFile {
+            path: norm_path,
+            digest,
+            size,
+            is_executable: None,
+        });
+        Ok(self)
+    }
+
     pub fn output(mut self, path: impl Into<String>, required: bool) -> Self {
         let norm_path = path.into().replace('\\', "/");
         self.outputs.push(OutputFile {
             path: norm_path,
             required,
+        });
+        self
+    }
+
+    pub fn output_file(mut self, output: OutputFile) -> Self {
+        let mut out = output;
+        out.path = out.path.replace('\\', "/");
+        self.outputs.push(out);
+        self
+    }
+
+    pub fn outputs<I>(mut self, outputs: I) -> Self
+    where
+        I: IntoIterator<Item = OutputFile>,
+    {
+        for out in outputs {
+            self = self.output_file(out);
+        }
+        self
+    }
+
+    pub fn output_path(mut self, path: impl AsRef<std::path::Path>) -> Self {
+        let norm_path = path.as_ref().to_string_lossy().replace('\\', "/");
+        self.outputs.push(OutputFile {
+            path: norm_path,
+            required: true,
         });
         self
     }
@@ -376,5 +482,91 @@ impl ComputationBuilder {
         };
         comp.validate()?;
         Ok(comp)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_milestone_10_2_fluent_builder_api() {
+        let comp = Computation::builder()
+            .operation("codegen")
+            .command("generator")
+            .args(vec!["--schema", "schema.json", "--opt"])
+            .arg("--fast")
+            .input("schema.json", Digest::from_bytes(b"{}"), 2)
+            .output("models.rs", true)
+            .env("TARGET_LANG", "rust")
+            .meta("author", "dcc-dev")
+            .build()
+            .expect("Builder with valid fields must succeed");
+
+        assert_eq!(comp.operation, "codegen");
+        assert_eq!(comp.command, "generator");
+        assert_eq!(
+            comp.args,
+            vec!["--schema", "schema.json", "--opt", "--fast"]
+        );
+        assert_eq!(comp.inputs.len(), 1);
+        assert_eq!(comp.outputs.len(), 1);
+        assert_eq!(comp.env.get("TARGET_LANG").unwrap(), "rust");
+        assert_eq!(comp.metadata.get("author").unwrap(), "dcc-dev");
+    }
+
+    #[test]
+    fn test_milestone_10_2_builder_validation_empty_operation() {
+        let err = Computation::builder()
+            .operation("")
+            .command("generator")
+            .output("out.txt", true)
+            .build()
+            .expect_err("Empty operation must fail validation");
+
+        match err {
+            CacheError::ValidationError(msg) => {
+                assert!(msg.contains("Operation identifier cannot be empty"));
+            }
+            other => panic!("Expected ValidationError, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_milestone_10_2_builder_validation_empty_command() {
+        let err = Computation::builder()
+            .operation("codegen")
+            .command("   ")
+            .output("out.txt", true)
+            .build()
+            .expect_err("Empty command must fail validation");
+
+        match err {
+            CacheError::ValidationError(msg) => {
+                assert!(msg.contains("Command executable cannot be empty"));
+            }
+            other => panic!("Expected ValidationError, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_milestone_10_2_builder_validation_path_traversal() {
+        let err_out = Computation::builder()
+            .operation("codegen")
+            .command("generator")
+            .output("../../../etc/passwd", true)
+            .build()
+            .expect_err("Path traversal in output must fail validation");
+
+        assert!(matches!(err_out, CacheError::PathTraversal(_)));
+
+        let err_inp = Computation::builder()
+            .operation("codegen")
+            .command("generator")
+            .input("../secret.key", Digest::from_bytes(b""), 0)
+            .build()
+            .expect_err("Path traversal in input must fail validation");
+
+        assert!(matches!(err_inp, CacheError::PathTraversal(_)));
     }
 }

@@ -123,7 +123,7 @@ mod tests {
     #[test]
     fn test_canonical_key_determinism() {
         let digest_a = Digest::from_bytes(b"hello");
-        let comp1 = Computation::builder("build", "rustc")
+        let comp1 = Computation::builder_with("build", "rustc")
             .arg("main.rs")
             .input("src/main.rs", digest_a.clone(), 10)
             .env("MODE", "release")
@@ -131,7 +131,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let comp2 = Computation::builder("build", "rustc")
+        let comp2 = Computation::builder_with("build", "rustc")
             .arg("main.rs")
             .env("OPT", "3") // inserted in different order
             .env("MODE", "release")
@@ -150,12 +150,12 @@ mod tests {
         let d1 = Digest::from_bytes(b"content 1");
         let d2 = Digest::from_bytes(b"content 2");
 
-        let comp1 = Computation::builder("gen", "tool")
+        let comp1 = Computation::builder_with("gen", "tool")
             .input("file.txt", d1, 9)
             .build()
             .unwrap();
 
-        let comp2 = Computation::builder("gen", "tool")
+        let comp2 = Computation::builder_with("gen", "tool")
             .input("file.txt", d2, 9)
             .build()
             .unwrap();
@@ -177,14 +177,14 @@ mod tests {
         let hash_z = Digest::from_bytes(b"HASH_Z");
 
         // Set 1: A = hash_x, B = hash_z
-        let comp1 = Computation::builder("build", "compiler")
+        let comp1 = Computation::builder_with("build", "compiler")
             .input("input_a.rs", hash_x, 100)
             .input("input_b.rs", hash_z.clone(), 200)
             .build()
             .unwrap();
 
         // Set 2: A = hash_y (mutated), B = hash_z (unchanged)
-        let comp2 = Computation::builder("build", "compiler")
+        let comp2 = Computation::builder_with("build", "compiler")
             .input("input_a.rs", hash_y, 100)
             .input("input_b.rs", hash_z, 200)
             .build()
@@ -208,12 +208,12 @@ mod tests {
         let d1 = Digest::from_bytes(b"nested module v1");
         let d2 = Digest::from_bytes(b"nested module v2");
 
-        let comp1 = Computation::builder("compile", "rustc")
+        let comp1 = Computation::builder_with("compile", "rustc")
             .input("src/models/deep/schema.json", d1, 50)
             .build()
             .unwrap();
 
-        let comp2 = Computation::builder("compile", "rustc")
+        let comp2 = Computation::builder_with("compile", "rustc")
             .input("src/models/deep/schema.json", d2, 50)
             .build()
             .unwrap();
@@ -232,12 +232,12 @@ mod tests {
     fn test_input_path_rename_with_same_hash_produces_different_key() {
         let d = Digest::from_bytes(b"shared data content");
 
-        let comp1 = Computation::builder("process", "tool")
+        let comp1 = Computation::builder_with("process", "tool")
             .input("path_alpha.txt", d.clone(), 100)
             .build()
             .unwrap();
 
-        let comp2 = Computation::builder("process", "tool")
+        let comp2 = Computation::builder_with("process", "tool")
             .input("path_beta.txt", d, 100)
             .build()
             .unwrap();
@@ -261,14 +261,14 @@ mod tests {
         let d_b = Digest::from_bytes(b"data B");
         let d_c = Digest::from_bytes(b"data C");
 
-        let comp1 = Computation::builder("bundle", "bundler")
+        let comp1 = Computation::builder_with("bundle", "bundler")
             .input("a.js", d_a.clone(), 10)
             .input("b.js", d_b.clone(), 20)
             .input("c.js", d_c.clone(), 30)
             .build()
             .unwrap();
 
-        let comp2 = Computation::builder("bundle", "bundler")
+        let comp2 = Computation::builder_with("bundle", "bundler")
             .input("c.js", d_c, 30)
             .input("a.js", d_a, 10)
             .input("b.js", d_b, 20)
@@ -290,12 +290,12 @@ mod tests {
 
     #[test]
     fn test_differing_arguments_produce_different_keys() {
-        let comp1 = Computation::builder("fmt", "generator")
+        let comp1 = Computation::builder_with("fmt", "generator")
             .arg("--fast")
             .build()
             .unwrap();
 
-        let comp2 = Computation::builder("fmt", "generator")
+        let comp2 = Computation::builder_with("fmt", "generator")
             .arg("--safe")
             .build()
             .unwrap();
@@ -315,12 +315,12 @@ mod tests {
 
     #[test]
     fn test_differing_command_executable_produces_different_keys() {
-        let comp1 = Computation::builder("build", "generator")
+        let comp1 = Computation::builder_with("build", "generator")
             .arg("--fast")
             .build()
             .unwrap();
 
-        let comp2 = Computation::builder("build", "transformer")
+        let comp2 = Computation::builder_with("build", "transformer")
             .arg("--fast")
             .build()
             .unwrap();
@@ -340,13 +340,13 @@ mod tests {
 
     #[test]
     fn test_argument_ordering_sensitivity_produces_different_keys() {
-        let comp1 = Computation::builder("build", "compiler")
+        let comp1 = Computation::builder_with("build", "compiler")
             .arg("--opt")
             .arg("--debug")
             .build()
             .unwrap();
 
-        let comp2 = Computation::builder("build", "compiler")
+        let comp2 = Computation::builder_with("build", "compiler")
             .arg("--debug")
             .arg("--opt")
             .build()
@@ -367,9 +367,9 @@ mod tests {
 
     #[test]
     fn test_argument_addition_removal_produces_different_keys() {
-        let comp1 = Computation::builder("run", "tool").build().unwrap();
+        let comp1 = Computation::builder_with("run", "tool").build().unwrap();
 
-        let comp2 = Computation::builder("run", "tool")
+        let comp2 = Computation::builder_with("run", "tool")
             .arg("--flag")
             .build()
             .unwrap();
@@ -386,12 +386,12 @@ mod tests {
 
     #[test]
     fn test_differing_tool_versions_produce_different_keys() {
-        let comp1 = Computation::builder("compile", "rustc")
+        let comp1 = Computation::builder_with("compile", "rustc")
             .tool("rustc", Some("1.80.0".into()), None)
             .build()
             .unwrap();
 
-        let comp2 = Computation::builder("compile", "rustc")
+        let comp2 = Computation::builder_with("compile", "rustc")
             .tool("rustc", Some("1.81.0".into()), None)
             .build()
             .unwrap();
@@ -414,12 +414,12 @@ mod tests {
         let d1 = Digest::from_bytes(b"compiler_binary_v1_bytes");
         let d2 = Digest::from_bytes(b"compiler_binary_v2_bytes");
 
-        let comp1 = Computation::builder("compile", "gcc")
+        let comp1 = Computation::builder_with("compile", "gcc")
             .tool("gcc", Some("13.2.0".into()), Some(d1))
             .build()
             .unwrap();
 
-        let comp2 = Computation::builder("compile", "gcc")
+        let comp2 = Computation::builder_with("compile", "gcc")
             .tool("gcc", Some("13.2.0".into()), Some(d2))
             .build()
             .unwrap();
@@ -447,15 +447,15 @@ mod tests {
             Some(Digest::from_bytes(b"clang_bin")),
         );
 
-        let comp_a = Computation::builder("build", "clang")
+        let comp_a = Computation::builder_with("build", "clang")
             .tool_identity(tool_a)
             .build()
             .unwrap();
-        let comp_b = Computation::builder("build", "clang")
+        let comp_b = Computation::builder_with("build", "clang")
             .tool_identity(tool_b)
             .build()
             .unwrap();
-        let comp_c = Computation::builder("build", "clang")
+        let comp_c = Computation::builder_with("build", "clang")
             .tool_identity(tool_c)
             .build()
             .unwrap();
@@ -477,12 +477,12 @@ mod tests {
 
     #[test]
     fn test_differing_environment_produce_different_keys() {
-        let comp1 = Computation::builder("test", "runner")
+        let comp1 = Computation::builder_with("test", "runner")
             .env("NODE_ENV", "development")
             .build()
             .unwrap();
 
-        let comp2 = Computation::builder("test", "runner")
+        let comp2 = Computation::builder_with("test", "runner")
             .env("NODE_ENV", "production")
             .build()
             .unwrap();
@@ -503,14 +503,14 @@ mod tests {
     #[test]
     fn test_declared_environment_order_independent_canonicalization() {
         // Declared environment variables inserted in arbitrary order must sort canonically
-        let comp1 = Computation::builder("build", "generator")
+        let comp1 = Computation::builder_with("build", "generator")
             .env("NODE_ENV", "production")
             .env("GENERATOR_VERSION", "2.1")
             .env("FEATURE_MODE", "enabled")
             .build()
             .unwrap();
 
-        let comp2 = Computation::builder("build", "generator")
+        let comp2 = Computation::builder_with("build", "generator")
             .env("FEATURE_MODE", "enabled")
             .env("NODE_ENV", "production")
             .env("GENERATOR_VERSION", "2.1")
@@ -534,12 +534,12 @@ mod tests {
     fn test_undeclared_environment_variables_do_not_fragment_cache() {
         // Computations only serialize declared environment variables in comp.env.
         // Unrelated variables in system environment do not pollute computation keys.
-        let comp1 = Computation::builder("compile", "rustc")
+        let comp1 = Computation::builder_with("compile", "rustc")
             .env("RUST_LOG", "info")
             .build()
             .unwrap();
 
-        let comp2 = Computation::builder("compile", "rustc")
+        let comp2 = Computation::builder_with("compile", "rustc")
             .env("RUST_LOG", "info")
             .build()
             .unwrap();
@@ -559,11 +559,11 @@ mod tests {
         let p_linux = crate::computation::PlatformConstraints::new("linux", "x86_64");
         let p_windows = crate::computation::PlatformConstraints::new("windows", "x86_64");
 
-        let comp1 = Computation::builder("build", "cc")
+        let comp1 = Computation::builder_with("build", "cc")
             .platform(p_linux)
             .build()
             .unwrap();
-        let comp2 = Computation::builder("build", "cc")
+        let comp2 = Computation::builder_with("build", "cc")
             .platform(p_windows)
             .build()
             .unwrap();
@@ -586,11 +586,11 @@ mod tests {
         let p_x86 = crate::computation::PlatformConstraints::new("linux", "x86_64");
         let p_arm = crate::computation::PlatformConstraints::new("linux", "aarch64");
 
-        let comp1 = Computation::builder("build", "cc")
+        let comp1 = Computation::builder_with("build", "cc")
             .platform(p_x86)
             .build()
             .unwrap();
-        let comp2 = Computation::builder("build", "cc")
+        let comp2 = Computation::builder_with("build", "cc")
             .platform(p_arm)
             .build()
             .unwrap();
@@ -615,11 +615,11 @@ mod tests {
         let p_musl = crate::computation::PlatformConstraints::new("linux", "x86_64")
             .with_target("x86_64-unknown-linux-musl");
 
-        let comp1 = Computation::builder("build", "rustc")
+        let comp1 = Computation::builder_with("build", "rustc")
             .platform(p_gnu)
             .build()
             .unwrap();
-        let comp2 = Computation::builder("build", "rustc")
+        let comp2 = Computation::builder_with("build", "rustc")
             .platform(p_musl)
             .build()
             .unwrap();
@@ -646,11 +646,11 @@ mod tests {
             .with_runtime("node20")
             .with_abi("glibc2.35");
 
-        let comp1 = Computation::builder("run", "node")
+        let comp1 = Computation::builder_with("run", "node")
             .platform(p_node18)
             .build()
             .unwrap();
-        let comp2 = Computation::builder("run", "node")
+        let comp2 = Computation::builder_with("run", "node")
             .platform(p_node20)
             .build()
             .unwrap();
@@ -669,12 +669,12 @@ mod tests {
     fn test_file_identity_content_primary_and_timestamp_invariant() {
         // Files with identical content and path have identical identity regardless of mtime
         let d = Digest::from_bytes(b"content alpha");
-        let comp1 = Computation::builder("build", "tool")
+        let comp1 = Computation::builder_with("build", "tool")
             .input("src/lib.rs", d.clone(), 100)
             .build()
             .unwrap();
 
-        let comp2 = Computation::builder("build", "tool")
+        let comp2 = Computation::builder_with("build", "tool")
             .input("src/lib.rs", d, 100)
             .build()
             .unwrap();
@@ -695,13 +695,13 @@ mod tests {
     #[test]
     fn test_file_identity_executable_bit_matters_when_set() {
         let d = Digest::from_bytes(b"script payload");
-        let mut comp1 = Computation::builder("run", "bash")
+        let mut comp1 = Computation::builder_with("run", "bash")
             .input("script.sh", d.clone(), 50)
             .build()
             .unwrap();
         comp1.inputs[0].is_executable = Some(false);
 
-        let mut comp2 = Computation::builder("run", "bash")
+        let mut comp2 = Computation::builder_with("run", "bash")
             .input("script.sh", d, 50)
             .build()
             .unwrap();

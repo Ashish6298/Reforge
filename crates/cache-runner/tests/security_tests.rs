@@ -24,7 +24,7 @@ fn test_corrupted_cas_object_causes_safe_fallback() {
         vec!["source.txt".to_string(), "build_out.txt".to_string()],
     );
 
-    let computation = Computation::builder("build-integrity", cmd)
+    let computation = Computation::builder_with("build-integrity", cmd)
         .args(args)
         .input("source.txt", Digest::from_bytes(b""), 0)
         .output("build_out.txt", true)

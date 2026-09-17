@@ -1,0 +1,71 @@
+================================================================================
+DCC VERIFICATION REPORT: MILESTONE 10.4 — INTEGRATION CONTRACT
+================================================================================
+Date: 2026-09-17
+Workspace: D:\DC
+Report Path: D:\DC\docs\report\milestone_10_4_integration_contract_report.txt
+
+1. OBJECTIVE & REQUIREMENTS
+--------------------------------------------------------------------------------
+Milestone 10.4 requires formalizing and documenting the Developer Integration Contract:
+- How to declare inputs
+- How to declare outputs
+- How to declare environment
+- How cache identity works
+- How errors work
+- How cache misses work
+- How to disable caching
+
+The contract must be thoroughly documented in both crate-level API docs (`crates/cache-integrations/src/lib.rs`) and user-facing project documentation (`README.md`), while preserving existing UI and CLI functionality.
+
+2. IMPLEMENTATION SUMMARY
+--------------------------------------------------------------------------------
+- Documented Crate Root:
+  * Updated `crates/cache-integrations/src/lib.rs` with top-level module documentation defining all 7 pillars of the Integration Contract.
+- Documented Project Reference:
+  * Updated `README.md` with Section "Generic Developer Integration Contract" providing explicit rules for build tool and custom engine integrators.
+- Verification:
+  * Compiled and tested doctests and library targets with clean clippy and formatting checks.
+
+3. INTEGRATION CONTRACT SPECIFICATION DETAILS
+--------------------------------------------------------------------------------
+1. How to Declare Inputs:
+   - Must be declared with relative/workspace paths, content SHA-256 digests, and file sizes.
+   - Ergonomic helper `.input_path(path)` hashes and populates metadata automatically.
+2. How to Declare Outputs:
+   - Output paths (files or directories) created by the computation must be declared.
+   - Required status is specified (`required = true/false`).
+   - On cache HIT, outputs are restored atomically from CAS.
+3. How to Declare Environment:
+   - Only variables affecting output should be declared via `.env(k, v)` or `.declared_env(k)`.
+   - Undeclared host environment variables are excluded from the canonical identity.
+4. How Cache Identity Works:
+   - Deterministic `CacheKey` derived from canonical JSON serialization and SHA-256 hashing.
+   - Path normalization (`/`), input/env canonical key sorting ensure reproducibility across platforms and invocation order.
+5. How Errors Work:
+   - Validation errors (`ValidationError`, `PathTraversal`) trigger pre-execution.
+   - Non-zero process exit codes do not pollute the cache by default (`FailurePolicy::DoNotCache`).
+   - Corrupted CAS objects trigger quarantine and safe re-execution.
+6. How Cache Misses Work:
+   - Unmatched keys execute the command in the workspace directory.
+   - Outputs and stdout/stderr are captured into CAS and indexed under `CacheEntry`.
+   - Miss reasons can be inspected with `--explain` or `MissExplainer`.
+7. How to Disable Caching:
+   - Configurable at runtime via `CachePolicy`:
+     * `ReadWrite` (default)
+     * `ReadOnly`
+     * `WriteOnly`
+     * `Bypass`
+     * `ForceRecompute`
+
+4. TEST EXECUTION RESULTS
+--------------------------------------------------------------------------------
+- `cargo check --workspace`: PASSED
+- `cargo test --workspace --examples`: PASSED (123 total test targets)
+- `cargo clippy --workspace --all-targets --all-features`: PASSED (0 warnings)
+- `cargo fmt --all -- --check`: PASSED (clean formatting)
+
+5. CONCLUSION
+--------------------------------------------------------------------------------
+Milestone 10.4 (Integration Contract) is fully documented, formalized, and verified.
+================================================================================

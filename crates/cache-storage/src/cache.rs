@@ -27,6 +27,23 @@ pub struct Cache {
 }
 
 impl Cache {
+    /// Open a Cache instance at the given root directory path, creating required directories if needed.
+    pub fn open(cache_dir: impl AsRef<Path>) -> Result<Self> {
+        let storage = CasStorage::new(crate::cas::StorageConfig {
+            root_dir: cache_dir.as_ref().to_path_buf(),
+            max_size_bytes: None,
+        })?;
+        storage.init_dirs()?;
+        Ok(Self::new(storage))
+    }
+
+    /// Open a Cache instance with custom storage configuration.
+    pub fn open_with_config(config: crate::cas::StorageConfig) -> Result<Self> {
+        let storage = CasStorage::new(config)?;
+        storage.init_dirs()?;
+        Ok(Self::new(storage))
+    }
+
     /// Create a new Cache library instance wrapping the provided CAS storage.
     pub fn new(storage: CasStorage) -> Self {
         Self {
@@ -271,7 +288,7 @@ mod tests {
         assert!(cache.verify_blob(&output_digest).is_ok());
 
         // 2. Build CacheEntry
-        let comp = Computation::builder("compile", "rustc")
+        let comp = Computation::builder_with("compile", "rustc")
             .arg("main.rs")
             .build()
             .unwrap();
@@ -341,7 +358,7 @@ mod tests {
         let content = b"valid content";
         let (digest, size) = cache.store_bytes(content).unwrap();
 
-        let comp = Computation::builder("test", "echo").build().unwrap();
+        let comp = Computation::builder_with("test", "echo").build().unwrap();
         let key = comp.compute_key().unwrap();
         let entry = CacheEntry::new(
             key.clone(),
@@ -372,7 +389,7 @@ mod tests {
         let input_bytes = b"input source code content";
         let input_digest = Digest::from_bytes(input_bytes);
 
-        let comp = Computation::builder("compile", "rustc")
+        let comp = Computation::builder_with("compile", "rustc")
             .arg("--crate-type=lib")
             .arg("lib.rs")
             .input("src/lib.rs", input_digest.clone(), input_bytes.len() as u64)
@@ -452,5 +469,53 @@ mod tests {
             tampered_entry.verify_identity().is_err(),
             "Tampered computation identity must be detected"
         );
+    }
+
+    #[test]
+    fn test_milestone_10_1_public_library_api() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache_path = temp_dir.path().join("dcc_cache");
+
+        // 1. Cache::open(path)
+        let cache = Cache::open(&cache_path).unwrap();
+        assert!(cache_path.exists());
+
+        // 2. ComputationBuilder fluent construction
+        let comp = Computation::builder_with("test_op", "echo")
+            .arg("hello world")
+            .output("out.txt", true)
+            .build()
+            .unwrap();
+
+        let key = comp.compute_key().unwrap();
+
+        // 3. Cache::lookup
+        assert!(cache.lookup(&key).unwrap().is_none());
+
+        // 4. Cache::store
+        let (out_digest, out_size) = cache.store_bytes(b"hello world").unwrap();
+        let entry = CacheEntry::new(
+            key.clone(),
+            comp,
+            vec![OutputManifestItem {
+                path: "out.txt".into(),
+                digest: out_digest,
+                size: out_size,
+                is_executable: None,
+            }],
+            ExecutionMetadata::default(),
+        );
+        cache.store(&entry).unwrap();
+
+        // 5. Cache::lookup after store
+        let found = cache.lookup(&key).unwrap().expect("should find entry");
+        assert_eq!(found.key, key);
+
+        // 6. Cache::verify
+        assert!(cache.verify(&key).is_ok());
+
+        // 7. Cache::remove
+        assert!(cache.remove(&key).unwrap());
+        assert!(cache.lookup(&key).unwrap().is_none());
     }
 }

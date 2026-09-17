@@ -72,6 +72,14 @@ impl<'a> RunnerEngine<'a> {
         Self { storage, options }
     }
 
+    /// Create a runner engine instance directly wrapping a Cache library instance.
+    pub fn from_cache(cache: &'a dcc_storage::Cache, options: Option<EngineOptions>) -> Self {
+        Self {
+            storage: cache.storage(),
+            options: options.unwrap_or_default(),
+        }
+    }
+
     /// Execute a command specified via structured CommandSpec.
     pub fn execute_command(&self, spec: &crate::command::CommandSpec) -> Result<ExecutionResult> {
         let computation = spec.to_computation("run");
