@@ -741,6 +741,21 @@ Current:
   sha256: def...
 ```
 
+### Debug Mode (Milestone 9.4)
+
+With `dcc run --verbose` (or `-v`), developers inspect the engine's step-by-step caching lifecycle:
+
+```text
+[INPUT] hashing files
+[KEY] generating computation key
+[LOOKUP] checking cache
+[MISS] no entry
+[EXEC] running command
+[OUTPUT] validating outputs
+[STORE] writing objects
+[DONE] stored result
+```
+
 ---
 
 ## CLI Usage
@@ -754,6 +769,9 @@ dcc run --input src/schema.json --output generated/models.rs -- generator src/sc
 
 # Explain cache miss reasons
 dcc run --explain --input src/schema.json --output generated/models.rs -- generator src/schema.json
+
+# Run with verbose stage-by-stage debugging
+dcc run --verbose --input src/schema.json --output generated/models.rs -- generator src/schema.json
 
 # View cache storage statistics (human-readable or JSON)
 dcc stats

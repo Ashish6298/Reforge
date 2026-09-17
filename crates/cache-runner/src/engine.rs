@@ -47,6 +47,7 @@ pub struct EngineOptions {
     pub failure_policy: FailurePolicy,
     pub working_dir: PathBuf,
     pub lock_timeout: Duration,
+    pub verbose: bool,
 }
 
 impl Default for EngineOptions {
@@ -56,6 +57,7 @@ impl Default for EngineOptions {
             failure_policy: FailurePolicy::DoNotCache,
             working_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             lock_timeout: Duration::from_secs(30),
+            verbose: false,
         }
     }
 }
@@ -78,6 +80,10 @@ impl<'a> RunnerEngine<'a> {
 
     pub fn execute(&self, mut computation: Computation) -> Result<ExecutionResult> {
         computation.validate()?;
+
+        if self.options.verbose {
+            eprintln!("[INPUT] hashing files");
+        }
 
         // 1. Collect and hash all declared input files
         let mut computed_inputs = Vec::new();
@@ -103,6 +109,9 @@ impl<'a> RunnerEngine<'a> {
         computation.inputs = computed_inputs;
 
         // 2. Canonical serialization and CacheKey generation
+        if self.options.verbose {
+            eprintln!("[KEY] generating computation key");
+        }
         let canonical = CanonicalComputation::from_computation(&computation);
         let key = canonical.compute_key()?;
 
@@ -128,6 +137,9 @@ impl<'a> RunnerEngine<'a> {
         }
 
         // 3. Cache lookup
+        if self.options.verbose {
+            eprintln!("[LOOKUP] checking cache");
+        }
         let lookup_start = std::time::Instant::now();
         if self.options.policy != CachePolicy::WriteOnly {
             match self.storage.get_entry(&key) {
@@ -312,6 +324,12 @@ impl<'a> RunnerEngine<'a> {
             }
         }
 
+        // Cache MISS -> Execute process
+        if self.options.verbose {
+            eprintln!("[MISS] no entry");
+            eprintln!("[EXEC] running command");
+        }
+
         // Run process
         let proc_output = ProcessExecutor::execute(
             &computation.command,
@@ -343,6 +361,9 @@ impl<'a> RunnerEngine<'a> {
         }
 
         // Validate and store outputs
+        if self.options.verbose {
+            eprintln!("[OUTPUT] validating outputs");
+        }
         let mut manifest_items = Vec::new();
         for output in &computation.outputs {
             let full_out_path = self.options.working_dir.join(&output.path);
@@ -380,6 +401,9 @@ impl<'a> RunnerEngine<'a> {
 
         let store_start = std::time::Instant::now();
         if should_store && self.options.policy != CachePolicy::ReadOnly {
+            if self.options.verbose {
+                eprintln!("[STORE] writing objects");
+            }
             let entry = CacheEntry::new(
                 key.clone(),
                 computation,
@@ -398,6 +422,9 @@ impl<'a> RunnerEngine<'a> {
                 },
             );
             self.storage.store_entry(&entry)?;
+            if self.options.verbose {
+                eprintln!("[DONE] stored result");
+            }
         }
         let store_time_ms = store_start.elapsed().as_millis() as u64;
 

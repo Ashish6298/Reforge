@@ -182,6 +182,7 @@ fn handle_run(storage: &CasStorage, args: RunArgs, json: bool) -> Result<()> {
             failure_policy: dcc_runner::FailurePolicy::default(),
             working_dir: std::env::current_dir()?,
             lock_timeout: Duration::from_secs(30),
+            verbose: args.verbose,
         },
     );
 
@@ -721,6 +722,7 @@ mod tests {
             operation: "copy_test_8_3".to_string(),
             policy: "read-write".to_string(),
             explain: true,
+            verbose: true,
             command: cmd.clone(),
         };
 
