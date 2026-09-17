@@ -337,6 +337,37 @@ Platform Dimensions:
 
 ---
 
+## Explainable Cache Misses
+
+Cache misses are never unexplained in DCC. When a computation produces a cache miss or recomputation, `MissExplainer` provides human-readable and structured diagnostic reasons:
+
+```text
+MISS: no cache entry exists
+
+MISS: input changed
+  src/parser.rs (was 3a8f..., now 9b2c...)
+
+MISS: command arguments changed
+  ["main.rs"] -> ["main.rs", "--release"]
+
+MISS: tool identity changed
+  tool version changed: Some("1.80.0") -> Some("1.81.0")
+
+MISS: relevant environment changed
+  OPTIMIZATION_LEVEL changed from "2" to "3"
+
+MISS: platform changed
+  Target triple changed: "x86_64-unknown-linux-gnu" -> "aarch64-unknown-linux-gnu"
+
+MISS: cached output failed integrity verification
+  CAS object 4a2b missing or integrity hash failed
+```
+
+- **CLI Flag**: Run with `dcc run --explain ...` to inspect the exact trigger for execution.
+- **Machine Readability**: Included in JSON outputs (`"miss_reason": { ... }`) for tooling and CI telemetry.
+
+---
+
 ## Workspace Architecture
 
 - **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`), streaming hashing, and canonical key derivation.

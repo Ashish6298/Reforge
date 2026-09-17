@@ -94,18 +94,78 @@ impl MissExplainer {
         }
 
         if current.tool != prev.tool {
-            return MissReason::ToolChanged {
-                reason: format!("Current: {:?}, Previous: {:?}", current.tool, prev.tool),
+            let reason = match (&current.tool, &prev.tool) {
+                (Some(c), Some(p)) => {
+                    let mut diffs = Vec::new();
+                    if c.name != p.name {
+                        diffs.push(format!("tool name changed: '{}' -> '{}'", p.name, c.name));
+                    }
+                    if c.version != p.version {
+                        diffs.push(format!(
+                            "tool version changed: {:?} -> {:?}",
+                            p.version, c.version
+                        ));
+                    }
+                    if c.digest != p.digest {
+                        diffs.push(format!(
+                            "tool digest changed: {:?} -> {:?}",
+                            p.digest.as_ref().map(|d| d.as_str()),
+                            c.digest.as_ref().map(|d| d.as_str())
+                        ));
+                    }
+                    diffs.join(", ")
+                }
+                (Some(c), None) => format!("tool identity added: '{}'", c.name),
+                (None, Some(p)) => format!("tool identity removed: '{}'", p.name),
+                (None, None) => "tool identity changed".to_string(),
             };
+            return MissReason::ToolChanged { reason };
         }
 
         if current.platform != prev.platform {
-            return MissReason::PlatformChanged {
-                reason: format!(
-                    "Current: {:?}, Previous: {:?}",
-                    current.platform, prev.platform
-                ),
+            let mut diffs = Vec::new();
+            if current.platform.os != prev.platform.os {
+                diffs.push(format!(
+                    "OS changed: '{}' -> '{}'",
+                    prev.platform.os, current.platform.os
+                ));
+            }
+            if current.platform.arch != prev.platform.arch {
+                diffs.push(format!(
+                    "Arch changed: '{}' -> '{}'",
+                    prev.platform.arch, current.platform.arch
+                ));
+            }
+            if current.platform.target != prev.platform.target {
+                diffs.push(format!(
+                    "Target triple changed: {:?} -> {:?}",
+                    prev.platform.target, current.platform.target
+                ));
+            }
+            if current.platform.runtime != prev.platform.runtime {
+                diffs.push(format!(
+                    "Runtime changed: {:?} -> {:?}",
+                    prev.platform.runtime, current.platform.runtime
+                ));
+            }
+            if current.platform.abi != prev.platform.abi {
+                diffs.push(format!(
+                    "ABI changed: {:?} -> {:?}",
+                    prev.platform.abi, current.platform.abi
+                ));
+            }
+            if current.platform.compiler != prev.platform.compiler {
+                diffs.push(format!(
+                    "Compiler changed: {:?} -> {:?}",
+                    prev.platform.compiler, current.platform.compiler
+                ));
+            }
+            let reason = if diffs.is_empty() {
+                "Platform constraints changed".to_string()
+            } else {
+                diffs.join(", ")
             };
+            return MissReason::PlatformChanged { reason };
         }
 
         MissReason::NoEntryFound

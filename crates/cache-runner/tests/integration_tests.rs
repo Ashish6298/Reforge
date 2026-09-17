@@ -1014,3 +1014,192 @@ fn test_milestone_5_5_platform_invalidation_comprehensive() {
         other => panic!("Expected PlatformChanged miss reason, got {:?}", other),
     }
 }
+
+#[test]
+fn test_milestone_5_6_explainable_cache_misses_comprehensive() {
+    // 1. Initial State: No Entry Exists
+    let comp_base = Computation::builder("build", "rustc")
+        .arg("main.rs")
+        .input(
+            "src/parser.rs",
+            Digest::from_bytes(b"fn parse() -> bool { true }"),
+            30,
+        )
+        .env("OPTIMIZATION_LEVEL", "2")
+        .tool("rustc", Some("1.80.0".into()), None)
+        .platform(
+            dcc_core::PlatformConstraints::new("linux", "x86_64")
+                .with_target("x86_64-unknown-linux-gnu"),
+        )
+        .build()
+        .unwrap();
+
+    let miss_no_entry = dcc_runner::MissExplainer::explain(&comp_base, None);
+    assert_eq!(miss_no_entry, dcc_core::MissReason::NoEntryFound);
+    let msg = format!("{}", miss_no_entry);
+    assert!(msg.contains("No previous cache entry"));
+
+    // 2. Input Changed
+    let comp_input_changed = Computation::builder("build", "rustc")
+        .arg("main.rs")
+        .input(
+            "src/parser.rs",
+            Digest::from_bytes(b"fn parse() -> bool { false }"),
+            31,
+        )
+        .env("OPTIMIZATION_LEVEL", "2")
+        .tool("rustc", Some("1.80.0".into()), None)
+        .platform(
+            dcc_core::PlatformConstraints::new("linux", "x86_64")
+                .with_target("x86_64-unknown-linux-gnu"),
+        )
+        .build()
+        .unwrap();
+
+    let miss_input = dcc_runner::MissExplainer::explain(&comp_input_changed, Some(&comp_base));
+    match &miss_input {
+        dcc_core::MissReason::InputChanged { path, .. } => {
+            assert_eq!(path, "src/parser.rs");
+        }
+        other => panic!("Expected InputChanged, got {:?}", other),
+    }
+    let msg_input = format!("{}", miss_input);
+    assert!(msg_input.contains("src/parser.rs"));
+
+    // 3. Command Executable Changed
+    let comp_cmd_changed = Computation::builder("build", "clang")
+        .arg("main.rs")
+        .input(
+            "src/parser.rs",
+            Digest::from_bytes(b"fn parse() -> bool { true }"),
+            30,
+        )
+        .env("OPTIMIZATION_LEVEL", "2")
+        .tool("rustc", Some("1.80.0".into()), None)
+        .platform(
+            dcc_core::PlatformConstraints::new("linux", "x86_64")
+                .with_target("x86_64-unknown-linux-gnu"),
+        )
+        .build()
+        .unwrap();
+
+    let miss_cmd = dcc_runner::MissExplainer::explain(&comp_cmd_changed, Some(&comp_base));
+    match &miss_cmd {
+        dcc_core::MissReason::CommandChanged { old, new } => {
+            assert_eq!(old, "rustc");
+            assert_eq!(new, "clang");
+        }
+        other => panic!("Expected CommandChanged, got {:?}", other),
+    }
+
+    // 4. Command Arguments Changed
+    let comp_args_changed = Computation::builder("build", "rustc")
+        .arg("main.rs")
+        .arg("--release")
+        .input(
+            "src/parser.rs",
+            Digest::from_bytes(b"fn parse() -> bool { true }"),
+            30,
+        )
+        .env("OPTIMIZATION_LEVEL", "2")
+        .tool("rustc", Some("1.80.0".into()), None)
+        .platform(
+            dcc_core::PlatformConstraints::new("linux", "x86_64")
+                .with_target("x86_64-unknown-linux-gnu"),
+        )
+        .build()
+        .unwrap();
+
+    let miss_args = dcc_runner::MissExplainer::explain(&comp_args_changed, Some(&comp_base));
+    match &miss_args {
+        dcc_core::MissReason::ArgumentsChanged { old, new } => {
+            assert_eq!(old, &vec!["main.rs".to_string()]);
+            assert_eq!(new, &vec!["main.rs".to_string(), "--release".to_string()]);
+        }
+        other => panic!("Expected ArgumentsChanged, got {:?}", other),
+    }
+
+    // 5. Tool Identity Changed
+    let comp_tool_changed = Computation::builder("build", "rustc")
+        .arg("main.rs")
+        .input(
+            "src/parser.rs",
+            Digest::from_bytes(b"fn parse() -> bool { true }"),
+            30,
+        )
+        .env("OPTIMIZATION_LEVEL", "2")
+        .tool("rustc", Some("1.81.0".into()), None)
+        .platform(
+            dcc_core::PlatformConstraints::new("linux", "x86_64")
+                .with_target("x86_64-unknown-linux-gnu"),
+        )
+        .build()
+        .unwrap();
+
+    let miss_tool = dcc_runner::MissExplainer::explain(&comp_tool_changed, Some(&comp_base));
+    match &miss_tool {
+        dcc_core::MissReason::ToolChanged { reason } => {
+            assert!(reason.contains("1.80.0") && reason.contains("1.81.0"));
+        }
+        other => panic!("Expected ToolChanged, got {:?}", other),
+    }
+
+    // 6. Relevant Environment Changed
+    let comp_env_changed = Computation::builder("build", "rustc")
+        .arg("main.rs")
+        .input(
+            "src/parser.rs",
+            Digest::from_bytes(b"fn parse() -> bool { true }"),
+            30,
+        )
+        .env("OPTIMIZATION_LEVEL", "3")
+        .tool("rustc", Some("1.80.0".into()), None)
+        .platform(
+            dcc_core::PlatformConstraints::new("linux", "x86_64")
+                .with_target("x86_64-unknown-linux-gnu"),
+        )
+        .build()
+        .unwrap();
+
+    let miss_env = dcc_runner::MissExplainer::explain(&comp_env_changed, Some(&comp_base));
+    match &miss_env {
+        dcc_core::MissReason::EnvironmentChanged { key, old, new } => {
+            assert_eq!(key, "OPTIMIZATION_LEVEL");
+            assert_eq!(old.as_deref(), Some("2"));
+            assert_eq!(new.as_deref(), Some("3"));
+        }
+        other => panic!("Expected EnvironmentChanged, got {:?}", other),
+    }
+
+    // 7. Platform Changed
+    let comp_plat_changed = Computation::builder("build", "rustc")
+        .arg("main.rs")
+        .input(
+            "src/parser.rs",
+            Digest::from_bytes(b"fn parse() -> bool { true }"),
+            30,
+        )
+        .env("OPTIMIZATION_LEVEL", "2")
+        .tool("rustc", Some("1.80.0".into()), None)
+        .platform(
+            dcc_core::PlatformConstraints::new("linux", "aarch64")
+                .with_target("aarch64-unknown-linux-gnu"),
+        )
+        .build()
+        .unwrap();
+
+    let miss_plat = dcc_runner::MissExplainer::explain(&comp_plat_changed, Some(&comp_base));
+    match &miss_plat {
+        dcc_core::MissReason::PlatformChanged { reason } => {
+            assert!(reason.contains("aarch64") && reason.contains("x86_64"));
+        }
+        other => panic!("Expected PlatformChanged, got {:?}", other),
+    }
+
+    // 8. Corrupted Cache / Failed Output Integrity Verification
+    let miss_corrupted = dcc_core::MissReason::CorruptedCache {
+        reason: "CAS object 4a2b missing or integrity hash failed".into(),
+    };
+    let msg_corrupted = format!("{}", miss_corrupted);
+    assert!(msg_corrupted.contains("Corrupted cache entry"));
+}
