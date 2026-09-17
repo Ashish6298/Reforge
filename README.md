@@ -471,12 +471,26 @@ DCC provides first-class support for configuring cache size limits via the `Byte
   * `dcc init --max-size "2 GB"`
   * `dcc prune --max-size "500 MB"`
 
+### Eviction Strategy (Milestone 7.2)
+
+DCC avoids complex, brittle heuristics in favor of deterministic, understandable eviction policies:
+
+- **LRU (Least Recently Used - Default)**: Evicts cache entries with the oldest `last_accessed_at` timestamp.
+- **FIFO (First In, First Out)**: Evicts cache entries with the oldest `created_at` timestamp.
+- **LFU (Least Frequently Used)**: Evicts cache entries with the lowest `hit_count`, tie-breaking on oldest access.
+- **TTL / Expiration**: Purges stale entries older than a configurable duration (`evict_expired`).
+- **Policy Enforcement**: `Pruner::enforce_policy(policy)` and `Pruner::evict_with_strategy(strategy, max_size)`.
+- **CLI Commands**:
+  * `dcc prune --strategy lru --max-size "2 GB"`
+  * `dcc prune --strategy fifo --max-size "1 GB"`
+  * `dcc prune --strategy lfu --max-size "500 MB"`
+
 ---
 
 ## Workspace Architecture
 
 - **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`, `ByteSize`), streaming hashing, and canonical key derivation.
-- **[`crates/cache-storage`](crates/cache-storage)**: Content-Addressed Storage (CAS) with 2-char hex prefix sharding, two-stage atomic writes (`.tmp` $\rightarrow$ `fsync` $\rightarrow$ rename), checksum verification, corrupted object isolation, LRU eviction (`Pruner`), and `fs2` multi-process locking.
+- **[`crates/cache-storage`](crates/cache-storage)**: Content-Addressed Storage (CAS) with 2-char hex prefix sharding, two-stage atomic writes (`.tmp` $\rightarrow$ `fsync` $\rightarrow$ rename), checksum verification, corrupted object isolation, multi-strategy eviction (`Pruner` supporting LRU/FIFO/LFU), and `fs2` multi-process locking.
 - **[`crates/cache-runner`](crates/cache-runner)**: Direct OS process execution, sandboxed output restoration with path-traversal protection, and structured miss explainer.
 - **[`crates/cache-cli`](crates/cache-cli)**: CLI binary (`dcc`) supporting `init`, `run`, `inspect`, `stats`, `verify`, `clean`, `prune`, and `doctor`.
 - **[`crates/cache-integrations`](crates/cache-integrations)**: Developer adapters for code generators, build systems, and tools.

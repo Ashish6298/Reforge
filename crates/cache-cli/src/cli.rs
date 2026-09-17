@@ -54,6 +54,13 @@ pub enum Commands {
             help = "Enforce max size (e.g. '500 MB', '2 GB', '10 GB' or raw bytes)"
         )]
         max_size: Option<String>,
+
+        #[arg(
+            long,
+            default_value = "lru",
+            help = "Eviction strategy: lru (least recently used), fifo (oldest created), lfu (least frequently used)"
+        )]
+        strategy: String,
     },
 
     #[command(about = "Diagnose cache health, environment, and permissions")]

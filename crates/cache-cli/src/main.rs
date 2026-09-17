@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use dcc_core::{CacheKey, CachePolicy, Computation, Digest};
 use dcc_runner::{EngineOptions, ExecutionStatus, RunnerEngine};
-use dcc_storage::{CasStorage, Pruner, StorageConfig, StorageStats};
+use dcc_storage::{CasStorage, EvictionStrategy, Pruner, StorageConfig, StorageStats};
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -37,7 +37,9 @@ fn main() -> Result<()> {
         Commands::Stats => handle_stats(&storage, cli.json)?,
         Commands::Verify => handle_verify(&storage, cli.json)?,
         Commands::Clean { key } => handle_clean(&storage, key.as_deref(), cli.json)?,
-        Commands::Prune { max_size } => handle_prune(&storage, max_size.as_deref(), cli.json)?,
+        Commands::Prune { max_size, strategy } => {
+            handle_prune(&storage, max_size.as_deref(), &strategy, cli.json)?
+        }
         Commands::Doctor => handle_doctor(&storage, cli.json)?,
     }
 
@@ -336,12 +338,27 @@ fn handle_clean(storage: &CasStorage, key_opt: Option<&str>, json: bool) -> Resu
     Ok(())
 }
 
-fn handle_prune(storage: &CasStorage, max_size_str: Option<&str>, json: bool) -> Result<()> {
+fn handle_prune(
+    storage: &CasStorage,
+    max_size_str: Option<&str>,
+    strategy_str: &str,
+    json: bool,
+) -> Result<()> {
     let pruner = Pruner::new(storage);
+    let strategy = match strategy_str.to_lowercase().as_str() {
+        "lru" => EvictionStrategy::Lru,
+        "fifo" => EvictionStrategy::Fifo,
+        "lfu" => EvictionStrategy::Lfu,
+        other => anyhow::bail!(
+            "Unknown eviction strategy '{}'. Supported: lru, fifo, lfu",
+            other
+        ),
+    };
+
     let result = if let Some(s) = max_size_str {
         let size = dcc_core::ByteSize::parse(s)
             .with_context(|| format!("Invalid max_size value '{}'", s))?;
-        pruner.enforce_max_size(size.as_bytes())?
+        pruner.evict_with_strategy(strategy, size.as_bytes())?
     } else {
         pruner.prune_unreferenced_objects()?
     };
@@ -349,8 +366,13 @@ fn handle_prune(storage: &CasStorage, max_size_str: Option<&str>, json: bool) ->
     if json {
         println!("{}", serde_json::to_string_pretty(&result)?);
     } else {
+        let strat_label = result
+            .strategy
+            .map(|s| format!(" (strategy: {:?})", s))
+            .unwrap_or_default();
         println!(
-            "Prune complete: deleted {} entries, {} unreferenced objects, freed {:.2} MB.",
+            "Prune complete{}: deleted {} entries, {} unreferenced objects, freed {:.2} MB.",
+            strat_label,
             result.deleted_entries,
             result.deleted_objects,
             result.freed_bytes as f64 / (1024.0 * 1024.0)

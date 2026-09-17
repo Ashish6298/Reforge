@@ -1,24 +1,51 @@
 use crate::cas::CasStorage;
+use chrono::{DateTime, Utc};
 use dcc_core::{CacheEntry, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 use walkdir::WalkDir;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum EvictionPolicy {
+/// Eviction strategies for managing cache capacity and lifecycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum EvictionStrategy {
+    /// Least Recently Used: evict entries with the oldest `last_accessed_at` timestamp.
+    #[default]
     Lru,
-    MaxSizeBytes(u64),
+    /// First In First Out: evict entries with the oldest `created_at` timestamp.
+    Fifo,
+    /// Least Frequently Used: evict entries with the lowest `hit_count` (tie-broken by `last_accessed_at`).
+    Lfu,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+/// Eviction policy configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvictionPolicy {
+    Lru,
+    Fifo,
+    Lfu,
+    MaxSizeBytes(u64),
+    StrategyAndLimit {
+        strategy: EvictionStrategy,
+        max_size_bytes: u64,
+    },
+}
+
+/// Results of an eviction or pruning operation.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EvictionResult {
     pub deleted_entries: usize,
     pub deleted_objects: usize,
     pub freed_bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strategy: Option<EvictionStrategy>,
 }
 
+/// High-level garbage collection and eviction coordinator.
 pub struct Pruner<'a> {
     storage: &'a CasStorage,
 }
@@ -28,6 +55,7 @@ impl<'a> Pruner<'a> {
         Self { storage }
     }
 
+    /// Prune CAS objects that are no longer referenced by any active cache entry.
     pub fn prune_unreferenced_objects(&self) -> Result<EvictionResult> {
         let mut referenced_digests = HashSet::new();
 
@@ -77,9 +105,22 @@ impl<'a> Pruner<'a> {
         Ok(result)
     }
 
+    /// Enforce a maximum cache size using the default LRU strategy.
     pub fn enforce_max_size(&self, max_size_bytes: u64) -> Result<EvictionResult> {
-        let mut result = EvictionResult::default();
-        let mut entries_with_access: Vec<(PathBuf, CacheEntry, u64)> = Vec::new();
+        self.evict_with_strategy(EvictionStrategy::Lru, max_size_bytes)
+    }
+
+    /// Enforce a maximum cache size using a specified eviction strategy (LRU, FIFO, LFU).
+    pub fn evict_with_strategy(
+        &self,
+        strategy: EvictionStrategy,
+        max_size_bytes: u64,
+    ) -> Result<EvictionResult> {
+        let mut result = EvictionResult {
+            strategy: Some(strategy),
+            ..Default::default()
+        };
+        let mut entries_list: Vec<(PathBuf, CacheEntry, u64)> = Vec::new();
 
         let entries_dir = self.storage.entries_dir();
         if entries_dir.exists() {
@@ -90,23 +131,41 @@ impl<'a> Pruner<'a> {
                     if let Ok(file) = fs::File::open(file_entry.path()) {
                         if let Ok(entry) = serde_json::from_reader::<_, CacheEntry>(file) {
                             let size = entry.total_output_size();
-                            entries_with_access.push((
-                                file_entry.path().to_path_buf(),
-                                entry,
-                                size,
-                            ));
+                            entries_list.push((file_entry.path().to_path_buf(), entry, size));
                         }
                     }
                 }
             }
         }
 
-        // Sort by LRU: oldest last_accessed_at first
-        entries_with_access.sort_by_key(|(_, entry, _)| entry.metadata.last_accessed_at);
+        // Sort candidates based on the chosen strategy (oldest/least valued candidates first)
+        match strategy {
+            EvictionStrategy::Lru => {
+                // Least Recently Used: oldest last_accessed_at first
+                entries_list.sort_by_key(|(_, entry, _)| entry.metadata.last_accessed_at);
+            }
+            EvictionStrategy::Fifo => {
+                // First In First Out: oldest created_at first
+                entries_list.sort_by_key(|(_, entry, _)| entry.metadata.created_at);
+            }
+            EvictionStrategy::Lfu => {
+                // Least Frequently Used: lowest hit_count first, tie-break by oldest last_accessed_at
+                entries_list.sort_by(|(_, a, _), (_, b, _)| {
+                    a.metadata
+                        .hit_count
+                        .cmp(&b.metadata.hit_count)
+                        .then_with(|| {
+                            a.metadata
+                                .last_accessed_at
+                                .cmp(&b.metadata.last_accessed_at)
+                        })
+                });
+            }
+        }
 
-        let mut current_size: u64 = entries_with_access.iter().map(|(_, _, s)| *s).sum();
+        let mut current_size: u64 = entries_list.iter().map(|(_, _, s)| *s).sum();
 
-        for (path, _, size) in entries_with_access {
+        for (path, _, size) in entries_list {
             if current_size <= max_size_bytes {
                 break;
             }
@@ -122,5 +181,224 @@ impl<'a> Pruner<'a> {
         result.freed_bytes += unreferenced.freed_bytes;
 
         Ok(result)
+    }
+
+    /// Enforce a configured `EvictionPolicy`.
+    pub fn enforce_policy(&self, policy: EvictionPolicy) -> Result<EvictionResult> {
+        match policy {
+            EvictionPolicy::Lru => {
+                let max_size = self
+                    .storage
+                    .max_size()
+                    .map(|bs| bs.as_bytes())
+                    .unwrap_or(u64::MAX);
+                self.evict_with_strategy(EvictionStrategy::Lru, max_size)
+            }
+            EvictionPolicy::Fifo => {
+                let max_size = self
+                    .storage
+                    .max_size()
+                    .map(|bs| bs.as_bytes())
+                    .unwrap_or(u64::MAX);
+                self.evict_with_strategy(EvictionStrategy::Fifo, max_size)
+            }
+            EvictionPolicy::Lfu => {
+                let max_size = self
+                    .storage
+                    .max_size()
+                    .map(|bs| bs.as_bytes())
+                    .unwrap_or(u64::MAX);
+                self.evict_with_strategy(EvictionStrategy::Lfu, max_size)
+            }
+            EvictionPolicy::MaxSizeBytes(limit) => {
+                self.evict_with_strategy(EvictionStrategy::Lru, limit)
+            }
+            EvictionPolicy::StrategyAndLimit {
+                strategy,
+                max_size_bytes,
+            } => self.evict_with_strategy(strategy, max_size_bytes),
+        }
+    }
+
+    /// Evict entries whose `last_accessed_at` is older than `max_age`.
+    pub fn evict_expired(&self, max_age: Duration) -> Result<EvictionResult> {
+        let mut result = EvictionResult::default();
+        let now = Utc::now();
+        let chrono_age = chrono::Duration::from_std(max_age).unwrap_or(chrono::Duration::zero());
+        let cutoff: DateTime<Utc> = now - chrono_age;
+
+        let entries_dir = self.storage.entries_dir();
+        if entries_dir.exists() {
+            for file_entry in WalkDir::new(entries_dir).into_iter().filter_map(|e| e.ok()) {
+                if file_entry.file_type().is_file()
+                    && file_entry.path().extension().and_then(|s| s.to_str()) == Some("json")
+                {
+                    if let Ok(file) = fs::File::open(file_entry.path()) {
+                        if let Ok(entry) = serde_json::from_reader::<_, CacheEntry>(file) {
+                            if entry.metadata.last_accessed_at < cutoff
+                                && fs::remove_file(file_entry.path()).is_ok()
+                            {
+                                result.deleted_entries += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let unreferenced = self.prune_unreferenced_objects()?;
+        result.deleted_objects += unreferenced.deleted_objects;
+        result.freed_bytes += unreferenced.freed_bytes;
+
+        Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cas::StorageConfig;
+    use dcc_core::computation::Computation;
+    use dcc_core::entry::{ExecutionMetadata, OutputManifestItem};
+
+    #[test]
+    fn test_eviction_strategy_fifo() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let storage = CasStorage::new(StorageConfig::new(temp_dir.path())).unwrap();
+        let pruner = Pruner::new(&storage);
+
+        // Entry 1: created at t=1000, last accessed at t=5000, size 100
+        let comp1 = Computation::builder("op1", "cmd1").build().unwrap();
+        let key1 = comp1.compute_key().unwrap();
+        let (d1, s1) = storage.store_object_bytes(&[1u8; 100]).unwrap();
+        let mut entry1 = CacheEntry::new(
+            key1.clone(),
+            comp1,
+            vec![OutputManifestItem {
+                path: "out1.dat".to_string(),
+                digest: d1,
+                size: s1,
+                is_executable: Some(false),
+            }],
+            ExecutionMetadata::default(),
+        );
+        entry1.metadata.created_at = DateTime::from_timestamp(1000, 0).unwrap();
+        entry1.metadata.last_accessed_at = DateTime::from_timestamp(5000, 0).unwrap();
+        storage.store_entry(&entry1).unwrap();
+
+        // Entry 2: created at t=3000, last accessed at t=2000, size 100
+        let comp2 = Computation::builder("op2", "cmd2").build().unwrap();
+        let key2 = comp2.compute_key().unwrap();
+        let (d2, s2) = storage.store_object_bytes(&[2u8; 100]).unwrap();
+        let mut entry2 = CacheEntry::new(
+            key2.clone(),
+            comp2,
+            vec![OutputManifestItem {
+                path: "out2.dat".to_string(),
+                digest: d2,
+                size: s2,
+                is_executable: Some(false),
+            }],
+            ExecutionMetadata::default(),
+        );
+        entry2.metadata.created_at = DateTime::from_timestamp(3000, 0).unwrap();
+        entry2.metadata.last_accessed_at = DateTime::from_timestamp(2000, 0).unwrap();
+        storage.store_entry(&entry2).unwrap();
+
+        // Under FIFO with limit 150 bytes: entry1 (created at 1000) is evicted first despite recent access
+        let res = pruner
+            .evict_with_strategy(EvictionStrategy::Fifo, 150)
+            .unwrap();
+        assert_eq!(res.deleted_entries, 1);
+        assert_eq!(res.deleted_objects, 1);
+        assert_eq!(res.strategy, Some(EvictionStrategy::Fifo));
+
+        assert!(storage.get_entry(&key1).unwrap().is_none());
+        assert!(storage.get_entry(&key2).unwrap().is_some());
+    }
+
+    #[test]
+    fn test_eviction_strategy_lfu() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let storage = CasStorage::new(StorageConfig::new(temp_dir.path())).unwrap();
+        let pruner = Pruner::new(&storage);
+
+        // Entry 1: hits = 10, size 100
+        let comp1 = Computation::builder("op1", "cmd1").build().unwrap();
+        let key1 = comp1.compute_key().unwrap();
+        let (d1, s1) = storage.store_object_bytes(&[1u8; 100]).unwrap();
+        let mut entry1 = CacheEntry::new(
+            key1.clone(),
+            comp1,
+            vec![OutputManifestItem {
+                path: "out1.dat".to_string(),
+                digest: d1,
+                size: s1,
+                is_executable: Some(false),
+            }],
+            ExecutionMetadata::default(),
+        );
+        entry1.metadata.hit_count = 10;
+        storage.store_entry(&entry1).unwrap();
+
+        // Entry 2: hits = 1, size 100
+        let comp2 = Computation::builder("op2", "cmd2").build().unwrap();
+        let key2 = comp2.compute_key().unwrap();
+        let (d2, s2) = storage.store_object_bytes(&[2u8; 100]).unwrap();
+        let mut entry2 = CacheEntry::new(
+            key2.clone(),
+            comp2,
+            vec![OutputManifestItem {
+                path: "out2.dat".to_string(),
+                digest: d2,
+                size: s2,
+                is_executable: Some(false),
+            }],
+            ExecutionMetadata::default(),
+        );
+        entry2.metadata.hit_count = 1;
+        storage.store_entry(&entry2).unwrap();
+
+        // Under LFU with limit 150 bytes: entry2 (hit_count = 1) is evicted, preserving entry1 (hit_count = 10)
+        let res = pruner
+            .evict_with_strategy(EvictionStrategy::Lfu, 150)
+            .unwrap();
+        assert_eq!(res.deleted_entries, 1);
+        assert_eq!(res.deleted_objects, 1);
+        assert_eq!(res.strategy, Some(EvictionStrategy::Lfu));
+
+        assert!(storage.get_entry(&key1).unwrap().is_some());
+        assert!(storage.get_entry(&key2).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_eviction_expired_ttl() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let storage = CasStorage::new(StorageConfig::new(temp_dir.path())).unwrap();
+        let pruner = Pruner::new(&storage);
+
+        let comp = Computation::builder("op", "cmd").build().unwrap();
+        let key = comp.compute_key().unwrap();
+        let (d, s) = storage.store_object_bytes(&[42u8; 50]).unwrap();
+        let mut entry = CacheEntry::new(
+            key.clone(),
+            comp,
+            vec![OutputManifestItem {
+                path: "out.dat".to_string(),
+                digest: d,
+                size: s,
+                is_executable: Some(false),
+            }],
+            ExecutionMetadata::default(),
+        );
+        // Accessed 10 hours ago
+        entry.metadata.last_accessed_at = Utc::now() - chrono::Duration::hours(10);
+        storage.store_entry(&entry).unwrap();
+
+        // Evict older than 1 hour
+        let res = pruner.evict_expired(Duration::from_secs(3600)).unwrap();
+        assert_eq!(res.deleted_entries, 1);
+        assert_eq!(res.deleted_objects, 1);
+        assert!(storage.get_entry(&key).unwrap().is_none());
     }
 }

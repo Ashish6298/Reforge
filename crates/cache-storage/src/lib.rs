@@ -7,7 +7,7 @@ pub mod storage_trait;
 
 pub use cache::Cache;
 pub use cas::{CasStorage, StorageConfig};
-pub use eviction::{EvictionPolicy, EvictionResult, Pruner};
+pub use eviction::{EvictionPolicy, EvictionResult, EvictionStrategy, Pruner};
 pub use lock::ComputationLock;
 pub use stats::StorageStats;
 pub use storage_trait::{BlobMetadata, Storage};

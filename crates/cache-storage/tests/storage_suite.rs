@@ -1,5 +1,5 @@
 use dcc_core::{ByteSize, CacheEntry, CacheError, Computation, Digest, ExecutionMetadata};
-use dcc_storage::{CasStorage, Pruner, StorageConfig};
+use dcc_storage::{CasStorage, EvictionPolicy, EvictionStrategy, Pruner, StorageConfig};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::sync::Arc;
@@ -395,4 +395,113 @@ fn test_storage_suite_max_size_enforcement_lru() {
     assert!(storage.get_entry(&key1).unwrap().is_none());
     assert!(storage.get_entry(&key2).unwrap().is_none());
     assert!(storage.get_entry(&key3).unwrap().is_some());
+}
+
+#[test]
+fn test_storage_suite_eviction_strategy_fifo_vs_lru() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let storage = CasStorage::new(StorageConfig::new(temp_dir.path())).unwrap();
+    let pruner = Pruner::new(&storage);
+
+    // Entry A: created at t=100, accessed at t=900 (recent access), size 100
+    let comp_a = Computation::builder("opA", "cmdA").build().unwrap();
+    let key_a = comp_a.compute_key().unwrap();
+    let (da, sa) = storage.store_object_bytes(&[10u8; 100]).unwrap();
+    let mut entry_a = CacheEntry::new(
+        key_a.clone(),
+        comp_a,
+        vec![dcc_core::OutputManifestItem {
+            path: "outA.dat".to_string(),
+            digest: da,
+            size: sa,
+            is_executable: Some(false),
+        }],
+        ExecutionMetadata::default(),
+    );
+    entry_a.metadata.created_at = chrono::DateTime::from_timestamp(100, 0).unwrap();
+    entry_a.metadata.last_accessed_at = chrono::DateTime::from_timestamp(900, 0).unwrap();
+    storage.store_entry(&entry_a).unwrap();
+
+    // Entry B: created at t=500, accessed at t=600 (older access), size 100
+    let comp_b = Computation::builder("opB", "cmdB").build().unwrap();
+    let key_b = comp_b.compute_key().unwrap();
+    let (db, sb) = storage.store_object_bytes(&[20u8; 100]).unwrap();
+    let mut entry_b = CacheEntry::new(
+        key_b.clone(),
+        comp_b,
+        vec![dcc_core::OutputManifestItem {
+            path: "outB.dat".to_string(),
+            digest: db,
+            size: sb,
+            is_executable: Some(false),
+        }],
+        ExecutionMetadata::default(),
+    );
+    entry_b.metadata.created_at = chrono::DateTime::from_timestamp(500, 0).unwrap();
+    entry_b.metadata.last_accessed_at = chrono::DateTime::from_timestamp(600, 0).unwrap();
+    storage.store_entry(&entry_b).unwrap();
+
+    // FIFO eviction with limit 150 bytes: Entry A is evicted (created first at t=100)
+    let prune_fifo = pruner
+        .evict_with_strategy(EvictionStrategy::Fifo, 150)
+        .unwrap();
+    assert_eq!(prune_fifo.deleted_entries, 1);
+    assert_eq!(prune_fifo.strategy, Some(EvictionStrategy::Fifo));
+    assert!(storage.get_entry(&key_a).unwrap().is_none());
+    assert!(storage.get_entry(&key_b).unwrap().is_some());
+}
+
+#[test]
+fn test_storage_suite_eviction_strategy_lfu_and_policy() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let storage = CasStorage::new(StorageConfig::new(temp_dir.path())).unwrap();
+    let pruner = Pruner::new(&storage);
+
+    // Entry 1: hits = 50, size 100
+    let comp1 = Computation::builder("op1", "cmd1").build().unwrap();
+    let key1 = comp1.compute_key().unwrap();
+    let (d1, s1) = storage.store_object_bytes(&[1u8; 100]).unwrap();
+    let mut entry1 = CacheEntry::new(
+        key1.clone(),
+        comp1,
+        vec![dcc_core::OutputManifestItem {
+            path: "out1.dat".to_string(),
+            digest: d1,
+            size: s1,
+            is_executable: Some(false),
+        }],
+        ExecutionMetadata::default(),
+    );
+    entry1.metadata.hit_count = 50;
+    storage.store_entry(&entry1).unwrap();
+
+    // Entry 2: hits = 2, size 100
+    let comp2 = Computation::builder("op2", "cmd2").build().unwrap();
+    let key2 = comp2.compute_key().unwrap();
+    let (d2, s2) = storage.store_object_bytes(&[2u8; 100]).unwrap();
+    let mut entry2 = CacheEntry::new(
+        key2.clone(),
+        comp2,
+        vec![dcc_core::OutputManifestItem {
+            path: "out2.dat".to_string(),
+            digest: d2,
+            size: s2,
+            is_executable: Some(false),
+        }],
+        ExecutionMetadata::default(),
+    );
+    entry2.metadata.hit_count = 2;
+    storage.store_entry(&entry2).unwrap();
+
+    // Enforce Policy with LFU strategy and limit 150 bytes
+    let policy = EvictionPolicy::StrategyAndLimit {
+        strategy: EvictionStrategy::Lfu,
+        max_size_bytes: 150,
+    };
+    let res = pruner.enforce_policy(policy).unwrap();
+    assert_eq!(res.deleted_entries, 1);
+    assert_eq!(res.strategy, Some(EvictionStrategy::Lfu));
+
+    assert!(storage.get_entry(&key1).unwrap().is_some());
+    assert!(storage.get_entry(&key2).unwrap().is_none());
 }
