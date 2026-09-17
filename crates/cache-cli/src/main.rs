@@ -742,4 +742,56 @@ mod tests {
             b"milestone 8.3 run payload"
         );
     }
+
+    #[test]
+    fn test_cli_json_machine_readable_output() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = StorageConfig {
+            root_dir: temp_dir.path().to_path_buf(),
+            max_size_bytes: Some(5 * 1024 * 1024 * 1024),
+        };
+        let storage = CasStorage::new(config).unwrap();
+
+        // 1. dcc init --json
+        assert!(handle_init(&storage, Some("5 GB"), true).is_ok());
+
+        // 2. dcc doctor --json
+        assert!(handle_doctor(&storage, true).is_ok());
+
+        // 3. dcc config --json
+        assert!(handle_config(&storage, None, true).is_ok());
+        assert!(handle_config(&storage, Some("max_size"), true).is_ok());
+
+        // 4. dcc stats --json
+        assert!(handle_stats(&storage, true).is_ok());
+
+        // 5. Populate and test dcc inspect <key> --json
+        let (digest, size) = storage.store_object_bytes(b"json payload").unwrap();
+        let comp = Computation::builder("json_op", "cmd").build().unwrap();
+        let key = comp.compute_key().unwrap();
+        let entry = CacheEntry::new(
+            key.clone(),
+            comp,
+            vec![OutputManifestItem {
+                path: "out.bin".into(),
+                digest,
+                size,
+                is_executable: None,
+            }],
+            ExecutionMetadata::default(),
+        );
+        storage.store_entry(&entry).unwrap();
+
+        assert!(handle_inspect(&storage, key.as_str(), true).is_ok());
+
+        // 6. dcc verify --json
+        assert!(handle_verify(&storage, true).is_ok());
+
+        // 7. dcc prune --json
+        assert!(handle_prune(&storage, None, "lru", true, true).is_ok());
+
+        // 8. dcc clean --json
+        assert!(handle_clean(&storage, Some(key.as_str()), true).is_ok());
+        assert!(handle_clean(&storage, None, true).is_ok());
+    }
 }

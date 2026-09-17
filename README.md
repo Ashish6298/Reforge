@@ -657,6 +657,24 @@ Displayed Fields:
 - **`size`**: Aggregate size of produced outputs in bytes and KB/MB.
 - **`integrity`**: Cryptographic validation status checking declared key against canonical computation digest.
 
+### JSON Output (`--json`) (Milestone 8.6)
+
+Every major command supports machine-readable structured JSON output via the global `--json` flag:
+
+```bash
+dcc stats --json
+dcc inspect <key> --json
+dcc run --json --input src/schema.json --output generated/models.rs -- generator src/schema.json
+dcc init --json
+dcc doctor --json
+dcc verify --json
+dcc config --json
+dcc prune --json
+dcc clean --json
+```
+
+Enables seamless integration with CI/CD runners, build automation pipelines, and metrics aggregators.
+
 ### Stable Exit Codes
 - `0`: Success / Cache HIT
 - `1`: Computation failed / Cache entry not found
