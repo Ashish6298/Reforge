@@ -388,6 +388,24 @@ DCC enforces an exhaustive 11-dimension correctness test matrix to guarantee tha
 
 ---
 
+## Concurrency & Locking
+
+DCC is architected for multi-process concurrency, allowing parallel terminals, build workers, and CI jobs to access the shared cache safely and simultaneously:
+
+```text
+Terminal A -> computation X
+Terminal B -> computation X
+Terminal C -> computation Y
+```
+
+### Concurrent Reads (Milestone 6.1)
+
+- **Immutable CAS Objects**: CAS objects are immutable once committed via atomic two-stage rename. Readers acquire shared read-only handles (`File::open`) without exclusive locks or contention.
+- **Lock-Free Read Scaling**: Dozens of concurrent threads or processes can stream the same CAS object or inspect metadata simultaneously.
+- **Concurrent Cache Hit Storms**: When multiple concurrent runner processes execute identical computations on a warm cache, 100% of workers experience immediate cache hits (`ExecutionStatus::Hit`), $0\text{ ms}$ execution duration, no child process spawning, and atomic output restoration into their respective workspaces.
+
+---
+
 ## Workspace Architecture
 
 - **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`), streaming hashing, and canonical key derivation.
