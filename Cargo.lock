@@ -228,6 +228,7 @@ dependencies = [
 name = "dcc-integrations"
 version = "1.0.0"
 dependencies = [
+ "anyhow",
  "dcc-core",
  "dcc-runner",
  "dcc-storage",

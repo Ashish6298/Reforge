@@ -1,0 +1,70 @@
+================================================================================
+DCC VERIFICATION REPORT: MILESTONE 10.3 — INTEGRATION EXAMPLES
+================================================================================
+Date: 2026-09-17
+Workspace: D:\DC
+Report Path: D:\DC\docs\report\milestone_10_3_integration_examples_report.txt
+
+1. OBJECTIVE & REQUIREMENTS
+--------------------------------------------------------------------------------
+Milestone 10.3 requires creating realistic developer integration examples:
+- `examples/cached_codegen.rs`: Realistic code generator integration (Schema -> Models).
+- `examples/cached_analysis.rs`: Realistic static code analysis / linter integration (Source + Rules -> Analysis Report).
+- `examples/cached_transform.rs`: Realistic data transformation / asset pipeline integration (Raw Dataset -> Minified JSON).
+
+Each example must demonstrate:
+- Opening the cache with `Cache::open(...)`.
+- Fluent computation construction with `Computation::builder()`.
+- Explicit input hashing with `.input_path(...)` / `.input(...)`.
+- Declared required outputs with `.output(...)`.
+- Execution lifecycle demonstrating cold MISS (storage) followed by warm HIT (deterministic output restoration).
+- Preserve existing CLI and library functionality without breaking UI/API changes.
+
+2. IMPLEMENTATION SUMMARY
+--------------------------------------------------------------------------------
+- Created / Enhanced Examples:
+  * `examples/cached_codegen.rs`:
+    Generates typed Rust domain models from a JSON schema. Demonstrates cold execution (MISS), output verification, file deletion, and subsequent cached execution (HIT) with restored outputs.
+  * `examples/cached_analysis.rs`:
+    Executes a static analysis check against rule configurations and source code files, generating a machine-readable `analysis_report.json` artifact with full caching and restoration.
+  * `examples/cached_transform.rs`:
+    Runs an ETL / asset transformation pipeline transforming raw tabular CSV data into minified JSON, validating cache reuse on unmodified source datasets.
+
+- Configured Cargo Manifest:
+  * Updated `crates/cache-integrations/Cargo.toml` with `[[example]]` targets for `cached_codegen`, `cached_analysis`, and `cached_transform`.
+
+- Documentation:
+  * Updated `README.md` with Developer Integration Examples section and commands.
+
+3. TEST & RUN VERIFICATION RESULTS
+--------------------------------------------------------------------------------
+1. Executing `cargo run --example cached_codegen`:
+   Status: SUCCESS (Exit Code 0)
+   Output:
+   - Cold execution: Miss (Key: 7ab42320541367c1fef8e7ec2ab076ebb674d51697e2a0ffdfe6605fa32fa11f)
+   - Warm execution: Hit  (Key: 7ab42320541367c1fef8e7ec2ab076ebb674d51697e2a0ffdfe6605fa32fa11f)
+   - Generated model artifacts verified.
+
+2. Executing `cargo run --example cached_analysis`:
+   Status: SUCCESS (Exit Code 0)
+   Output:
+   - Cold execution: Miss (Key: a4d0459406b0cef1da6926f60ab51968aee0f9457eed86b6cd52bfd2cdfc3dc8)
+   - Warm execution: Hit  (Key: a4d0459406b0cef1da6926f60ab51968aee0f9457eed86b6cd52bfd2cdfc3dc8)
+   - Analysis report artifacts verified.
+
+3. Executing `cargo run --example cached_transform`:
+   Status: SUCCESS (Exit Code 0)
+   Output:
+   - Cold execution: Miss (Key: ba441d2783ce570cfdaab729efa7b67a22abb23528df64131d94d8a74b2cb17b)
+   - Warm execution: Hit  (Key: ba441d2783ce570cfdaab729efa7b67a22abb23528df64131d94d8a74b2cb17b)
+   - Transformed JSON artifacts verified.
+
+4. Quality Gates:
+   - `cargo test --workspace --examples`: PASSED (120 unit/integration tests + 3 example unit tests)
+   - `cargo clippy --workspace --all-targets --all-features`: PASSED (0 warnings)
+   - `cargo fmt --all -- --check`: PASSED (clean formatting)
+
+4. CONCLUSION
+--------------------------------------------------------------------------------
+Milestone 10.3 (Integration Examples) is fully implemented, executed, verified, and documented.
+================================================================================

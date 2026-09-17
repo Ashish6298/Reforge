@@ -865,6 +865,30 @@ let computation = Computation::builder()
 
 ---
 
+## Developer Integration Examples (`examples/`)
+
+Realistic developer integration examples demonstrating first-class usage of the DCC Rust library:
+
+```bash
+# 1. Code Generator (Schema -> Models)
+cargo run --example cached_codegen
+
+# 2. Static Code Analysis & Linter (Source + Rules -> Analysis Report)
+cargo run --example cached_analysis
+
+# 3. Data Transformation & Asset Minification (CSV -> JSON Pipeline)
+cargo run --example cached_transform
+```
+
+Each example illustrates:
+1. Opening the local cache using `Cache::open(cache_dir)`.
+2. Initializing a `GenericIntegration` runner bound to the workspace.
+3. Defining inputs, outputs, environment declarations, and metadata with `Computation::builder()`.
+4. Cold execution causing a cache **MISS** and storing generated artifacts.
+5. Deleting local outputs and running the second execution to demonstrate instantaneous cache **HIT** and deterministic output restoration.
+
+---
+
 ## Quality Gates & Verification
 
 ```bash
