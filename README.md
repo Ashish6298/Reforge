@@ -634,6 +634,29 @@ Output Metrics:
 - **`estimated time saved`**: Total estimated execution time saved by serving hits from cache.
 - **`largest object`**: Size in bytes of the largest stored CAS blob.
 
+### `dcc inspect` (Milestone 8.5)
+
+Allows developers to inspect stored computation records and manifests:
+
+```bash
+dcc inspect <key>
+dcc inspect <key> --json
+```
+
+Displayed Fields:
+- **`key`**: Canonical SHA-256 computation key.
+- **`operation`**: High-level logical operation identifier.
+- **`command`**: Target executable binary or script.
+- **`arguments`**: Full argument list.
+- **`inputs`**: Manifest of input files (paths, sizes, SHA-256 digests).
+- **`outputs`**: Manifest of produced output files (paths, sizes, CAS SHA-256 digests).
+- **`tool identity`**: Name, version, and binary executable hash.
+- **`environment`**: Explicitly declared environment variables.
+- **`created`**: UTC timestamp when computation was first recorded.
+- **`last accessed`**: UTC timestamp of the most recent cache hit/access.
+- **`size`**: Aggregate size of produced outputs in bytes and KB/MB.
+- **`integrity`**: Cryptographic validation status checking declared key against canonical computation digest.
+
 ### Stable Exit Codes
 - `0`: Success / Cache HIT
 - `1`: Computation failed / Cache entry not found

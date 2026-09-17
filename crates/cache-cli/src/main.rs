@@ -239,6 +239,12 @@ fn handle_inspect(storage: &CasStorage, key_str: &str, json: bool) -> Result<()>
             if json {
                 println!("{}", serde_json::to_string_pretty(&entry)?);
             } else {
+                let total_output_size: u64 = entry.outputs.iter().map(|o| o.size).sum();
+                let identity_status = match entry.verify_identity() {
+                    Ok(()) => "Valid (matches canonical computation key)".to_string(),
+                    Err(e) => format!("Integrity Error ({})", e),
+                };
+
                 println!("--- Computation Entry ---");
                 println!("Key:           {}", entry.key);
                 println!("Operation:     {}", entry.computation.operation);
@@ -258,13 +264,36 @@ fn handle_inspect(storage: &CasStorage, key_str: &str, json: bool) -> Result<()>
                         out.path, out.size, out.digest
                     );
                 }
-                println!("Created At:    {}", entry.metadata.created_at);
+                if let Some(tool) = &entry.computation.tool {
+                    let ver = tool.version.as_deref().unwrap_or("none");
+                    let dig = tool.digest.as_ref().map(|d| d.as_str()).unwrap_or("none");
+                    println!(
+                        "Tool Identity: {} (version: {}, digest: {})",
+                        tool.name, ver, dig
+                    );
+                } else {
+                    println!("Tool Identity: none");
+                }
+                println!(
+                    "Environment:   {} variables declared",
+                    entry.computation.env.len()
+                );
+                for (k, v) in &entry.computation.env {
+                    println!("  - {}={}", k, v);
+                }
+                println!("Created:       {}", entry.metadata.created_at);
                 println!("Last Accessed: {}", entry.metadata.last_accessed_at);
                 println!("Hit Count:     {}", entry.metadata.hit_count);
                 println!(
                     "Execution Time:{} ms",
                     entry.metadata.execution.execution_time_ms
                 );
+                println!(
+                    "Size:          {} bytes ({:.2} KB total output size)",
+                    total_output_size,
+                    total_output_size as f64 / 1024.0
+                );
+                println!("Integrity:     {}", identity_status);
             }
         }
         None => {
