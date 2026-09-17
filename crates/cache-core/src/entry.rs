@@ -47,11 +47,34 @@ pub enum CacheResult<T> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct TimingMetrics {
+    #[serde(default)]
+    pub execution_time_ms: u64,
+    #[serde(default)]
+    pub lookup_time_ms: u64,
+    #[serde(default)]
+    pub restore_time_ms: u64,
+    #[serde(default)]
+    pub store_time_ms: u64,
+}
+
+impl TimingMetrics {
+    /// Calculate estimated wall-clock time saved by cache hit:
+    /// time_saved = execution_time_ms - (lookup_time_ms + restore_time_ms)
+    pub fn calculate_time_saved_ms(&self) -> u64 {
+        let hit_overhead = self.lookup_time_ms.saturating_add(self.restore_time_ms);
+        self.execution_time_ms.saturating_sub(hit_overhead)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ExecutionMetadata {
     pub exit_code: i32,
     pub execution_time_ms: u64,
     pub stdout_digest: Option<Digest>,
     pub stderr_digest: Option<Digest>,
+    #[serde(default)]
+    pub timings: TimingMetrics,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -176,6 +199,78 @@ pub enum MissReason {
     ForcedRecompute,
 }
 
+impl MissReason {
+    /// Formats the miss reason in structured explain mode matching Milestone 9.3 spec.
+    pub fn format_explain(&self) -> String {
+        let mut out = String::new();
+        out.push_str("Cache lookup\n\nResult: MISS\n\n");
+        match self {
+            Self::InputChanged {
+                path,
+                old_digest,
+                new_digest,
+            } => {
+                out.push_str("Reason:\n  input changed\n\n");
+                out.push_str(&format!("Changed:\n  {}\n\n", path));
+                out.push_str(&format!(
+                    "Previous:\n  sha256: {}\n\n",
+                    old_digest.as_deref().unwrap_or("<none>")
+                ));
+                out.push_str(&format!("Current:\n  sha256: {}", new_digest));
+            }
+            Self::InputAdded { path } => {
+                out.push_str("Reason:\n  input added\n\n");
+                out.push_str(&format!("Added:\n  {}", path));
+            }
+            Self::InputRemoved { path } => {
+                out.push_str("Reason:\n  input removed\n\n");
+                out.push_str(&format!("Removed:\n  {}", path));
+            }
+            Self::CommandChanged { old, new } => {
+                out.push_str("Reason:\n  command changed\n\n");
+                out.push_str(&format!("Previous:\n  {}\n\n", old));
+                out.push_str(&format!("Current:\n  {}", new));
+            }
+            Self::ArgumentsChanged { old, new } => {
+                out.push_str("Reason:\n  arguments changed\n\n");
+                out.push_str(&format!("Previous:\n  {:?}\n\n", old));
+                out.push_str(&format!("Current:\n  {:?}", new));
+            }
+            Self::EnvironmentChanged { key, old, new } => {
+                out.push_str("Reason:\n  environment changed\n\n");
+                out.push_str(&format!("Variable:\n  {}\n\n", key));
+                out.push_str(&format!(
+                    "Previous:\n  {}\n\n",
+                    old.as_deref().unwrap_or("<unset>")
+                ));
+                out.push_str(&format!(
+                    "Current:\n  {}",
+                    new.as_deref().unwrap_or("<unset>")
+                ));
+            }
+            Self::ToolChanged { reason } => {
+                out.push_str("Reason:\n  tool identity changed\n\n");
+                out.push_str(&format!("Details:\n  {}", reason));
+            }
+            Self::PlatformChanged { reason } => {
+                out.push_str("Reason:\n  platform constraints changed\n\n");
+                out.push_str(&format!("Details:\n  {}", reason));
+            }
+            Self::CorruptedCache { reason } => {
+                out.push_str("Reason:\n  cache integrity corrupted\n\n");
+                out.push_str(&format!("Details:\n  {}", reason));
+            }
+            Self::ForcedRecompute => {
+                out.push_str("Reason:\n  forced recompute policy");
+            }
+            Self::NoEntryFound => {
+                out.push_str("Reason:\n  no previous cache entry found");
+            }
+        }
+        out
+    }
+}
+
 impl std::fmt::Display for MissReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -242,11 +337,51 @@ mod tests {
                 execution_time_ms: 50,
                 stdout_digest: Some(Digest::from_bytes(b"stdout content")),
                 stderr_digest: None,
+                timings: TimingMetrics {
+                    execution_time_ms: 50,
+                    lookup_time_ms: 2,
+                    restore_time_ms: 3,
+                    store_time_ms: 5,
+                },
             },
         );
 
         assert_eq!(entry.total_output_size(), 1024);
         assert!(entry.stdout_digest().is_some());
         assert!(entry.stderr_digest().is_none());
+        assert_eq!(
+            entry.metadata.execution.timings.calculate_time_saved_ms(),
+            45
+        );
+    }
+
+    #[test]
+    fn test_timing_metrics_calculation() {
+        let timings = TimingMetrics {
+            execution_time_ms: 1000,
+            lookup_time_ms: 10,
+            restore_time_ms: 40,
+            store_time_ms: 25,
+        };
+
+        // time saved = execution_time (1000) - overhead (10 + 40) = 950ms
+        assert_eq!(timings.calculate_time_saved_ms(), 950);
+    }
+
+    #[test]
+    fn test_miss_reason_format_explain() {
+        let miss_input = MissReason::InputChanged {
+            path: "src/parser.rs".to_string(),
+            old_digest: Some("abc12345".to_string()),
+            new_digest: "def67890".to_string(),
+        };
+
+        let explained = miss_input.format_explain();
+        assert!(explained.contains("Cache lookup"));
+        assert!(explained.contains("Result: MISS"));
+        assert!(explained.contains("Reason:\n  input changed"));
+        assert!(explained.contains("Changed:\n  src/parser.rs"));
+        assert!(explained.contains("Previous:\n  sha256: abc12345"));
+        assert!(explained.contains("Current:\n  sha256: def67890"));
     }
 }

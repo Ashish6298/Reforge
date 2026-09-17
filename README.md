@@ -690,6 +690,74 @@ DCC implements documented, stable exit codes for deterministic process orchestra
 
 ---
 
+## Observability & Cache Explanation (Milestone 9)
+
+Provides full visibility into cache efficiency, telemetry, and execution performance.
+
+### Hit / Miss Metrics (Milestone 9.1)
+
+Tracks quantitative cache activity across all computations:
+
+- **`total requests`**: Total computation cache queries processed (`hits + misses`).
+- **`hits`**: Number of requests resolved directly from cache without recomputation.
+- **`misses`**: Number of computations that resulted in a cache miss.
+- **`hit ratio`**: Cache reuse ratio percentage (`hits / total requests`).
+- **`execution count`**: Number of external command executions performed.
+- **`cache restore count`**: Number of output restoration events from CAS storage.
+- **`cache store count`**: Number of completed computations stored into CAS.
+
+Viewable via `dcc stats` and `dcc stats --json`.
+
+### Timing Metrics & Time Saved (Milestone 9.2)
+
+DCC tracks granular lifecycle timings for both cache misses and cache hits:
+
+- **`computation execution time` (`execution_time_ms`)**: Time spent executing the actual compiler, generator, or tool process.
+- **`cache lookup time` (`lookup_time_ms`)**: Time spent querying the CAS entry index and locating cached records.
+- **`cache restore time` (`restore_time_ms`)**: Time spent restoring output files and directories from CAS blobs to disk.
+- **`cache store time` (`store_time_ms`)**: Time spent hashing outputs, committing CAS objects, and saving entry metadata.
+- **`time saved` (`time_saved_ms`)**: Net time saved on a cache hit, calculated as:
+  $$\text{Time Saved} = \text{Execution Time} - (\text{Lookup Time} + \text{Restore Time})$$
+
+### Explain Mode (Milestone 9.3)
+
+With `dcc run --explain`, developers get clear, actionable root-cause analysis answering *"Why didn't my cache work?"*:
+
+```text
+Cache lookup
+
+Result: MISS
+
+Reason:
+  input changed
+
+Changed:
+  src/parser.rs
+
+Previous:
+  sha256: abc...
+
+Current:
+  sha256: def...
+```
+
+### Debug Mode (Milestone 9.4)
+
+With `dcc run --verbose` (or `-v`), developers inspect the engine's step-by-step caching lifecycle:
+
+```text
+[INPUT] hashing files
+[KEY] generating computation key
+[LOOKUP] checking cache
+[MISS] no entry
+[EXEC] running command
+[OUTPUT] validating outputs
+[STORE] writing objects
+[DONE] stored result
+```
+
+---
+
 ## CLI Usage
 
 ```bash
@@ -701,6 +769,9 @@ dcc run --input src/schema.json --output generated/models.rs -- generator src/sc
 
 # Explain cache miss reasons
 dcc run --explain --input src/schema.json --output generated/models.rs -- generator src/schema.json
+
+# Run with verbose stage-by-stage debugging
+dcc run --verbose --input src/schema.json --output generated/models.rs -- generator src/schema.json
 
 # View cache storage statistics (human-readable or JSON)
 dcc stats

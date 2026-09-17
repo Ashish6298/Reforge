@@ -182,6 +182,7 @@ fn handle_run(storage: &CasStorage, args: RunArgs, json: bool) -> Result<()> {
             failure_policy: dcc_runner::FailurePolicy::default(),
             working_dir: std::env::current_dir()?,
             lock_timeout: Duration::from_secs(30),
+            verbose: args.verbose,
         },
     );
 
@@ -210,7 +211,7 @@ fn handle_run(storage: &CasStorage, args: RunArgs, json: bool) -> Result<()> {
                 );
                 if args.explain {
                     if let Some(reason) = &result.miss_reason {
-                        println!("Reason: {}", reason);
+                        println!("\n{}", reason.format_explain());
                     }
                 }
                 if !result.stdout.is_empty() {
@@ -325,9 +326,13 @@ fn handle_stats(storage: &CasStorage, json: bool) -> Result<()> {
             stats.total_object_size_bytes as f64 / (1024.0 * 1024.0),
             stats.total_entry_size_bytes as f64 / 1024.0
         );
+        println!("Total Requests:       {}", stats.total_requests);
         println!("Hits:                 {}", stats.total_hits);
         println!("Misses:               {}", stats.total_misses);
         println!("Hit Ratio:            {:.1}%", stats.hit_ratio * 100.0);
+        println!("Execution Count:      {}", stats.execution_count);
+        println!("Cache Restore Count:  {}", stats.cache_restore_count);
+        println!("Cache Store Count:    {}", stats.cache_store_count);
         println!(
             "Bytes Restored:       {} ({:.2} MB)",
             stats.bytes_restored,
@@ -717,6 +722,7 @@ mod tests {
             operation: "copy_test_8_3".to_string(),
             policy: "read-write".to_string(),
             explain: true,
+            verbose: true,
             command: cmd.clone(),
         };
 

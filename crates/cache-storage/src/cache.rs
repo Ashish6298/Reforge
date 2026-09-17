@@ -291,6 +291,7 @@ mod tests {
                 execution_time_ms: 45,
                 stdout_digest: None,
                 stderr_digest: None,
+                timings: Default::default(),
             },
         );
 
@@ -409,6 +410,7 @@ mod tests {
                 execution_time_ms: 85,
                 stdout_digest: None,
                 stderr_digest: None,
+                timings: Default::default(),
             },
         );
 

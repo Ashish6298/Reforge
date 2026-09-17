@@ -548,6 +548,7 @@ mod tests {
                 execution_time_ms: 120,
                 stdout_digest: None,
                 stderr_digest: None,
+                timings: Default::default(),
             },
         );
 

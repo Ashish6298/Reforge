@@ -507,6 +507,7 @@ mod tests {
                 execution_time_ms: 10,
                 stdout_digest: Some(stdout_digest.clone()),
                 stderr_digest: None,
+                timings: Default::default(),
             },
         );
         storage.store_entry(&entry1).unwrap();

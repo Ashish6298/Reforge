@@ -172,6 +172,9 @@ pub struct RunArgs {
     #[arg(long, help = "Explain cache miss reasons in detail")]
     pub explain: bool,
 
+    #[arg(short, long, help = "Enable verbose structured debugging output")]
+    pub verbose: bool,
+
     #[arg(
         long,
         default_value = "read-write",
