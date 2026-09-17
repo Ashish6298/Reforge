@@ -14,6 +14,7 @@ pub struct CommandSpec {
     pub environment: BTreeMap<String, String>,
     pub inputs: Vec<InputFile>,
     pub outputs: Vec<OutputFile>,
+    pub tool: Option<dcc_core::ToolIdentity>,
     pub cache_policy: CachePolicy,
 }
 
@@ -27,6 +28,10 @@ impl CommandSpec {
         let mut comp = dcc_core::Computation::builder(operation, &self.executable)
             .args(self.arguments.clone())
             .policy(self.cache_policy);
+
+        if let Some(tool) = &self.tool {
+            comp = comp.tool(&tool.name, tool.version.clone(), tool.digest.clone());
+        }
 
         for input in &self.inputs {
             comp = comp.input(&input.path, input.digest.clone(), input.size);
@@ -49,7 +54,7 @@ impl CommandSpec {
             outputs: self.outputs.clone(),
             env: self.environment.clone(),
             platform: dcc_core::PlatformConstraints::default(),
-            tool: None,
+            tool: self.tool.clone(),
             policy: self.cache_policy,
             metadata: BTreeMap::new(),
             working_dir: Some(self.working_directory.to_string_lossy().to_string()),
@@ -65,6 +70,7 @@ pub struct CommandSpecBuilder {
     environment: BTreeMap<String, String>,
     inputs: Vec<InputFile>,
     outputs: Vec<OutputFile>,
+    tool: Option<dcc_core::ToolIdentity>,
     cache_policy: CachePolicy,
 }
 
@@ -77,8 +83,29 @@ impl CommandSpecBuilder {
             environment: BTreeMap::new(),
             inputs: Vec::new(),
             outputs: Vec::new(),
+            tool: None,
             cache_policy: CachePolicy::ReadWrite,
         }
+    }
+
+    pub fn tool(
+        mut self,
+        name: impl Into<String>,
+        version: Option<String>,
+        digest: Option<dcc_core::Digest>,
+    ) -> Self {
+        self.tool = Some(dcc_core::ToolIdentity::with_digest(name, version, digest));
+        self
+    }
+
+    pub fn tool_version(mut self, name: impl Into<String>, version: impl Into<String>) -> Self {
+        self.tool = Some(dcc_core::ToolIdentity::with_version(name, version));
+        self
+    }
+
+    pub fn tool_identity(mut self, tool: dcc_core::ToolIdentity) -> Self {
+        self.tool = Some(tool);
+        self
     }
 
     pub fn arg(mut self, arg: impl Into<String>) -> Self {
@@ -210,6 +237,7 @@ impl CommandSpecBuilder {
             environment: self.environment,
             inputs: self.inputs,
             outputs: self.outputs,
+            tool: self.tool,
             cache_policy: self.cache_policy,
         })
     }

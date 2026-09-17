@@ -718,3 +718,88 @@ fn test_milestone_5_2_command_and_argument_changes_comprehensive() {
         other => panic!("Expected ArgumentsChanged miss reason, got {:?}", other),
     }
 }
+
+#[test]
+fn test_milestone_5_3_tool_version_invalidation_comprehensive() {
+    let env = TestEnv::new().unwrap();
+
+    env.create_input_file("source.rs", b"fn main() {}").unwrap();
+
+    #[cfg(windows)]
+    let (cmd, args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "[System.IO.File]::WriteAllText('binary.out', 'COMPILED_BINARY')".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd, args) = (
+        "sh",
+        vec![
+            "-c".to_string(),
+            "echo -n 'COMPILED_BINARY' > binary.out".to_string(),
+        ],
+    );
+
+    // Spec with compiler version 1.80.0
+    let spec_v1_80 = dcc_runner::CommandSpec::builder(cmd)
+        .args(args.clone())
+        .current_dir(env.workspace_dir.path())
+        .input_path("source.rs")
+        .output_path("binary.out")
+        .tool_version("rustc", "1.80.0")
+        .build()
+        .unwrap();
+
+    // Spec with compiler version 1.81.0
+    let spec_v1_81 = dcc_runner::CommandSpec::builder(cmd)
+        .args(args)
+        .current_dir(env.workspace_dir.path())
+        .input_path("source.rs")
+        .output_path("binary.out")
+        .tool_version("rustc", "1.81.0")
+        .build()
+        .unwrap();
+
+    let engine = RunnerEngine::new(
+        &env.storage,
+        EngineOptions {
+            working_dir: env.workspace_dir.path().to_path_buf(),
+            ..Default::default()
+        },
+    );
+
+    // 1. Run with compiler 1.80.0 (Cold run -> MISS)
+    let res_80 = engine.execute_command(&spec_v1_80).unwrap();
+    assert_eq!(res_80.status, ExecutionStatus::Miss);
+    let key_80 = res_80.key;
+
+    // 2. Run with compiler 1.81.0 (Cold run -> MISS, MUST NOT reuse 1.80 cached result)
+    let res_81 = engine.execute_command(&spec_v1_81).unwrap();
+    assert_eq!(res_81.status, ExecutionStatus::Miss);
+    let key_81 = res_81.key;
+
+    // Invariant: compiler 1.80.0 and compiler 1.81.0 must derive different keys
+    assert_ne!(
+        key_80, key_81,
+        "A computation using compiler 1.80 must not silently reuse a result from compiler 1.81"
+    );
+
+    // 3. Rerun compiler 1.80.0 -> HIT
+    fs::remove_file(env.workspace_dir.path().join("binary.out")).unwrap();
+    let res_80_hit = engine.execute_command(&spec_v1_80).unwrap();
+    assert_eq!(res_80_hit.status, ExecutionStatus::Hit);
+    assert_eq!(res_80_hit.key, key_80);
+
+    // 4. Verify MissExplainer identifies tool identity change
+    let comp_80 = env.storage.get_entry(&key_80).unwrap().unwrap().computation;
+    let comp_81 = env.storage.get_entry(&key_81).unwrap().unwrap().computation;
+    let miss_reason = dcc_runner::MissExplainer::explain(&comp_81, Some(&comp_80));
+    match miss_reason {
+        dcc_core::MissReason::ToolChanged { reason } => {
+            assert!(reason.contains("1.80.0") || reason.contains("1.81.0"));
+        }
+        other => panic!("Expected ToolChanged miss reason, got {:?}", other),
+    }
+}

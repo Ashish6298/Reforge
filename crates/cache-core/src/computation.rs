@@ -29,6 +29,56 @@ pub struct ToolIdentity {
     pub digest: Option<Digest>,
 }
 
+impl ToolIdentity {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            version: None,
+            digest: None,
+        }
+    }
+
+    pub fn with_version(name: impl Into<String>, version: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            version: Some(version.into()),
+            digest: None,
+        }
+    }
+
+    pub fn with_digest(
+        name: impl Into<String>,
+        version: Option<String>,
+        digest: Option<Digest>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            version,
+            digest,
+        }
+    }
+
+    /// Construct tool identity by reading and hashing the executable binary at `path`.
+    pub fn from_executable(
+        name: impl Into<String>,
+        executable_path: &std::path::Path,
+        version: Option<String>,
+    ) -> Result<Self> {
+        let digest = if executable_path.is_file() {
+            let file = std::fs::File::open(executable_path)?;
+            Some(Digest::from_reader(std::io::BufReader::new(file))?)
+        } else {
+            None
+        };
+
+        Ok(Self {
+            name: name.into(),
+            version,
+            digest,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlatformConstraints {
     pub os: String,
@@ -196,6 +246,11 @@ impl ComputationBuilder {
             version,
             digest,
         });
+        self
+    }
+
+    pub fn tool_identity(mut self, tool: ToolIdentity) -> Self {
+        self.tool = Some(tool);
         self
     }
 

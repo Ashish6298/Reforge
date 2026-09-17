@@ -276,6 +276,29 @@ generator --safe  ──►  CacheKey B  (Key A ≠ Key B)
 
 ---
 
+## Tool Identity & Version Invalidation
+
+A computation using one tool or compiler version must not silently reuse results produced by another version:
+
+```text
+compiler 1.80  ──►  CacheKey A
+compiler 1.81  ──►  CacheKey B  (Key A ≠ Key B)
+```
+
+Tool identity is modeled as a composite structure incorporated into canonical key derivation:
+
+```text
+ToolIdentity
+├── name: String              # Logical tool identifier (e.g. "rustc", "gcc", "clang")
+├── version: Option<String>   # Reported version (e.g. "1.80.0", "13.2.0")
+└── digest: Option<Digest>    # SHA-256 binary hash of the executable file
+```
+
+- **Binary Digest Invalidation**: If the compiler binary on disk changes (e.g. rebuild or patch), the computed digest invalidates existing cache entries even if the reported version string remains identical.
+- **Miss Explanation**: `MissExplainer` pinpoints tool and version mismatches via `MissReason::ToolChanged`.
+
+---
+
 ## Workspace Architecture
 
 - **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`), streaming hashing, and canonical key derivation.

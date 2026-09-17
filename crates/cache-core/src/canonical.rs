@@ -394,7 +394,76 @@ mod tests {
             .compute_key()
             .unwrap();
 
-        assert_ne!(key1, key2);
+        assert_ne!(
+            key1, key2,
+            "Tool version differences (1.80.0 vs 1.81.0) must produce different keys"
+        );
+    }
+
+    #[test]
+    fn test_tool_executable_digest_differences_produce_different_keys() {
+        let d1 = Digest::from_bytes(b"compiler_binary_v1_bytes");
+        let d2 = Digest::from_bytes(b"compiler_binary_v2_bytes");
+
+        let comp1 = Computation::builder("compile", "gcc")
+            .tool("gcc", Some("13.2.0".into()), Some(d1))
+            .build()
+            .unwrap();
+
+        let comp2 = Computation::builder("compile", "gcc")
+            .tool("gcc", Some("13.2.0".into()), Some(d2))
+            .build()
+            .unwrap();
+
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
+
+        assert_ne!(
+            key1, key2,
+            "Tool executable binary digest differences must produce different keys"
+        );
+    }
+
+    #[test]
+    fn test_tool_identity_strategy_composite_components() {
+        let tool_a = crate::computation::ToolIdentity::new("clang");
+        let tool_b = crate::computation::ToolIdentity::with_version("clang", "18.1.0");
+        let tool_c = crate::computation::ToolIdentity::with_digest(
+            "clang",
+            Some("18.1.0".into()),
+            Some(Digest::from_bytes(b"clang_bin")),
+        );
+
+        let comp_a = Computation::builder("build", "clang")
+            .tool_identity(tool_a)
+            .build()
+            .unwrap();
+        let comp_b = Computation::builder("build", "clang")
+            .tool_identity(tool_b)
+            .build()
+            .unwrap();
+        let comp_c = Computation::builder("build", "clang")
+            .tool_identity(tool_c)
+            .build()
+            .unwrap();
+
+        let key_a = CanonicalComputation::from_computation(&comp_a)
+            .compute_key()
+            .unwrap();
+        let key_b = CanonicalComputation::from_computation(&comp_b)
+            .compute_key()
+            .unwrap();
+        let key_c = CanonicalComputation::from_computation(&comp_c)
+            .compute_key()
+            .unwrap();
+
+        assert_ne!(key_a, key_b);
+        assert_ne!(key_b, key_c);
+        assert_ne!(key_a, key_c);
     }
 
     #[test]
