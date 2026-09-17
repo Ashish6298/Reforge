@@ -802,6 +802,43 @@ dcc doctor
 
 ---
 
+## Generic Developer Integration API (Rust Library)
+
+DCC provides a first-class, idiomatic Rust public API for developers to embed caching directly into custom build tools, code generators, compilers, and linters without calling CLI subprocesses:
+
+```rust
+use dcc_integrations::{Cache, ComputationBuilder, GenericIntegration};
+use std::path::Path;
+
+// 1. Open the cache workspace (auto-creates layout if missing)
+let cache = Cache::open(Path::new("./.dcc_cache"))?;
+
+// 2. Build computation specifications fluently
+let spec = ComputationBuilder::new("codegen-models")
+    .with_arguments(vec!["--schema".into(), "schema.json".into()])
+    .with_inputs(vec![Path::new("schema.json").to_path_buf()])
+    .with_outputs(vec![Path::new("generated/models.rs").to_path_buf()])
+    .build();
+
+// 3. Execute or lookup using the integration runner
+let runner = GenericIntegration::from_cache(&cache, Default::default());
+let result = runner.execute(&spec, Path::new("."))?;
+
+if result.was_hit {
+    println!("Computation restored from cache!");
+} else {
+    println!("Computation executed and stored in cache!");
+}
+
+// 4. Or interact with the low-level Cache API directly
+let key = spec.canonical_key();
+if let Some(entry) = cache.lookup(&key)? {
+    println!("Found cached entry with {} outputs", entry.outputs.len());
+}
+```
+
+---
+
 ## Quality Gates & Verification
 
 ```bash
@@ -812,3 +849,4 @@ cargo fmt --all -- --check
 ```
 
 All 6 core exit criteria (deterministic computation modeling, canonical key generation, cache entry creation, retrieval, identity verification, and corrupted metadata detection) and all 11 physical storage scenarios (empty cache, single object, deduplication, corruption quarantine, interrupted write isolation, deletion, concurrent read/write races, deeply nested paths, multi-MB large files, and binary byte safety) are fully verified and tested.
+

@@ -224,6 +224,25 @@ pub struct ComputationBuilder {
     working_dir: Option<String>,
 }
 
+impl Default for ComputationBuilder {
+    fn default() -> Self {
+        Self {
+            schema_version: Computation::CURRENT_SCHEMA_VERSION,
+            operation: String::new(),
+            command: String::new(),
+            args: Vec::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            env: BTreeMap::new(),
+            platform: PlatformConstraints::default(),
+            tool: None,
+            policy: CachePolicy::ReadWrite,
+            metadata: BTreeMap::new(),
+            working_dir: None,
+        }
+    }
+}
+
 impl ComputationBuilder {
     pub fn new(operation: impl Into<String>, command: impl Into<String>) -> Self {
         Self {
@@ -240,6 +259,16 @@ impl ComputationBuilder {
             metadata: BTreeMap::new(),
             working_dir: None,
         }
+    }
+
+    pub fn operation(mut self, op: impl Into<String>) -> Self {
+        self.operation = op.into();
+        self
+    }
+
+    pub fn command(mut self, cmd: impl Into<String>) -> Self {
+        self.command = cmd.into();
+        self
     }
 
     pub fn args<I, S>(mut self, args: I) -> Self
