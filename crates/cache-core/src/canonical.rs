@@ -281,13 +281,87 @@ mod tests {
 
     #[test]
     fn test_differing_arguments_produce_different_keys() {
-        let comp1 = Computation::builder("fmt", "tool")
+        let comp1 = Computation::builder("fmt", "generator")
             .arg("--fast")
             .build()
             .unwrap();
 
-        let comp2 = Computation::builder("fmt", "tool")
+        let comp2 = Computation::builder("fmt", "generator")
             .arg("--safe")
+            .build()
+            .unwrap();
+
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
+
+        assert_ne!(
+            key1, key2,
+            "generator --fast and generator --safe must produce different cache keys"
+        );
+    }
+
+    #[test]
+    fn test_differing_command_executable_produces_different_keys() {
+        let comp1 = Computation::builder("build", "generator")
+            .arg("--fast")
+            .build()
+            .unwrap();
+
+        let comp2 = Computation::builder("build", "transformer")
+            .arg("--fast")
+            .build()
+            .unwrap();
+
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
+
+        assert_ne!(
+            key1, key2,
+            "Differing command executables must produce different cache keys"
+        );
+    }
+
+    #[test]
+    fn test_argument_ordering_sensitivity_produces_different_keys() {
+        let comp1 = Computation::builder("build", "compiler")
+            .arg("--opt")
+            .arg("--debug")
+            .build()
+            .unwrap();
+
+        let comp2 = Computation::builder("build", "compiler")
+            .arg("--debug")
+            .arg("--opt")
+            .build()
+            .unwrap();
+
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
+
+        assert_ne!(
+            key1, key2,
+            "Command line argument order is semantically meaningful and must not be commuted"
+        );
+    }
+
+    #[test]
+    fn test_argument_addition_removal_produces_different_keys() {
+        let comp1 = Computation::builder("run", "tool").build().unwrap();
+
+        let comp2 = Computation::builder("run", "tool")
+            .arg("--flag")
             .build()
             .unwrap();
 

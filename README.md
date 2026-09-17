@@ -260,6 +260,22 @@ input A = hash Y  ──►  CacheKey 2  (Key 1 ≠ Key 2)
 
 ---
 
+## Command & Argument Invalidation
+
+Modifications to executable names, command-line arguments, argument ordering, or flags strictly alter computation keys:
+
+```text
+generator --fast  ──►  CacheKey A
+generator --safe  ──►  CacheKey B  (Key A ≠ Key B)
+```
+
+- **Ordered Arguments**: Argument sequence is preserved verbatim (`["--opt", "--debug"]` ≠ `["--debug", "--opt"]`).
+- **Option Flag Sensitivity**: Flag variations, additions, or omissions create distinct cache identities.
+- **Independent Cache Isolation**: Computations with different commands or arguments never collide or cross-contaminate stored artifacts.
+- **Miss Explanation**: `MissExplainer` identifies changed arguments (`MissReason::ArgumentsChanged`) or executables (`MissReason::CommandChanged`).
+
+---
+
 ## Workspace Architecture
 
 - **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`), streaming hashing, and canonical key derivation.

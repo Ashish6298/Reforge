@@ -584,3 +584,137 @@ fn test_milestone_5_1_input_changes_comprehensive() {
         other => panic!("Expected InputChanged miss reason, got {:?}", other),
     }
 }
+
+#[test]
+fn test_milestone_5_2_command_and_argument_changes_comprehensive() {
+    let env = TestEnv::new().unwrap();
+
+    // Shared input file for both commands
+    env.create_input_file("source.txt", b"INPUT_DATA_123")
+        .unwrap();
+
+    // Command 1: generator --fast (simulated via powershell / sh)
+    #[cfg(windows)]
+    let (cmd1, args1) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "[System.IO.File]::WriteAllText('mode.out', 'RESULT_FAST_MODE')".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd1, args1) = (
+        "sh",
+        vec![
+            "-c".to_string(),
+            "echo -n 'RESULT_FAST_MODE' > mode.out".to_string(),
+        ],
+    );
+
+    // Command 2: generator --safe (simulated via powershell / sh)
+    #[cfg(windows)]
+    let (cmd2, args2) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "[System.IO.File]::WriteAllText('mode.out', 'RESULT_SAFE_MODE')".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd2, args2) = (
+        "sh",
+        vec![
+            "-c".to_string(),
+            "echo -n 'RESULT_SAFE_MODE' > mode.out".to_string(),
+        ],
+    );
+
+    let spec_fast = dcc_runner::CommandSpec::builder(cmd1)
+        .args(args1)
+        .current_dir(env.workspace_dir.path())
+        .input_path("source.txt")
+        .output_path("mode.out")
+        .build()
+        .unwrap();
+
+    let spec_safe = dcc_runner::CommandSpec::builder(cmd2)
+        .args(args2)
+        .current_dir(env.workspace_dir.path())
+        .input_path("source.txt")
+        .output_path("mode.out")
+        .build()
+        .unwrap();
+
+    let engine = RunnerEngine::new(
+        &env.storage,
+        EngineOptions {
+            working_dir: env.workspace_dir.path().to_path_buf(),
+            ..Default::default()
+        },
+    );
+
+    // 1. Run generator --fast (Cold run -> MISS)
+    let res_fast_1 = engine.execute_command(&spec_fast).unwrap();
+    assert_eq!(res_fast_1.status, ExecutionStatus::Miss);
+    let key_fast = res_fast_1.key;
+    assert_eq!(
+        String::from_utf8_lossy(&env.read_output_file("mode.out").unwrap()).trim(),
+        "RESULT_FAST_MODE"
+    );
+
+    // 2. Run generator --safe (Cold run -> MISS)
+    let res_safe_1 = engine.execute_command(&spec_safe).unwrap();
+    assert_eq!(res_safe_1.status, ExecutionStatus::Miss);
+    let key_safe = res_safe_1.key;
+    assert_eq!(
+        String::from_utf8_lossy(&env.read_output_file("mode.out").unwrap()).trim(),
+        "RESULT_SAFE_MODE"
+    );
+
+    // Invariant: generator --fast and generator --safe MUST create different keys
+    assert_ne!(
+        key_fast, key_safe,
+        "generator --fast and generator --safe must produce different cache keys"
+    );
+
+    // 3. Delete output file and rerun generator --fast (Warm run -> HIT)
+    fs::remove_file(env.workspace_dir.path().join("mode.out")).unwrap();
+    let res_fast_2 = engine.execute_command(&spec_fast).unwrap();
+    assert_eq!(res_fast_2.status, ExecutionStatus::Hit);
+    assert_eq!(res_fast_2.key, key_fast);
+    assert_eq!(
+        String::from_utf8_lossy(&env.read_output_file("mode.out").unwrap()).trim(),
+        "RESULT_FAST_MODE"
+    );
+
+    // 4. Delete output file and rerun generator --safe (Warm run -> HIT)
+    fs::remove_file(env.workspace_dir.path().join("mode.out")).unwrap();
+    let res_safe_2 = engine.execute_command(&spec_safe).unwrap();
+    assert_eq!(res_safe_2.status, ExecutionStatus::Hit);
+    assert_eq!(res_safe_2.key, key_safe);
+    assert_eq!(
+        String::from_utf8_lossy(&env.read_output_file("mode.out").unwrap()).trim(),
+        "RESULT_SAFE_MODE"
+    );
+
+    // 5. Verify MissExplainer identifies argument change
+    let comp_fast = env
+        .storage
+        .get_entry(&key_fast)
+        .unwrap()
+        .unwrap()
+        .computation;
+    let comp_safe = env
+        .storage
+        .get_entry(&key_safe)
+        .unwrap()
+        .unwrap()
+        .computation;
+    let miss_reason = dcc_runner::MissExplainer::explain(&comp_safe, Some(&comp_fast));
+    match miss_reason {
+        dcc_core::MissReason::ArgumentsChanged { old, new } => {
+            assert_ne!(old, new);
+        }
+        other => panic!("Expected ArgumentsChanged miss reason, got {:?}", other),
+    }
+}
