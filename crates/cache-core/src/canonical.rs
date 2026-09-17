@@ -39,6 +39,12 @@ pub struct CanonicalPlatform {
     pub arch: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub abi: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compiler: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -86,6 +92,9 @@ impl CanonicalComputation {
                 os: comp.platform.os.clone(),
                 arch: comp.platform.arch.clone(),
                 target: comp.platform.target.clone(),
+                runtime: comp.platform.runtime.clone(),
+                abi: comp.platform.abi.clone(),
+                compiler: comp.platform.compiler.clone(),
             },
             tool: comp.tool.as_ref().map(|t| CanonicalTool {
                 name: t.name.clone(),
@@ -485,7 +494,175 @@ mod tests {
             .compute_key()
             .unwrap();
 
-        assert_ne!(key1, key2);
+        assert_ne!(
+            key1, key2,
+            "Declared environment differences (NODE_ENV=dev vs prod) must alter key"
+        );
+    }
+
+    #[test]
+    fn test_declared_environment_order_independent_canonicalization() {
+        // Declared environment variables inserted in arbitrary order must sort canonically
+        let comp1 = Computation::builder("build", "generator")
+            .env("NODE_ENV", "production")
+            .env("GENERATOR_VERSION", "2.1")
+            .env("FEATURE_MODE", "enabled")
+            .build()
+            .unwrap();
+
+        let comp2 = Computation::builder("build", "generator")
+            .env("FEATURE_MODE", "enabled")
+            .env("NODE_ENV", "production")
+            .env("GENERATOR_VERSION", "2.1")
+            .build()
+            .unwrap();
+
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
+
+        assert_eq!(
+            key1, key2,
+            "Declared environment maps must be canonically sorted and invariant to insertion order"
+        );
+    }
+
+    #[test]
+    fn test_undeclared_environment_variables_do_not_fragment_cache() {
+        // Computations only serialize declared environment variables in comp.env.
+        // Unrelated variables in system environment do not pollute computation keys.
+        let comp1 = Computation::builder("compile", "rustc")
+            .env("RUST_LOG", "info")
+            .build()
+            .unwrap();
+
+        let comp2 = Computation::builder("compile", "rustc")
+            .env("RUST_LOG", "info")
+            .build()
+            .unwrap();
+
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
+
+        assert_eq!(key1, key2);
+    }
+
+    #[test]
+    fn test_platform_os_differences_produce_different_keys() {
+        let p_linux = crate::computation::PlatformConstraints::new("linux", "x86_64");
+        let p_windows = crate::computation::PlatformConstraints::new("windows", "x86_64");
+
+        let comp1 = Computation::builder("build", "cc")
+            .platform(p_linux)
+            .build()
+            .unwrap();
+        let comp2 = Computation::builder("build", "cc")
+            .platform(p_windows)
+            .build()
+            .unwrap();
+
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
+
+        assert_ne!(
+            key1, key2,
+            "OS differences (linux vs windows) must alter key"
+        );
+    }
+
+    #[test]
+    fn test_platform_architecture_differences_produce_different_keys() {
+        let p_x86 = crate::computation::PlatformConstraints::new("linux", "x86_64");
+        let p_arm = crate::computation::PlatformConstraints::new("linux", "aarch64");
+
+        let comp1 = Computation::builder("build", "cc")
+            .platform(p_x86)
+            .build()
+            .unwrap();
+        let comp2 = Computation::builder("build", "cc")
+            .platform(p_arm)
+            .build()
+            .unwrap();
+
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
+
+        assert_ne!(
+            key1, key2,
+            "Architecture differences (x86_64 vs aarch64) must alter key"
+        );
+    }
+
+    #[test]
+    fn test_platform_target_triple_differences_produce_different_keys() {
+        let p_gnu = crate::computation::PlatformConstraints::new("linux", "x86_64")
+            .with_target("x86_64-unknown-linux-gnu");
+        let p_musl = crate::computation::PlatformConstraints::new("linux", "x86_64")
+            .with_target("x86_64-unknown-linux-musl");
+
+        let comp1 = Computation::builder("build", "rustc")
+            .platform(p_gnu)
+            .build()
+            .unwrap();
+        let comp2 = Computation::builder("build", "rustc")
+            .platform(p_musl)
+            .build()
+            .unwrap();
+
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
+
+        assert_ne!(
+            key1, key2,
+            "Target triple differences (gnu vs musl) must alter key"
+        );
+    }
+
+    #[test]
+    fn test_platform_runtime_and_abi_differences_produce_different_keys() {
+        let p_node18 = crate::computation::PlatformConstraints::new("linux", "x86_64")
+            .with_runtime("node18")
+            .with_abi("glibc2.31");
+        let p_node20 = crate::computation::PlatformConstraints::new("linux", "x86_64")
+            .with_runtime("node20")
+            .with_abi("glibc2.35");
+
+        let comp1 = Computation::builder("run", "node")
+            .platform(p_node18)
+            .build()
+            .unwrap();
+        let comp2 = Computation::builder("run", "node")
+            .platform(p_node20)
+            .build()
+            .unwrap();
+
+        let key1 = CanonicalComputation::from_computation(&comp1)
+            .compute_key()
+            .unwrap();
+        let key2 = CanonicalComputation::from_computation(&comp2)
+            .compute_key()
+            .unwrap();
+
+        assert_ne!(key1, key2, "Runtime/ABI differences must alter key");
     }
 
     #[test]

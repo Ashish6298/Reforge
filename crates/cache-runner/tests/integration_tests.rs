@@ -803,3 +803,214 @@ fn test_milestone_5_3_tool_version_invalidation_comprehensive() {
         other => panic!("Expected ToolChanged miss reason, got {:?}", other),
     }
 }
+
+#[test]
+fn test_milestone_5_4_declared_environment_invalidation_comprehensive() {
+    let env = TestEnv::new().unwrap();
+
+    env.create_input_file("config.json", b"{\"app\": \"demo\"}")
+        .unwrap();
+
+    // Command outputs the value of the environment variable FEATURE_MODE to env_out.txt
+    #[cfg(windows)]
+    let (cmd, args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "$val = $env:FEATURE_MODE; [System.IO.File]::WriteAllText('env_out.txt', \"MODE: $val\")".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd, args) = (
+        "sh",
+        vec![
+            "-c".to_string(),
+            "echo -n \"MODE: $FEATURE_MODE\" > env_out.txt".to_string(),
+        ],
+    );
+
+    // Spec 1 with declared env FEATURE_MODE = "legacy"
+    let spec_legacy = dcc_runner::CommandSpec::builder(cmd)
+        .args(args.clone())
+        .current_dir(env.workspace_dir.path())
+        .input_path("config.json")
+        .output_path("env_out.txt")
+        .env("FEATURE_MODE", "legacy")
+        .build()
+        .unwrap();
+
+    // Spec 2 with declared env FEATURE_MODE = "modern"
+    let spec_modern = dcc_runner::CommandSpec::builder(cmd)
+        .args(args)
+        .current_dir(env.workspace_dir.path())
+        .input_path("config.json")
+        .output_path("env_out.txt")
+        .env("FEATURE_MODE", "modern")
+        .build()
+        .unwrap();
+
+    let engine = RunnerEngine::new(
+        &env.storage,
+        EngineOptions {
+            working_dir: env.workspace_dir.path().to_path_buf(),
+            ..Default::default()
+        },
+    );
+
+    // 1. Run spec_legacy (Cold run -> MISS)
+    let res_legacy = engine.execute_command(&spec_legacy).unwrap();
+    assert_eq!(res_legacy.status, ExecutionStatus::Miss);
+    let key_legacy = res_legacy.key;
+    assert_eq!(
+        String::from_utf8_lossy(&env.read_output_file("env_out.txt").unwrap()).trim(),
+        "MODE: legacy"
+    );
+
+    // 2. Run spec_modern (Cold run -> MISS, MUST NOT reuse legacy result)
+    let res_modern = engine.execute_command(&spec_modern).unwrap();
+    assert_eq!(res_modern.status, ExecutionStatus::Miss);
+    let key_modern = res_modern.key;
+    assert_eq!(
+        String::from_utf8_lossy(&env.read_output_file("env_out.txt").unwrap()).trim(),
+        "MODE: modern"
+    );
+
+    // Invariant: Changing declared environment must produce different cache keys
+    assert_ne!(
+        key_legacy, key_modern,
+        "Declared environment differences must produce distinct cache keys"
+    );
+
+    // 3. Rerun spec_legacy -> HIT, restores "MODE: legacy"
+    fs::remove_file(env.workspace_dir.path().join("env_out.txt")).unwrap();
+    let res_legacy_hit = engine.execute_command(&spec_legacy).unwrap();
+    assert_eq!(res_legacy_hit.status, ExecutionStatus::Hit);
+    assert_eq!(res_legacy_hit.key, key_legacy);
+    assert_eq!(
+        String::from_utf8_lossy(&env.read_output_file("env_out.txt").unwrap()).trim(),
+        "MODE: legacy"
+    );
+
+    // 4. Verify MissExplainer identifies environment variable change
+    let comp_legacy = env
+        .storage
+        .get_entry(&key_legacy)
+        .unwrap()
+        .unwrap()
+        .computation;
+    let comp_modern = env
+        .storage
+        .get_entry(&key_modern)
+        .unwrap()
+        .unwrap()
+        .computation;
+    let miss_reason = dcc_runner::MissExplainer::explain(&comp_modern, Some(&comp_legacy));
+    match miss_reason {
+        dcc_core::MissReason::EnvironmentChanged { key, old, new } => {
+            assert_eq!(key, "FEATURE_MODE");
+            assert_eq!(old, Some("legacy".to_string()));
+            assert_eq!(new, Some("modern".to_string()));
+        }
+        other => panic!("Expected EnvironmentChanged miss reason, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_milestone_5_5_platform_invalidation_comprehensive() {
+    let env = TestEnv::new().unwrap();
+
+    env.create_input_file("target_app.rs", b"fn entry() {}")
+        .unwrap();
+
+    #[cfg(windows)]
+    let (cmd, args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "[System.IO.File]::WriteAllText('app.bin', 'COMPILED_FOR_TARGET')".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd, args) = (
+        "sh",
+        vec![
+            "-c".to_string(),
+            "echo -n 'COMPILED_FOR_TARGET' > app.bin".to_string(),
+        ],
+    );
+
+    // Spec 1 targeting x86_64-unknown-linux-gnu
+    let platform_x86 = dcc_core::PlatformConstraints::new("linux", "x86_64")
+        .with_target("x86_64-unknown-linux-gnu");
+    let spec_x86 = dcc_runner::CommandSpec::builder(cmd)
+        .args(args.clone())
+        .current_dir(env.workspace_dir.path())
+        .input_path("target_app.rs")
+        .output_path("app.bin")
+        .platform(platform_x86)
+        .build()
+        .unwrap();
+
+    // Spec 2 targeting aarch64-unknown-linux-gnu
+    let platform_arm = dcc_core::PlatformConstraints::new("linux", "aarch64")
+        .with_target("aarch64-unknown-linux-gnu");
+    let spec_arm = dcc_runner::CommandSpec::builder(cmd)
+        .args(args)
+        .current_dir(env.workspace_dir.path())
+        .input_path("target_app.rs")
+        .output_path("app.bin")
+        .platform(platform_arm)
+        .build()
+        .unwrap();
+
+    let engine = RunnerEngine::new(
+        &env.storage,
+        EngineOptions {
+            working_dir: env.workspace_dir.path().to_path_buf(),
+            ..Default::default()
+        },
+    );
+
+    // 1. Run x86 target (Cold run -> MISS)
+    let res_x86 = engine.execute_command(&spec_x86).unwrap();
+    assert_eq!(res_x86.status, ExecutionStatus::Miss);
+    let key_x86 = res_x86.key;
+
+    // 2. Run ARM target (Cold run -> MISS, MUST NOT reuse x86 cached result)
+    let res_arm = engine.execute_command(&spec_arm).unwrap();
+    assert_eq!(res_arm.status, ExecutionStatus::Miss);
+    let key_arm = res_arm.key;
+
+    // Invariant: Target architecture/triple differences must produce different keys
+    assert_ne!(
+        key_x86, key_arm,
+        "Target platform differences (x86_64 vs aarch64) must derive distinct cache keys"
+    );
+
+    // 3. Rerun x86 target -> HIT
+    fs::remove_file(env.workspace_dir.path().join("app.bin")).unwrap();
+    let res_x86_hit = engine.execute_command(&spec_x86).unwrap();
+    assert_eq!(res_x86_hit.status, ExecutionStatus::Hit);
+    assert_eq!(res_x86_hit.key, key_x86);
+
+    // 4. Verify MissExplainer identifies platform difference
+    let comp_x86 = env
+        .storage
+        .get_entry(&key_x86)
+        .unwrap()
+        .unwrap()
+        .computation;
+    let comp_arm = env
+        .storage
+        .get_entry(&key_arm)
+        .unwrap()
+        .unwrap()
+        .computation;
+    let miss_reason = dcc_runner::MissExplainer::explain(&comp_arm, Some(&comp_x86));
+    match miss_reason {
+        dcc_core::MissReason::PlatformChanged { reason } => {
+            assert!(reason.contains("aarch64") || reason.contains("x86_64"));
+        }
+        other => panic!("Expected PlatformChanged miss reason, got {:?}", other),
+    }
+}

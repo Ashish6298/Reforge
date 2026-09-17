@@ -299,6 +299,44 @@ ToolIdentity
 
 ---
 
+## Declared Environment Invalidation
+
+To avoid accidental cache fragmentation, DCC **never hashes the entire ambient process environment**. Instead, only explicitly declared environment variables are captured and hashed:
+
+```text
+CACHE_ENV / Declared Variables:
+    NODE_ENV
+    GENERATOR_VERSION
+    FEATURE_MODE
+```
+
+- **Selective Isolation**: System variables like `USER`, `PWD`, `SSH_AUTH_SOCK`, and ephemeral tokens do not affect cache identity.
+- **Declared Variable Sensitivity**: Mutating any declared variable (e.g. `FEATURE_MODE=0` vs `FEATURE_MODE=1`) alters the canonical cache key.
+- **Lexicographical Normalization**: Declared environment pairs are stored in a `BTreeMap` and serialized in alphabetical order, guaranteeing canonical stability regardless of insertion sequence.
+- **Miss Explanation**: `MissExplainer` pinpoints environment differences via `MissReason::EnvironmentChanged`.
+
+---
+
+## Platform Constraints & Invalidation
+
+Platform-sensitive computations must capture meaningful platform dimensions without including unnecessary host machine metrics (which destroys cache reuse across developers and CI):
+
+```text
+Platform Dimensions:
+    OS              (e.g., linux, windows, macos)
+    Architecture    (e.g., x86_64, aarch64, arm)
+    Target Triple   (e.g., x86_64-unknown-linux-musl vs x86_64-unknown-linux-gnu)
+    Runtime         (e.g., node20, python3.11, jvm21)
+    ABI             (e.g., glibc, musl, msvc)
+    Compiler        (e.g., rustc 1.80.0, clang 17.0.6)
+```
+
+- **Targeted Discrimination**: Changing target triples or operating systems automatically invalidates cache entries and prevents binary mismatch errors.
+- **Machine Neutrality**: Hostnames, process IDs, CPU core count, and local paths are excluded, preserving maximum cache sharing between workstations and CI workers.
+- **Fluent Runner Integration**: Configure via `CommandSpecBuilder::platform`, `.platform_target(...)`, `.platform_runtime(...)`, or `.platform_abi(...)`.
+
+---
+
 ## Workspace Architecture
 
 - **[`crates/cache-core`](crates/cache-core)**: Core domain models (`Digest`, `CacheKey`, `Computation`, `CacheEntry`, `StructuredEvent`), streaming hashing, and canonical key derivation.

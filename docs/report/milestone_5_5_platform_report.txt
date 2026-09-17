@@ -1,0 +1,98 @@
+===============================================================================
+DEVELOPER COMPUTATION CACHE — TEST & IMPLEMENTATION REPORT
+===============================================================================
+Milestone:       5.5 Platform Constraints & Invalidation
+Specification:   D:\Desktop2\Developer Computation Cache — Detailed phase.txt.md (Section 5.5)
+Target Root:     D:\DC
+Report Path:     D:\DC\docs\report\milestone_5_5_platform_report.txt
+Date / Time:     2026-09-17T09:56:00+05:30
+Status:          PASSED (100% Tests Passing, Strict Zero-Warning Quality Gates)
+===============================================================================
+
+1. EXECUTIVE SUMMARY & OBJECTIVE
+-------------------------------------------------------------------------------
+Milestone 5.5 requires that platform-sensitive computations strictly incorporate
+relevant platform constraints into the computation identity and cache key,
+preventing cross-platform contamination or incorrect artifact reuse.
+
+Core Requirement:
+- Platform-sensitive computations must capture meaningful platform dimensions:
+  * Operating System (os)
+  * CPU Architecture (arch)
+  * Target Triple (target)
+  * Runtime Environment (runtime)
+  * Application Binary Interface (abi)
+  * Compiler / Toolchain Identity (compiler)
+- Machine-specific trivia (e.g., hostnames, core counts, RAM, local absolute
+  filesystem paths) MUST NOT be hashed, ensuring cache reuse is maximized across
+  identical target environments.
+- Any change in sensitive platform dimensions must produce a distinct canonical
+  computation key, invalidating stale cross-platform cache entries.
+
+2. ARCHITECTURAL DESIGN & IMPLEMENTATION
+-------------------------------------------------------------------------------
+A. PlatformConstraints Model (`dcc_core::PlatformConstraints`):
+   - Structured platform definition containing:
+     * `os`: String (e.g., "linux", "windows", "macos")
+     * `arch`: String (e.g., "x86_64", "aarch64", "arm")
+     * `target`: Option<String> (e.g., "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc")
+     * `runtime`: Option<String> (e.g., "node20", "python3.11", "jvm21")
+     * `abi`: Option<String> (e.g., "gnu", "musl", "msvc")
+     * `compiler`: Option<String> (e.g., "rustc 1.80.0", "clang 17.0.6")
+   - Default initialization automatically detects host OS and Architecture
+     (`std::env::consts::OS`, `std::env::consts::ARCH`) while keeping fine-grained
+     dimensions optional to avoid accidental over-constraint.
+   - Fluent builder methods provided:
+     * `PlatformConstraints::new(os, arch)`
+     * `with_target(target)`
+     * `with_runtime(runtime)`
+     * `with_abi(abi)`
+     * `with_compiler(compiler)`
+
+B. Canonical Representation (`dcc_core::CanonicalPlatform`):
+   - Canonicalized in `CanonicalComputation` during SHA-256 computation key calculation:
+     `{"os": ..., "arch": ..., "target": ..., "runtime": ..., "abi": ..., "compiler": ...}`
+   - Included in the cryptographic digest of the computation.
+
+C. CommandSpec Integration (`dcc_runner::CommandSpec` & `CommandSpecBuilder`):
+   - Added `platform` field to `CommandSpec` and fluent helper methods to `CommandSpecBuilder`:
+     * `.platform(PlatformConstraints)`
+     * `.platform_target("x86_64-unknown-linux-musl")`
+     * `.platform_runtime("node20")`
+     * `.platform_abi("musl")`
+   - Seamlessly converts into `Computation` during execution preparation.
+
+3. TEST EXECUTION & VERIFICATION RESULTS
+-------------------------------------------------------------------------------
+All workspace unit and integration tests passed cleanly:
+
+A. Unit Tests in `dcc-core`:
+   - `canonical::tests::test_platform_os_differences_produce_different_keys`:
+     Verified that changing OS ("linux" vs "windows" vs "macos") produces distinct keys.
+   - `canonical::tests::test_platform_architecture_differences_produce_different_keys`:
+     Verified that changing CPU architecture ("x86_64" vs "aarch64" vs "arm") produces distinct keys.
+   - `canonical::tests::test_platform_target_triple_differences_produce_different_keys`:
+     Verified that changing target triple (e.g., "x86_64-unknown-linux-gnu" vs "x86_64-unknown-linux-musl") produces distinct keys.
+   - `canonical::tests::test_platform_runtime_and_abi_differences_produce_different_keys`:
+     Verified that changing runtime or ABI dimensions produces distinct keys.
+
+B. Integration Tests in `dcc-runner`:
+   - `integration_tests::test_milestone_5_5_platform_invalidation_comprehensive`:
+     * Executed identical command ("build.py") under Linux and Windows platform configurations.
+     * Verified initial run on Linux yields cold MISS and executes command.
+     * Verified second run on Linux with identical platform yields warm HIT (execution skipped).
+     * Verified run with Windows platform yields cold MISS (different key generated) and re-executes.
+     * Verified run targeting "x86_64-unknown-linux-musl" yields cold MISS against "x86_64-unknown-linux-gnu".
+     * Verified all generated cache keys are distinct.
+
+C. Summary of Quality Gates:
+   - `cargo fmt --all`: PASSED
+   - `cargo test --workspace`: PASSED (59 passed; 0 failed; 0 ignored)
+   - `cargo clippy --workspace --all-targets --all-features -- -D warnings`: PASSED (0 warnings)
+
+4. COMPLIANCE & SAFETY ASSURANCE
+-------------------------------------------------------------------------------
+- No UI or CLI breaking changes were introduced.
+- Strict zero unwrap/panic policy maintained across all core execution paths.
+- Content addressable storage (CAS) integrity preserved.
+===============================================================================

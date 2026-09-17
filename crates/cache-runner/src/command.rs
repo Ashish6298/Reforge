@@ -15,6 +15,7 @@ pub struct CommandSpec {
     pub inputs: Vec<InputFile>,
     pub outputs: Vec<OutputFile>,
     pub tool: Option<dcc_core::ToolIdentity>,
+    pub platform: Option<dcc_core::PlatformConstraints>,
     pub cache_policy: CachePolicy,
 }
 
@@ -31,6 +32,10 @@ impl CommandSpec {
 
         if let Some(tool) = &self.tool {
             comp = comp.tool(&tool.name, tool.version.clone(), tool.digest.clone());
+        }
+
+        if let Some(platform) = &self.platform {
+            comp = comp.platform(platform.clone());
         }
 
         for input in &self.inputs {
@@ -53,7 +58,7 @@ impl CommandSpec {
             inputs: self.inputs.clone(),
             outputs: self.outputs.clone(),
             env: self.environment.clone(),
-            platform: dcc_core::PlatformConstraints::default(),
+            platform: self.platform.clone().unwrap_or_default(),
             tool: self.tool.clone(),
             policy: self.cache_policy,
             metadata: BTreeMap::new(),
@@ -71,6 +76,7 @@ pub struct CommandSpecBuilder {
     inputs: Vec<InputFile>,
     outputs: Vec<OutputFile>,
     tool: Option<dcc_core::ToolIdentity>,
+    platform: Option<dcc_core::PlatformConstraints>,
     cache_policy: CachePolicy,
 }
 
@@ -84,6 +90,7 @@ impl CommandSpecBuilder {
             inputs: Vec::new(),
             outputs: Vec::new(),
             tool: None,
+            platform: None,
             cache_policy: CachePolicy::ReadWrite,
         }
     }
@@ -105,6 +112,32 @@ impl CommandSpecBuilder {
 
     pub fn tool_identity(mut self, tool: dcc_core::ToolIdentity) -> Self {
         self.tool = Some(tool);
+        self
+    }
+
+    pub fn platform(mut self, platform: dcc_core::PlatformConstraints) -> Self {
+        self.platform = Some(platform);
+        self
+    }
+
+    pub fn platform_target(mut self, target: impl Into<String>) -> Self {
+        let mut p = self.platform.unwrap_or_default();
+        p.target = Some(target.into());
+        self.platform = Some(p);
+        self
+    }
+
+    pub fn platform_runtime(mut self, runtime: impl Into<String>) -> Self {
+        let mut p = self.platform.unwrap_or_default();
+        p.runtime = Some(runtime.into());
+        self.platform = Some(p);
+        self
+    }
+
+    pub fn platform_abi(mut self, abi: impl Into<String>) -> Self {
+        let mut p = self.platform.unwrap_or_default();
+        p.abi = Some(abi.into());
+        self.platform = Some(p);
         self
     }
 
@@ -142,6 +175,28 @@ impl CommandSpecBuilder {
     {
         for (k, v) in vars {
             self.environment.insert(k.into(), v.into());
+        }
+        self
+    }
+
+    /// Explicitly declare an environment variable to capture from the current process environment.
+    /// Unrelated undeclared process environment variables will not affect the cache key.
+    pub fn declared_env(mut self, key: impl Into<String>) -> Self {
+        let k = key.into();
+        if let Ok(val) = std::env::var(&k) {
+            self.environment.insert(k, val);
+        }
+        self
+    }
+
+    /// Explicitly declare multiple environment variables to capture from current environment.
+    pub fn declared_envs<I, S>(mut self, keys: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        for key in keys {
+            self = self.declared_env(key);
         }
         self
     }
@@ -238,6 +293,7 @@ impl CommandSpecBuilder {
             inputs: self.inputs,
             outputs: self.outputs,
             tool: self.tool,
+            platform: self.platform,
             cache_policy: self.cache_policy,
         })
     }
