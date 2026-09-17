@@ -147,6 +147,37 @@ impl<'a> GenericIntegration<'a> {
 
         self.engine.execute(comp)
     }
+
+    /// Compile a Rust source artifact using `rustc` caching with explicit tool identity,
+    /// source files, and compiler arguments (Milestone 11.2).
+    pub fn run_rust_build(
+        &self,
+        source_path: &str,
+        output_path: &str,
+        opt_level: Option<&str>,
+        extra_flags: &[String],
+        rustc_path: Option<&str>,
+    ) -> Result<ExecutionResult> {
+        let compiler = rustc_path.unwrap_or("rustc");
+        let mut args = vec![
+            source_path.to_string(),
+            "-o".to_string(),
+            output_path.to_string(),
+        ];
+        if let Some(opt) = opt_level {
+            args.push(format!("-Copt-level={}", opt));
+        }
+        args.extend_from_slice(extra_flags);
+
+        let action = BuildAction::builder()
+            .compiler(compiler)
+            .arguments(args)
+            .source_input(source_path, Digest::from_bytes(b""), 0)
+            .output(output_path, true)
+            .build()?;
+
+        self.execute_build_action(action)
+    }
 }
 
 #[cfg(test)]
@@ -287,5 +318,76 @@ mod tests {
         let res2 = integration.execute_build_action(action).unwrap();
         assert_eq!(res2.status, ExecutionStatus::Hit);
         assert!(out_file.is_file());
+    }
+
+    #[test]
+    fn test_milestone_11_2_rust_build_integration() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache_dir = temp_dir.path().join(".cache");
+        let ws_dir = temp_dir.path().join("ws");
+        std::fs::create_dir_all(&ws_dir).unwrap();
+
+        let cache = Cache::open(&cache_dir).unwrap();
+        let integration = GenericIntegration::from_cache(&cache, &ws_dir);
+
+        let src_file = ws_dir.join("lib.rs");
+        let out_file = ws_dir.join("libcalc.rlib");
+        std::fs::write(&src_file, b"pub fn add(a: i32, b: i32) -> i32 { a + b }").unwrap();
+
+        #[cfg(windows)]
+        let (cmd, args) = (
+            "powershell.exe",
+            vec![
+                "-Command".to_string(),
+                format!(
+                    "Set-Content -Path '{}' -Value 'rlib_compiled_binary_payload'",
+                    out_file.display()
+                ),
+            ],
+        );
+        #[cfg(not(windows))]
+        let (cmd, args) = (
+            "sh",
+            vec![
+                "-c".to_string(),
+                format!(
+                    "echo 'rlib_compiled_binary_payload' > '{}'",
+                    out_file.display()
+                ),
+            ],
+        );
+
+        let action = BuildAction::builder()
+            .compiler(cmd)
+            .arguments(args)
+            .source_input("lib.rs", Digest::hash_file(&src_file).unwrap(), 42)
+            .compiler_version("rustc 1.80.0")
+            .target("x86_64-pc-windows-msvc")
+            .env("RUSTFLAGS", "-C opt-level=2")
+            .output("libcalc.rlib", true)
+            .build()
+            .unwrap();
+
+        // 1. Initial Build Execution -> Expect MISS
+        let res1 = integration.execute_build_action(action.clone()).unwrap();
+        assert_eq!(res1.status, ExecutionStatus::Miss);
+        assert!(out_file.is_file());
+        assert_eq!(
+            std::fs::read(&out_file).unwrap().trim_ascii(),
+            b"rlib_compiled_binary_payload"
+        );
+
+        // Delete artifact
+        std::fs::remove_file(&out_file).unwrap();
+        assert!(!out_file.exists());
+
+        // 2. Second Build Execution -> Expect HIT
+        let res2 = integration.execute_build_action(action).unwrap();
+        assert_eq!(res2.status, ExecutionStatus::Hit);
+        assert!(out_file.is_file());
+        assert_eq!(
+            std::fs::read(&out_file).unwrap().trim_ascii(),
+            b"rlib_compiled_binary_payload"
+        );
     }
 }

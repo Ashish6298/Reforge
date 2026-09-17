@@ -878,6 +878,9 @@ cargo run --example cached_analysis
 
 # 3. Data Transformation & Asset Minification (CSV -> JSON Pipeline)
 cargo run --example cached_transform
+
+# 4. Rust Compiler Build Action Integration (Source + Compiler Config + Tool Identity)
+cargo run --example cached_rust_build
 ```
 
 Each example illustrates:
