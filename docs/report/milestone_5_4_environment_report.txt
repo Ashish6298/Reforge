@@ -1,0 +1,80 @@
+================================================================================
+DCC IMPLEMENTATION REPORT: MILESTONE 5.4 — DECLARED ENVIRONMENT
+================================================================================
+Timestamp: 2026-09-17
+Status: SUCCESS / FULLY VERIFIED
+Specification Section: Milestone 5.4 (Environment)
+
+1. OBJECTIVE & REQUIREMENTS
+--------------------------------------------------------------------------------
+The objective of Milestone 5.4 is to support explicit declared environment variables
+and prevent accidental cache fragmentation caused by undeclared system environment
+variables:
+
+    CACHE_ENV / Declared Variables:
+        NODE_ENV
+        GENERATOR_VERSION
+        FEATURE_MODE
+
+Core Guarantees & Invariants:
+1. No Automatic Full-Environment Hashing: Unrelated process environment variables
+   (e.g. `USER`, `PWD`, `SSH_AUTH_SOCK`, `TERM`, `RANDOM_TOKEN`) must never pollute
+   or fragment computation keys.
+2. Declared Environment Sensitivity: If a declared environment variable changes value
+   (e.g. `FEATURE_MODE=legacy` vs `FEATURE_MODE=modern`), DCC derives distinct
+   canonical cache keys.
+3. Canonical Map Sorting: Declared environment key-value pairs are stored in a
+   `BTreeMap` and serialized in alphabetical order, making key derivation invariant
+   to the declaration/insertion sequence.
+4. Builder Support:
+   - `CommandSpecBuilder::env(key, val)`
+   - `CommandSpecBuilder::envs([(k1, v1), ...])`
+   - `CommandSpecBuilder::declared_env(key)` (reads variable from process environment)
+   - `CommandSpecBuilder::declared_envs([key1, key2, ...])`
+5. Miss Explanation: When environment differences cause a cache miss, `MissExplainer`
+   identifies the exact variable key and old/new values (`MissReason::EnvironmentChanged`).
+
+2. IMPLEMENTATION DETAILS
+--------------------------------------------------------------------------------
+- Core Model (`crates/cache-core/src/computation.rs`):
+  * `Computation.env: BTreeMap<String, String>`.
+  * Added `declared_env` and `declared_envs` helper methods to `ComputationBuilder`.
+- Command Model (`crates/cache-runner/src/command.rs`):
+  * Added `declared_env` and `declared_envs` to `CommandSpecBuilder`.
+  * Preserved isolated environment map in `CommandSpec`.
+- Canonical Key Serialization (`crates/cache-core/src/canonical.rs`):
+  * Only serializes declared `comp.env` entries.
+  * Sorted lexicographically before SHA-256 computation.
+
+3. TEST & VERIFICATION RESULTS
+--------------------------------------------------------------------------------
+- Comprehensive Unit Tests (`crates/cache-core/src/canonical.rs`):
+  * `test_differing_environment_produce_different_keys`: Validates `NODE_ENV=dev` vs `NODE_ENV=prod`.
+  * `test_declared_environment_order_independent_canonicalization`: Validates insertion order invariance.
+  * `test_undeclared_environment_variables_do_not_fragment_cache`: Validates undeclared variable isolation.
+
+- End-to-End Integration Tests (`crates/cache-runner/tests/integration_tests.rs`):
+  * `test_milestone_5_4_declared_environment_invalidation_comprehensive`:
+    1. Runs with `FEATURE_MODE=legacy` -> MISS, executes, caches under `Key Legacy`.
+    2. Runs with `FEATURE_MODE=modern` -> MISS, derives `Key Modern != Key Legacy`, executes, caches.
+    3. Reruns with `FEATURE_MODE=legacy` -> HIT, restores `"MODE: legacy"`.
+    4. Confirms `MissExplainer` yields `MissReason::EnvironmentChanged { key: "FEATURE_MODE", old: "legacy", new: "modern" }`.
+
+- Workspace Test Suite Summary:
+  * Total tests passed: 51 passed; 0 failed; 0 ignored (100% pass rate).
+  * Linter (`clippy`): 0 warnings (`-D warnings`).
+  * Formatter (`rustfmt`): Clean formatting verified.
+
+4. ARTIFACTS AND MODIFICATIONS
+--------------------------------------------------------------------------------
+- `crates/cache-core/src/computation.rs`: Added `declared_env` & `declared_envs` to `ComputationBuilder`.
+- `crates/cache-core/src/canonical.rs`: Added declared environment canonicalization & isolation tests.
+- `crates/cache-runner/src/command.rs`: Added `declared_env` & `declared_envs` to `CommandSpecBuilder`.
+- `crates/cache-runner/tests/integration_tests.rs`: Added `test_milestone_5_4_declared_environment_invalidation_comprehensive`.
+- `docs/report/milestone_5_4_environment_report.txt`: Generated Milestone 5.4 report.
+- `README.md`: Updated with Declared Environment Invalidation documentation.
+
+5. CONCLUSION
+--------------------------------------------------------------------------------
+Milestone 5.4 is completely implemented, verified, and passes all quality gates.
+================================================================================

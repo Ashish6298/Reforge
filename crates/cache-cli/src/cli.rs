@@ -1,6 +1,36 @@
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
+/// Documented stable CLI exit codes for `dcc`
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+#[allow(dead_code)]
+pub enum ExitCode {
+    /// 0 = success / cache hit
+    Success = 0,
+    /// 1 = computation failed / cache entry not found
+    ComputationFailed = 1,
+    /// 2 = invalid configuration
+    InvalidConfiguration = 2,
+    /// 3 = cache storage or I/O error
+    CacheError = 3,
+    /// 4 = cryptographic or metadata integrity failure
+    IntegrityFailure = 4,
+    /// 5 = invalid arguments or unrecognized option
+    InvalidArguments = 5,
+}
+
+#[allow(dead_code)]
+impl ExitCode {
+    pub fn as_i32(self) -> i32 {
+        self as i32
+    }
+
+    pub fn exit(self) -> ! {
+        std::process::exit(self as i32)
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "dcc", version, about = "Developer Computation Cache", long_about = None)]
 pub struct Cli {
@@ -21,9 +51,9 @@ pub enum Commands {
         #[arg(
             short,
             long,
-            help = "Max cache size in bytes (e.g. 10737418240 for 10GB)"
+            help = "Max cache size (e.g. '500 MB', '2 GB', '10 GB' or raw bytes)"
         )]
-        max_size: Option<u64>,
+        max_size: Option<String>,
     },
 
     #[command(about = "Execute a computation with caching")]
@@ -49,15 +79,83 @@ pub enum Commands {
 
     #[command(about = "Prune unreferenced objects or enforce max cache size")]
     Prune {
-        #[arg(long, help = "Enforce max size in bytes")]
-        max_size: Option<u64>,
+        #[arg(
+            long,
+            help = "Enforce max size (e.g. '500 MB', '2 GB', '10 GB' or raw bytes)"
+        )]
+        max_size: Option<String>,
+
+        #[arg(
+            long,
+            default_value = "lru",
+            help = "Eviction strategy: lru (least recently used), fifo (oldest created), lfu (least frequently used)"
+        )]
+        strategy: String,
+
+        #[arg(
+            long,
+            help = "Perform a dry run without deleting any entries or objects"
+        )]
+        dry_run: bool,
+    },
+
+    #[command(about = "Inspect or manage cache configuration")]
+    Config {
+        #[arg(
+            long,
+            help = "Display configuration setting (e.g. 'max_size', 'cache_dir')"
+        )]
+        get: Option<String>,
     },
 
     #[command(about = "Diagnose cache health, environment, and permissions")]
     Doctor,
+
+    #[command(about = "Manage and maintain local computation cache (clean, prune, verify, stats)")]
+    Cache {
+        #[command(subcommand)]
+        command: CacheCommands,
+    },
 }
 
-#[derive(Args, Debug)]
+#[derive(Subcommand, Debug)]
+pub enum CacheCommands {
+    #[command(about = "Clean entire cache or delete specific keys")]
+    Clean {
+        #[arg(short, long, help = "Specific computation key to delete")]
+        key: Option<String>,
+    },
+
+    #[command(about = "Prune unreferenced objects or enforce max cache size")]
+    Prune {
+        #[arg(
+            long,
+            help = "Enforce max size (e.g. '500 MB', '2 GB', '10 GB' or raw bytes)"
+        )]
+        max_size: Option<String>,
+
+        #[arg(
+            long,
+            default_value = "lru",
+            help = "Eviction strategy: lru (least recently used), fifo (oldest created), lfu (least frequently used)"
+        )]
+        strategy: String,
+
+        #[arg(
+            long,
+            help = "Perform a dry run without deleting any entries or objects"
+        )]
+        dry_run: bool,
+    },
+
+    #[command(about = "Verify integrity of stored objects")]
+    Verify,
+
+    #[command(about = "Display cache statistics and storage metrics")]
+    Stats,
+}
+
+#[derive(Args, Debug, Clone)]
 pub struct RunArgs {
     #[arg(short, long = "input", action = clap::ArgAction::Append, help = "Declared input files")]
     pub inputs: Vec<String>,

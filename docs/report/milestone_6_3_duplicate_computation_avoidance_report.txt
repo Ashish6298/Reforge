@@ -1,0 +1,83 @@
+================================================================================
+DEVELOPER COMPUTATION CACHE (DCC) — MILESTONE 6.3 ENGINEERING & VERIFICATION REPORT
+================================================================================
+Date: 2026-09-17
+Milestone: Milestone 6.3 — Duplicate Computation Avoidance
+Status: COMPLETED & VERIFIED
+Workspace Test Suite: 67 / 67 Passed (100% Pass Rate)
+Zero Warnings Policy: Enforced & Verified (Clippy & Fmt clean)
+================================================================================
+
+1. EXECUTIVE SUMMARY & OBJECTIVE
+--------------------------------------------------------------------------------
+Milestone 6.3 implements and validates duplicate computation suppression when multiple
+processes or threads simultaneously encounter a cache miss for the exact same key:
+  A -> MISS
+  B -> MISS
+
+Without coordination, both processes would perform redundant, expensive compilation,
+code generation, or artifact build steps.
+
+Milestone 6.3 guarantees the coordinated synchronization flow:
+  1. Process A acquires computation lock (.cache/locks/<key>.lock).
+  2. Process B blocks on the computation lock and waits.
+  3. Process A executes the command, stores output CAS artifacts, and writes metadata.
+  4. Process A completes and releases the lock.
+  5. Process B acquires the computation lock.
+  6. Process B re-checks the cache, finds the fresh entry written by Process A.
+  7. Process B restores outputs directly into its own workspace and reports HIT.
+  8. Process B completely bypasses redundant execution of the expensive command.
+
+--------------------------------------------------------------------------------
+2. ARCHITECTURAL IMPLEMENTATION & INVARIANTS
+--------------------------------------------------------------------------------
+- ComputationLock Lifecycle (`crates/cache-storage/src/lock.rs`):
+  * Utilizes operating system-level advisory file locks (`fs2::FileExt::try_lock_exclusive`)
+    operating on `.cache/locks/<key>.lock`.
+  * Non-blocking retry loop with exponential/periodic polling and configurable timeouts
+    (`lock_timeout: Duration`).
+  * RAII `Drop` implementation safely unlocks the file descriptor and removes the lockfile.
+
+- Re-Check Cache on Lock Acquisition (`RunnerEngine::run_and_store`):
+  * After acquiring the lock, `RunnerEngine` performs a secondary cache lookup before
+    spawning any child process.
+  * If a concurrent process completed the computation while the current process was
+    waiting, `RunnerEngine` validates the metadata identity, restores output files
+    into the caller's workspace, and returns `ExecutionStatus::Hit` with `0ms` duration.
+
+- Safe Concurrent Workspace Output Restoration (`crates/cache-runner/src/restore.rs`):
+  * Unique nonce temporary files (`.tmp_restore_<prefix8>_<pid>_<nanos>_<counter>`)
+    prevent race collisions during concurrent restorations.
+  * Reader handles are scoped and dropped before atomic replacement (`fs::rename`).
+
+--------------------------------------------------------------------------------
+3. TEST SUITE & CONCURRENCY VALIDATION
+--------------------------------------------------------------------------------
+
+The concurrency test harness (`crates/cache-runner/tests/concurrency_tests.rs`)
+verifies the following scenarios:
+
+1. `test_milestone_6_3_duplicate_computation_avoidance_comprehensive`:
+   - 6 concurrent threads start simultaneously using a thread barrier against an
+     empty cache executing an expensive computation (with physical side-effect logging
+     to a shared execution counter log file).
+   - Invariants Verified:
+     * Exactly 1 thread executes the computation (`ExecutionStatus::Miss`).
+     * Exactly 5 threads wait on lock, re-check cache, and return `ExecutionStatus::Hit`.
+     * The physical execution counter log records exactly 1 execution line across
+       all 6 threads.
+     * All 6 threads receive 100% verified output files in their respective workspaces.
+
+2. `test_concurrent_identical_computations`:
+   - 8 concurrent threads executing identical computations in parallel.
+
+--------------------------------------------------------------------------------
+4. VERIFICATION METRICS
+--------------------------------------------------------------------------------
+- Test Suite: 67 passed; 0 failed; finished in 5.82s
+- Clippy: 0 warnings with `-D warnings`
+- Rustfmt: 0 formatting differences
+
+================================================================================
+END OF REPORT — MILESTONE 6.3 COMPLETED
+================================================================================

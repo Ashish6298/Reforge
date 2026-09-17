@@ -489,3 +489,994 @@ fn test_failed_computations_are_not_cached_by_default() {
         "Second execution of failed computation must still NOT be cached"
     );
 }
+
+#[test]
+fn test_milestone_5_1_input_changes_comprehensive() {
+    let env = TestEnv::new().unwrap();
+
+    // 1. Initial State: Input A has content X
+    let hash_x_bytes = b"PAYLOAD_CONTENT_HASH_X";
+    env.create_input_file("input_a.txt", hash_x_bytes).unwrap();
+
+    #[cfg(windows)]
+    let (cmd, args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "$content = [System.IO.File]::ReadAllText('input_a.txt'); [System.IO.File]::WriteAllText('output.txt', \"PROCESSED: $content\")".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd, args) = (
+        "sh",
+        vec![
+            "-c".to_string(),
+            "content=$(cat input_a.txt); echo -n \"PROCESSED: $content\" > output.txt".to_string(),
+        ],
+    );
+
+    let command_spec = dcc_runner::CommandSpec::builder(cmd)
+        .args(args)
+        .current_dir(env.workspace_dir.path())
+        .input_path("input_a.txt")
+        .output_path("output.txt")
+        .build()
+        .unwrap();
+
+    let engine = RunnerEngine::new(
+        &env.storage,
+        EngineOptions {
+            working_dir: env.workspace_dir.path().to_path_buf(),
+            ..Default::default()
+        },
+    );
+
+    // Initial Execution with Input A = Hash X
+    let res_x = engine.execute_command(&command_spec).unwrap();
+    assert_eq!(res_x.status, ExecutionStatus::Miss);
+    let key_x = res_x.key;
+    let expected_x_output = format!("PROCESSED: {}", String::from_utf8_lossy(hash_x_bytes));
+    assert_eq!(
+        String::from_utf8_lossy(&env.read_output_file("output.txt").unwrap()).trim(),
+        expected_x_output.trim()
+    );
+
+    // Verify cache hit on unchanged input
+    let res_x_hit = engine.execute_command(&command_spec).unwrap();
+    assert_eq!(res_x_hit.status, ExecutionStatus::Hit);
+    assert_eq!(res_x_hit.key, key_x);
+
+    // 2. Modify Input A: from Hash X to Hash Y
+    let hash_y_bytes = b"PAYLOAD_CONTENT_HASH_Y_DIFFERENT";
+    env.create_input_file("input_a.txt", hash_y_bytes).unwrap();
+
+    // Execute with Input A = Hash Y
+    let res_y = engine.execute_command(&command_spec).unwrap();
+    assert_eq!(res_y.status, ExecutionStatus::Miss);
+    let key_y = res_y.key;
+
+    // Invariant: Key X must differ from Key Y
+    assert_ne!(
+        key_x, key_y,
+        "input A = hash X vs input A = hash Y MUST produce different computation keys"
+    );
+
+    // Verify output reflects new Input Y
+    let expected_y_output = format!("PROCESSED: {}", String::from_utf8_lossy(hash_y_bytes));
+    assert_eq!(
+        String::from_utf8_lossy(&env.read_output_file("output.txt").unwrap()).trim(),
+        expected_y_output.trim()
+    );
+
+    // Verify MissExplainer identifies the exact input change
+    let comp_x = env.storage.get_entry(&key_x).unwrap().unwrap().computation;
+    let comp_y = env.storage.get_entry(&key_y).unwrap().unwrap().computation;
+    let miss_reason = dcc_runner::MissExplainer::explain(&comp_y, Some(&comp_x));
+    match miss_reason {
+        dcc_core::MissReason::InputChanged {
+            path,
+            old_digest,
+            new_digest,
+        } => {
+            assert_eq!(path, "input_a.txt");
+            assert_ne!(old_digest.unwrap(), new_digest);
+        }
+        other => panic!("Expected InputChanged miss reason, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_milestone_5_2_command_and_argument_changes_comprehensive() {
+    let env = TestEnv::new().unwrap();
+
+    // Shared input file for both commands
+    env.create_input_file("source.txt", b"INPUT_DATA_123")
+        .unwrap();
+
+    // Command 1: generator --fast (simulated via powershell / sh)
+    #[cfg(windows)]
+    let (cmd1, args1) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "[System.IO.File]::WriteAllText('mode.out', 'RESULT_FAST_MODE')".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd1, args1) = (
+        "sh",
+        vec![
+            "-c".to_string(),
+            "echo -n 'RESULT_FAST_MODE' > mode.out".to_string(),
+        ],
+    );
+
+    // Command 2: generator --safe (simulated via powershell / sh)
+    #[cfg(windows)]
+    let (cmd2, args2) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "[System.IO.File]::WriteAllText('mode.out', 'RESULT_SAFE_MODE')".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd2, args2) = (
+        "sh",
+        vec![
+            "-c".to_string(),
+            "echo -n 'RESULT_SAFE_MODE' > mode.out".to_string(),
+        ],
+    );
+
+    let spec_fast = dcc_runner::CommandSpec::builder(cmd1)
+        .args(args1)
+        .current_dir(env.workspace_dir.path())
+        .input_path("source.txt")
+        .output_path("mode.out")
+        .build()
+        .unwrap();
+
+    let spec_safe = dcc_runner::CommandSpec::builder(cmd2)
+        .args(args2)
+        .current_dir(env.workspace_dir.path())
+        .input_path("source.txt")
+        .output_path("mode.out")
+        .build()
+        .unwrap();
+
+    let engine = RunnerEngine::new(
+        &env.storage,
+        EngineOptions {
+            working_dir: env.workspace_dir.path().to_path_buf(),
+            ..Default::default()
+        },
+    );
+
+    // 1. Run generator --fast (Cold run -> MISS)
+    let res_fast_1 = engine.execute_command(&spec_fast).unwrap();
+    assert_eq!(res_fast_1.status, ExecutionStatus::Miss);
+    let key_fast = res_fast_1.key;
+    assert_eq!(
+        String::from_utf8_lossy(&env.read_output_file("mode.out").unwrap()).trim(),
+        "RESULT_FAST_MODE"
+    );
+
+    // 2. Run generator --safe (Cold run -> MISS)
+    let res_safe_1 = engine.execute_command(&spec_safe).unwrap();
+    assert_eq!(res_safe_1.status, ExecutionStatus::Miss);
+    let key_safe = res_safe_1.key;
+    assert_eq!(
+        String::from_utf8_lossy(&env.read_output_file("mode.out").unwrap()).trim(),
+        "RESULT_SAFE_MODE"
+    );
+
+    // Invariant: generator --fast and generator --safe MUST create different keys
+    assert_ne!(
+        key_fast, key_safe,
+        "generator --fast and generator --safe must produce different cache keys"
+    );
+
+    // 3. Delete output file and rerun generator --fast (Warm run -> HIT)
+    fs::remove_file(env.workspace_dir.path().join("mode.out")).unwrap();
+    let res_fast_2 = engine.execute_command(&spec_fast).unwrap();
+    assert_eq!(res_fast_2.status, ExecutionStatus::Hit);
+    assert_eq!(res_fast_2.key, key_fast);
+    assert_eq!(
+        String::from_utf8_lossy(&env.read_output_file("mode.out").unwrap()).trim(),
+        "RESULT_FAST_MODE"
+    );
+
+    // 4. Delete output file and rerun generator --safe (Warm run -> HIT)
+    fs::remove_file(env.workspace_dir.path().join("mode.out")).unwrap();
+    let res_safe_2 = engine.execute_command(&spec_safe).unwrap();
+    assert_eq!(res_safe_2.status, ExecutionStatus::Hit);
+    assert_eq!(res_safe_2.key, key_safe);
+    assert_eq!(
+        String::from_utf8_lossy(&env.read_output_file("mode.out").unwrap()).trim(),
+        "RESULT_SAFE_MODE"
+    );
+
+    // 5. Verify MissExplainer identifies argument change
+    let comp_fast = env
+        .storage
+        .get_entry(&key_fast)
+        .unwrap()
+        .unwrap()
+        .computation;
+    let comp_safe = env
+        .storage
+        .get_entry(&key_safe)
+        .unwrap()
+        .unwrap()
+        .computation;
+    let miss_reason = dcc_runner::MissExplainer::explain(&comp_safe, Some(&comp_fast));
+    match miss_reason {
+        dcc_core::MissReason::ArgumentsChanged { old, new } => {
+            assert_ne!(old, new);
+        }
+        other => panic!("Expected ArgumentsChanged miss reason, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_milestone_5_3_tool_version_invalidation_comprehensive() {
+    let env = TestEnv::new().unwrap();
+
+    env.create_input_file("source.rs", b"fn main() {}").unwrap();
+
+    #[cfg(windows)]
+    let (cmd, args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "[System.IO.File]::WriteAllText('binary.out', 'COMPILED_BINARY')".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd, args) = (
+        "sh",
+        vec![
+            "-c".to_string(),
+            "echo -n 'COMPILED_BINARY' > binary.out".to_string(),
+        ],
+    );
+
+    // Spec with compiler version 1.80.0
+    let spec_v1_80 = dcc_runner::CommandSpec::builder(cmd)
+        .args(args.clone())
+        .current_dir(env.workspace_dir.path())
+        .input_path("source.rs")
+        .output_path("binary.out")
+        .tool_version("rustc", "1.80.0")
+        .build()
+        .unwrap();
+
+    // Spec with compiler version 1.81.0
+    let spec_v1_81 = dcc_runner::CommandSpec::builder(cmd)
+        .args(args)
+        .current_dir(env.workspace_dir.path())
+        .input_path("source.rs")
+        .output_path("binary.out")
+        .tool_version("rustc", "1.81.0")
+        .build()
+        .unwrap();
+
+    let engine = RunnerEngine::new(
+        &env.storage,
+        EngineOptions {
+            working_dir: env.workspace_dir.path().to_path_buf(),
+            ..Default::default()
+        },
+    );
+
+    // 1. Run with compiler 1.80.0 (Cold run -> MISS)
+    let res_80 = engine.execute_command(&spec_v1_80).unwrap();
+    assert_eq!(res_80.status, ExecutionStatus::Miss);
+    let key_80 = res_80.key;
+
+    // 2. Run with compiler 1.81.0 (Cold run -> MISS, MUST NOT reuse 1.80 cached result)
+    let res_81 = engine.execute_command(&spec_v1_81).unwrap();
+    assert_eq!(res_81.status, ExecutionStatus::Miss);
+    let key_81 = res_81.key;
+
+    // Invariant: compiler 1.80.0 and compiler 1.81.0 must derive different keys
+    assert_ne!(
+        key_80, key_81,
+        "A computation using compiler 1.80 must not silently reuse a result from compiler 1.81"
+    );
+
+    // 3. Rerun compiler 1.80.0 -> HIT
+    fs::remove_file(env.workspace_dir.path().join("binary.out")).unwrap();
+    let res_80_hit = engine.execute_command(&spec_v1_80).unwrap();
+    assert_eq!(res_80_hit.status, ExecutionStatus::Hit);
+    assert_eq!(res_80_hit.key, key_80);
+
+    // 4. Verify MissExplainer identifies tool identity change
+    let comp_80 = env.storage.get_entry(&key_80).unwrap().unwrap().computation;
+    let comp_81 = env.storage.get_entry(&key_81).unwrap().unwrap().computation;
+    let miss_reason = dcc_runner::MissExplainer::explain(&comp_81, Some(&comp_80));
+    match miss_reason {
+        dcc_core::MissReason::ToolChanged { reason } => {
+            assert!(reason.contains("1.80.0") || reason.contains("1.81.0"));
+        }
+        other => panic!("Expected ToolChanged miss reason, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_milestone_5_4_declared_environment_invalidation_comprehensive() {
+    let env = TestEnv::new().unwrap();
+
+    env.create_input_file("config.json", b"{\"app\": \"demo\"}")
+        .unwrap();
+
+    // Command outputs the value of the environment variable FEATURE_MODE to env_out.txt
+    #[cfg(windows)]
+    let (cmd, args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "$val = $env:FEATURE_MODE; [System.IO.File]::WriteAllText('env_out.txt', \"MODE: $val\")".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd, args) = (
+        "sh",
+        vec![
+            "-c".to_string(),
+            "echo -n \"MODE: $FEATURE_MODE\" > env_out.txt".to_string(),
+        ],
+    );
+
+    // Spec 1 with declared env FEATURE_MODE = "legacy"
+    let spec_legacy = dcc_runner::CommandSpec::builder(cmd)
+        .args(args.clone())
+        .current_dir(env.workspace_dir.path())
+        .input_path("config.json")
+        .output_path("env_out.txt")
+        .env("FEATURE_MODE", "legacy")
+        .build()
+        .unwrap();
+
+    // Spec 2 with declared env FEATURE_MODE = "modern"
+    let spec_modern = dcc_runner::CommandSpec::builder(cmd)
+        .args(args)
+        .current_dir(env.workspace_dir.path())
+        .input_path("config.json")
+        .output_path("env_out.txt")
+        .env("FEATURE_MODE", "modern")
+        .build()
+        .unwrap();
+
+    let engine = RunnerEngine::new(
+        &env.storage,
+        EngineOptions {
+            working_dir: env.workspace_dir.path().to_path_buf(),
+            ..Default::default()
+        },
+    );
+
+    // 1. Run spec_legacy (Cold run -> MISS)
+    let res_legacy = engine.execute_command(&spec_legacy).unwrap();
+    assert_eq!(res_legacy.status, ExecutionStatus::Miss);
+    let key_legacy = res_legacy.key;
+    assert_eq!(
+        String::from_utf8_lossy(&env.read_output_file("env_out.txt").unwrap()).trim(),
+        "MODE: legacy"
+    );
+
+    // 2. Run spec_modern (Cold run -> MISS, MUST NOT reuse legacy result)
+    let res_modern = engine.execute_command(&spec_modern).unwrap();
+    assert_eq!(res_modern.status, ExecutionStatus::Miss);
+    let key_modern = res_modern.key;
+    assert_eq!(
+        String::from_utf8_lossy(&env.read_output_file("env_out.txt").unwrap()).trim(),
+        "MODE: modern"
+    );
+
+    // Invariant: Changing declared environment must produce different cache keys
+    assert_ne!(
+        key_legacy, key_modern,
+        "Declared environment differences must produce distinct cache keys"
+    );
+
+    // 3. Rerun spec_legacy -> HIT, restores "MODE: legacy"
+    fs::remove_file(env.workspace_dir.path().join("env_out.txt")).unwrap();
+    let res_legacy_hit = engine.execute_command(&spec_legacy).unwrap();
+    assert_eq!(res_legacy_hit.status, ExecutionStatus::Hit);
+    assert_eq!(res_legacy_hit.key, key_legacy);
+    assert_eq!(
+        String::from_utf8_lossy(&env.read_output_file("env_out.txt").unwrap()).trim(),
+        "MODE: legacy"
+    );
+
+    // 4. Verify MissExplainer identifies environment variable change
+    let comp_legacy = env
+        .storage
+        .get_entry(&key_legacy)
+        .unwrap()
+        .unwrap()
+        .computation;
+    let comp_modern = env
+        .storage
+        .get_entry(&key_modern)
+        .unwrap()
+        .unwrap()
+        .computation;
+    let miss_reason = dcc_runner::MissExplainer::explain(&comp_modern, Some(&comp_legacy));
+    match miss_reason {
+        dcc_core::MissReason::EnvironmentChanged { key, old, new } => {
+            assert_eq!(key, "FEATURE_MODE");
+            assert_eq!(old, Some("legacy".to_string()));
+            assert_eq!(new, Some("modern".to_string()));
+        }
+        other => panic!("Expected EnvironmentChanged miss reason, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_milestone_5_5_platform_invalidation_comprehensive() {
+    let env = TestEnv::new().unwrap();
+
+    env.create_input_file("target_app.rs", b"fn entry() {}")
+        .unwrap();
+
+    #[cfg(windows)]
+    let (cmd, args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "[System.IO.File]::WriteAllText('app.bin', 'COMPILED_FOR_TARGET')".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd, args) = (
+        "sh",
+        vec![
+            "-c".to_string(),
+            "echo -n 'COMPILED_FOR_TARGET' > app.bin".to_string(),
+        ],
+    );
+
+    // Spec 1 targeting x86_64-unknown-linux-gnu
+    let platform_x86 = dcc_core::PlatformConstraints::new("linux", "x86_64")
+        .with_target("x86_64-unknown-linux-gnu");
+    let spec_x86 = dcc_runner::CommandSpec::builder(cmd)
+        .args(args.clone())
+        .current_dir(env.workspace_dir.path())
+        .input_path("target_app.rs")
+        .output_path("app.bin")
+        .platform(platform_x86)
+        .build()
+        .unwrap();
+
+    // Spec 2 targeting aarch64-unknown-linux-gnu
+    let platform_arm = dcc_core::PlatformConstraints::new("linux", "aarch64")
+        .with_target("aarch64-unknown-linux-gnu");
+    let spec_arm = dcc_runner::CommandSpec::builder(cmd)
+        .args(args)
+        .current_dir(env.workspace_dir.path())
+        .input_path("target_app.rs")
+        .output_path("app.bin")
+        .platform(platform_arm)
+        .build()
+        .unwrap();
+
+    let engine = RunnerEngine::new(
+        &env.storage,
+        EngineOptions {
+            working_dir: env.workspace_dir.path().to_path_buf(),
+            ..Default::default()
+        },
+    );
+
+    // 1. Run x86 target (Cold run -> MISS)
+    let res_x86 = engine.execute_command(&spec_x86).unwrap();
+    assert_eq!(res_x86.status, ExecutionStatus::Miss);
+    let key_x86 = res_x86.key;
+
+    // 2. Run ARM target (Cold run -> MISS, MUST NOT reuse x86 cached result)
+    let res_arm = engine.execute_command(&spec_arm).unwrap();
+    assert_eq!(res_arm.status, ExecutionStatus::Miss);
+    let key_arm = res_arm.key;
+
+    // Invariant: Target architecture/triple differences must produce different keys
+    assert_ne!(
+        key_x86, key_arm,
+        "Target platform differences (x86_64 vs aarch64) must derive distinct cache keys"
+    );
+
+    // 3. Rerun x86 target -> HIT
+    fs::remove_file(env.workspace_dir.path().join("app.bin")).unwrap();
+    let res_x86_hit = engine.execute_command(&spec_x86).unwrap();
+    assert_eq!(res_x86_hit.status, ExecutionStatus::Hit);
+    assert_eq!(res_x86_hit.key, key_x86);
+
+    // 4. Verify MissExplainer identifies platform difference
+    let comp_x86 = env
+        .storage
+        .get_entry(&key_x86)
+        .unwrap()
+        .unwrap()
+        .computation;
+    let comp_arm = env
+        .storage
+        .get_entry(&key_arm)
+        .unwrap()
+        .unwrap()
+        .computation;
+    let miss_reason = dcc_runner::MissExplainer::explain(&comp_arm, Some(&comp_x86));
+    match miss_reason {
+        dcc_core::MissReason::PlatformChanged { reason } => {
+            assert!(reason.contains("aarch64") || reason.contains("x86_64"));
+        }
+        other => panic!("Expected PlatformChanged miss reason, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_milestone_5_6_explainable_cache_misses_comprehensive() {
+    // 1. Initial State: No Entry Exists
+    let comp_base = Computation::builder("build", "rustc")
+        .arg("main.rs")
+        .input(
+            "src/parser.rs",
+            Digest::from_bytes(b"fn parse() -> bool { true }"),
+            30,
+        )
+        .env("OPTIMIZATION_LEVEL", "2")
+        .tool("rustc", Some("1.80.0".into()), None)
+        .platform(
+            dcc_core::PlatformConstraints::new("linux", "x86_64")
+                .with_target("x86_64-unknown-linux-gnu"),
+        )
+        .build()
+        .unwrap();
+
+    let miss_no_entry = dcc_runner::MissExplainer::explain(&comp_base, None);
+    assert_eq!(miss_no_entry, dcc_core::MissReason::NoEntryFound);
+    let msg = format!("{}", miss_no_entry);
+    assert!(msg.contains("No previous cache entry"));
+
+    // 2. Input Changed
+    let comp_input_changed = Computation::builder("build", "rustc")
+        .arg("main.rs")
+        .input(
+            "src/parser.rs",
+            Digest::from_bytes(b"fn parse() -> bool { false }"),
+            31,
+        )
+        .env("OPTIMIZATION_LEVEL", "2")
+        .tool("rustc", Some("1.80.0".into()), None)
+        .platform(
+            dcc_core::PlatformConstraints::new("linux", "x86_64")
+                .with_target("x86_64-unknown-linux-gnu"),
+        )
+        .build()
+        .unwrap();
+
+    let miss_input = dcc_runner::MissExplainer::explain(&comp_input_changed, Some(&comp_base));
+    match &miss_input {
+        dcc_core::MissReason::InputChanged { path, .. } => {
+            assert_eq!(path, "src/parser.rs");
+        }
+        other => panic!("Expected InputChanged, got {:?}", other),
+    }
+    let msg_input = format!("{}", miss_input);
+    assert!(msg_input.contains("src/parser.rs"));
+
+    // 3. Command Executable Changed
+    let comp_cmd_changed = Computation::builder("build", "clang")
+        .arg("main.rs")
+        .input(
+            "src/parser.rs",
+            Digest::from_bytes(b"fn parse() -> bool { true }"),
+            30,
+        )
+        .env("OPTIMIZATION_LEVEL", "2")
+        .tool("rustc", Some("1.80.0".into()), None)
+        .platform(
+            dcc_core::PlatformConstraints::new("linux", "x86_64")
+                .with_target("x86_64-unknown-linux-gnu"),
+        )
+        .build()
+        .unwrap();
+
+    let miss_cmd = dcc_runner::MissExplainer::explain(&comp_cmd_changed, Some(&comp_base));
+    match &miss_cmd {
+        dcc_core::MissReason::CommandChanged { old, new } => {
+            assert_eq!(old, "rustc");
+            assert_eq!(new, "clang");
+        }
+        other => panic!("Expected CommandChanged, got {:?}", other),
+    }
+
+    // 4. Command Arguments Changed
+    let comp_args_changed = Computation::builder("build", "rustc")
+        .arg("main.rs")
+        .arg("--release")
+        .input(
+            "src/parser.rs",
+            Digest::from_bytes(b"fn parse() -> bool { true }"),
+            30,
+        )
+        .env("OPTIMIZATION_LEVEL", "2")
+        .tool("rustc", Some("1.80.0".into()), None)
+        .platform(
+            dcc_core::PlatformConstraints::new("linux", "x86_64")
+                .with_target("x86_64-unknown-linux-gnu"),
+        )
+        .build()
+        .unwrap();
+
+    let miss_args = dcc_runner::MissExplainer::explain(&comp_args_changed, Some(&comp_base));
+    match &miss_args {
+        dcc_core::MissReason::ArgumentsChanged { old, new } => {
+            assert_eq!(old, &vec!["main.rs".to_string()]);
+            assert_eq!(new, &vec!["main.rs".to_string(), "--release".to_string()]);
+        }
+        other => panic!("Expected ArgumentsChanged, got {:?}", other),
+    }
+
+    // 5. Tool Identity Changed
+    let comp_tool_changed = Computation::builder("build", "rustc")
+        .arg("main.rs")
+        .input(
+            "src/parser.rs",
+            Digest::from_bytes(b"fn parse() -> bool { true }"),
+            30,
+        )
+        .env("OPTIMIZATION_LEVEL", "2")
+        .tool("rustc", Some("1.81.0".into()), None)
+        .platform(
+            dcc_core::PlatformConstraints::new("linux", "x86_64")
+                .with_target("x86_64-unknown-linux-gnu"),
+        )
+        .build()
+        .unwrap();
+
+    let miss_tool = dcc_runner::MissExplainer::explain(&comp_tool_changed, Some(&comp_base));
+    match &miss_tool {
+        dcc_core::MissReason::ToolChanged { reason } => {
+            assert!(reason.contains("1.80.0") && reason.contains("1.81.0"));
+        }
+        other => panic!("Expected ToolChanged, got {:?}", other),
+    }
+
+    // 6. Relevant Environment Changed
+    let comp_env_changed = Computation::builder("build", "rustc")
+        .arg("main.rs")
+        .input(
+            "src/parser.rs",
+            Digest::from_bytes(b"fn parse() -> bool { true }"),
+            30,
+        )
+        .env("OPTIMIZATION_LEVEL", "3")
+        .tool("rustc", Some("1.80.0".into()), None)
+        .platform(
+            dcc_core::PlatformConstraints::new("linux", "x86_64")
+                .with_target("x86_64-unknown-linux-gnu"),
+        )
+        .build()
+        .unwrap();
+
+    let miss_env = dcc_runner::MissExplainer::explain(&comp_env_changed, Some(&comp_base));
+    match &miss_env {
+        dcc_core::MissReason::EnvironmentChanged { key, old, new } => {
+            assert_eq!(key, "OPTIMIZATION_LEVEL");
+            assert_eq!(old.as_deref(), Some("2"));
+            assert_eq!(new.as_deref(), Some("3"));
+        }
+        other => panic!("Expected EnvironmentChanged, got {:?}", other),
+    }
+
+    // 7. Platform Changed
+    let comp_plat_changed = Computation::builder("build", "rustc")
+        .arg("main.rs")
+        .input(
+            "src/parser.rs",
+            Digest::from_bytes(b"fn parse() -> bool { true }"),
+            30,
+        )
+        .env("OPTIMIZATION_LEVEL", "2")
+        .tool("rustc", Some("1.80.0".into()), None)
+        .platform(
+            dcc_core::PlatformConstraints::new("linux", "aarch64")
+                .with_target("aarch64-unknown-linux-gnu"),
+        )
+        .build()
+        .unwrap();
+
+    let miss_plat = dcc_runner::MissExplainer::explain(&comp_plat_changed, Some(&comp_base));
+    match &miss_plat {
+        dcc_core::MissReason::PlatformChanged { reason } => {
+            assert!(reason.contains("aarch64") && reason.contains("x86_64"));
+        }
+        other => panic!("Expected PlatformChanged, got {:?}", other),
+    }
+
+    // 8. Corrupted Cache / Failed Output Integrity Verification
+    let miss_corrupted = dcc_core::MissReason::CorruptedCache {
+        reason: "CAS object 4a2b missing or integrity hash failed".into(),
+    };
+    let msg_corrupted = format!("{}", miss_corrupted);
+    assert!(msg_corrupted.contains("Corrupted cache entry"));
+}
+
+#[test]
+fn test_milestone_5_7_correctness_test_matrix_comprehensive() {
+    let env = TestEnv::new().unwrap();
+
+    #[cfg(windows)]
+    let (cmd, base_args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "Copy-Item input.txt -Destination output.txt; Write-Output 'RUN_SUCCESS'".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd, base_args) = (
+        "sh",
+        vec![
+            "-c".to_string(),
+            "cp input.txt output.txt && echo 'RUN_SUCCESS'".to_string(),
+        ],
+    );
+
+    let engine = RunnerEngine::new(
+        &env.storage,
+        EngineOptions {
+            working_dir: env.workspace_dir.path().to_path_buf(),
+            ..Default::default()
+        },
+    );
+
+    // ==========================================
+    // DIMENSION 1: SAME INPUTS -> CACHE HIT
+    // ==========================================
+    env.create_input_file("input.txt", b"BASELINE_PAYLOAD_V1")
+        .unwrap();
+
+    let spec_base = dcc_runner::CommandSpec::builder(cmd)
+        .args(base_args.clone())
+        .current_dir(env.workspace_dir.path())
+        .input_path("input.txt")
+        .output_path("output.txt")
+        .tool_version("compiler", "1.0.0")
+        .env("BUILD_MODE", "debug")
+        .platform(dcc_core::PlatformConstraints::new("linux", "x86_64"))
+        .build()
+        .unwrap();
+
+    let res_base = engine.execute_command(&spec_base).unwrap();
+    assert_eq!(res_base.status, ExecutionStatus::Miss);
+    let key_base = res_base.key;
+
+    // Second run with identical inputs & spec -> HIT
+    fs::remove_file(env.workspace_dir.path().join("output.txt")).unwrap();
+    let res_hit = engine.execute_command(&spec_base).unwrap();
+    assert_eq!(res_hit.status, ExecutionStatus::Hit);
+    assert_eq!(res_hit.key, key_base);
+    assert_eq!(
+        env.read_output_file("output.txt").unwrap(),
+        b"BASELINE_PAYLOAD_V1"
+    );
+
+    // ==========================================
+    // DIMENSION 2: DIFFERENT INPUT CONTENTS -> MISS & DIFFERENT KEY
+    // ==========================================
+    env.create_input_file("input.txt", b"MODIFIED_PAYLOAD_V2")
+        .unwrap();
+    let res_diff_content = engine.execute_command(&spec_base).unwrap();
+    assert_eq!(res_diff_content.status, ExecutionStatus::Miss);
+    assert_ne!(res_diff_content.key, key_base);
+    assert_eq!(
+        env.read_output_file("output.txt").unwrap(),
+        b"MODIFIED_PAYLOAD_V2"
+    );
+
+    // Reset input file to baseline for subsequent comparisons
+    env.create_input_file("input.txt", b"BASELINE_PAYLOAD_V1")
+        .unwrap();
+
+    // ==========================================
+    // DIMENSION 3: DIFFERENT PATHS -> MISS & DIFFERENT KEY
+    // ==========================================
+    env.create_input_file("other_input.txt", b"BASELINE_PAYLOAD_V1")
+        .unwrap();
+    let spec_diff_path = dcc_runner::CommandSpec::builder(cmd)
+        .args(base_args.clone())
+        .current_dir(env.workspace_dir.path())
+        .input_path("other_input.txt")
+        .output_path("output.txt")
+        .tool_version("compiler", "1.0.0")
+        .env("BUILD_MODE", "debug")
+        .platform(dcc_core::PlatformConstraints::new("linux", "x86_64"))
+        .build()
+        .unwrap();
+
+    let res_diff_path = engine.execute_command(&spec_diff_path).unwrap();
+    assert_eq!(res_diff_path.status, ExecutionStatus::Miss);
+    assert_ne!(res_diff_path.key, key_base);
+
+    // ==========================================
+    // DIMENSION 4: DIFFERENT ARGUMENTS -> MISS & DIFFERENT KEY
+    // ==========================================
+    #[cfg(windows)]
+    let diff_args = vec![
+        "-Command".to_string(),
+        "Copy-Item input.txt -Destination output.txt; Write-Output 'RUN_ALT'".to_string(),
+    ];
+    #[cfg(not(windows))]
+    let diff_args = vec![
+        "-c".to_string(),
+        "cp input.txt output.txt && echo 'RUN_ALT'".to_string(),
+    ];
+
+    let spec_diff_args = dcc_runner::CommandSpec::builder(cmd)
+        .args(diff_args)
+        .current_dir(env.workspace_dir.path())
+        .input_path("input.txt")
+        .output_path("output.txt")
+        .tool_version("compiler", "1.0.0")
+        .env("BUILD_MODE", "debug")
+        .platform(dcc_core::PlatformConstraints::new("linux", "x86_64"))
+        .build()
+        .unwrap();
+
+    let res_diff_args = engine.execute_command(&spec_diff_args).unwrap();
+    assert_eq!(res_diff_args.status, ExecutionStatus::Miss);
+    assert_ne!(res_diff_args.key, key_base);
+
+    // ==========================================
+    // DIMENSION 5: DIFFERENT ENVIRONMENT -> MISS & DIFFERENT KEY
+    // ==========================================
+    let spec_diff_env = dcc_runner::CommandSpec::builder(cmd)
+        .args(base_args.clone())
+        .current_dir(env.workspace_dir.path())
+        .input_path("input.txt")
+        .output_path("output.txt")
+        .tool_version("compiler", "1.0.0")
+        .env("BUILD_MODE", "release") // changed from debug
+        .platform(dcc_core::PlatformConstraints::new("linux", "x86_64"))
+        .build()
+        .unwrap();
+
+    let res_diff_env = engine.execute_command(&spec_diff_env).unwrap();
+    assert_eq!(res_diff_env.status, ExecutionStatus::Miss);
+    assert_ne!(res_diff_env.key, key_base);
+
+    // ==========================================
+    // DIMENSION 6: DIFFERENT TOOL VERSION -> MISS & DIFFERENT KEY
+    // ==========================================
+    let spec_diff_tool = dcc_runner::CommandSpec::builder(cmd)
+        .args(base_args.clone())
+        .current_dir(env.workspace_dir.path())
+        .input_path("input.txt")
+        .output_path("output.txt")
+        .tool_version("compiler", "2.0.0") // changed version
+        .env("BUILD_MODE", "debug")
+        .platform(dcc_core::PlatformConstraints::new("linux", "x86_64"))
+        .build()
+        .unwrap();
+
+    let res_diff_tool = engine.execute_command(&spec_diff_tool).unwrap();
+    assert_eq!(res_diff_tool.status, ExecutionStatus::Miss);
+    assert_ne!(res_diff_tool.key, key_base);
+
+    // ==========================================
+    // DIMENSION 7: DIFFERENT PLATFORM -> MISS & DIFFERENT KEY
+    // ==========================================
+    let spec_diff_platform = dcc_runner::CommandSpec::builder(cmd)
+        .args(base_args)
+        .current_dir(env.workspace_dir.path())
+        .input_path("input.txt")
+        .output_path("output.txt")
+        .tool_version("compiler", "1.0.0")
+        .env("BUILD_MODE", "debug")
+        .platform(dcc_core::PlatformConstraints::new("windows", "x86_64")) // changed os
+        .build()
+        .unwrap();
+
+    let res_diff_platform = engine.execute_command(&spec_diff_platform).unwrap();
+    assert_eq!(res_diff_platform.status, ExecutionStatus::Miss);
+    assert_ne!(res_diff_platform.key, key_base);
+
+    // ==========================================
+    // DIMENSION 8: MISSING OUTPUT ON EXECUTION -> STRICT VALIDATION ERROR
+    // ==========================================
+    #[cfg(windows)]
+    let (no_out_cmd, no_out_args) = (
+        "powershell.exe",
+        vec!["-Command".to_string(), "Write-Output 'NOOP'".to_string()],
+    );
+    #[cfg(not(windows))]
+    let (no_out_cmd, no_out_args) = ("echo", vec!["NOOP".to_string()]);
+
+    let spec_missing_out = dcc_runner::CommandSpec::builder(no_out_cmd)
+        .args(no_out_args)
+        .current_dir(env.workspace_dir.path())
+        .input_path("input.txt")
+        .output_path("non_existent_output.txt")
+        .build()
+        .unwrap();
+
+    let err_missing_out = engine.execute_command(&spec_missing_out);
+    assert!(
+        err_missing_out.is_err(),
+        "Command execution omitting required output file must return ValidationError"
+    );
+
+    // ==========================================
+    // DIMENSION 9: MODIFIED CACHED OUTPUT (INTEGRITY FAILURE) -> RECOMPUTE & HEAL
+    // ==========================================
+    // Restore base cache
+    let entry = env.storage.get_entry(&key_base).unwrap().unwrap();
+    let blob_digest = &entry.outputs[0].digest;
+    let blob_path = env.storage.object_path(blob_digest);
+    assert!(blob_path.exists());
+
+    // Tamper with cached CAS object byte
+    fs::write(&blob_path, b"CORRUPTED_CAS_DATA").unwrap();
+
+    // Executing spec_base must detect the corruption, quarantine it, and safely fall back to recomputation
+    fs::remove_file(env.workspace_dir.path().join("output.txt")).unwrap();
+    let res_corrupted_blob = engine.execute_command(&spec_base).unwrap();
+    assert_eq!(res_corrupted_blob.status, ExecutionStatus::Miss);
+    assert!(
+        matches!(
+            res_corrupted_blob.miss_reason,
+            Some(dcc_core::MissReason::CorruptedCache { .. })
+        ),
+        "Expected CorruptedCache miss reason"
+    );
+    assert_eq!(
+        env.read_output_file("output.txt").unwrap(),
+        b"BASELINE_PAYLOAD_V1"
+    );
+
+    // ==========================================
+    // DIMENSION 10: CORRUPTED METADATA -> IDENTITY MISMATCH DETECTION & HEAL
+    // ==========================================
+    // Fetch newly stored entry after recomputation
+    let entry_path = env.storage.entry_path(&key_base);
+    assert!(entry_path.exists());
+
+    // Corrupt entry metadata JSON (e.g. invalidate inner computation tool name)
+    let entry_json = fs::read_to_string(&entry_path).unwrap();
+    let corrupted_json = entry_json.replace("\"compiler\"", "\"tampered_tool\"");
+    assert_ne!(entry_json, corrupted_json);
+    fs::write(&entry_path, corrupted_json).unwrap();
+
+    fs::remove_file(env.workspace_dir.path().join("output.txt")).unwrap();
+    let res_corrupted_meta = engine.execute_command(&spec_base).unwrap();
+    assert_eq!(res_corrupted_meta.status, ExecutionStatus::Miss);
+    assert!(matches!(
+        res_corrupted_meta.miss_reason,
+        Some(dcc_core::MissReason::CorruptedCache { .. })
+    ));
+
+    // ==========================================
+    // DIMENSION 11: PARTIAL CACHE (MISSING CAS OBJECT REFERENCED BY ENTRY)
+    // ==========================================
+    let entry_fresh = env.storage.get_entry(&key_base).unwrap().unwrap();
+    let blob_fresh = &entry_fresh.outputs[0].digest;
+    let blob_fresh_path = env.storage.object_path(blob_fresh);
+    if blob_fresh_path.exists() {
+        fs::remove_file(blob_fresh_path).unwrap();
+    }
+
+    fs::remove_file(env.workspace_dir.path().join("output.txt")).unwrap();
+    let res_partial_cache = engine.execute_command(&spec_base).unwrap();
+    assert_eq!(res_partial_cache.status, ExecutionStatus::Miss);
+    assert!(matches!(
+        res_partial_cache.miss_reason,
+        Some(dcc_core::MissReason::CorruptedCache { .. })
+    ));
+    assert_eq!(
+        env.read_output_file("output.txt").unwrap(),
+        b"BASELINE_PAYLOAD_V1"
+    );
+}

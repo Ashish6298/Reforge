@@ -1,0 +1,72 @@
+================================================================================
+DEVELOPER COMPUTATION CACHE (DCC) - VERIFICATION REPORT
+================================================================================
+Milestone:     Milestone 8.4 — `stats` (`dcc stats`) Metrics & Telemetry
+Date:          2026-09-17
+Status:        SUCCESS (107 workspace tests passing, 0 clippy warnings)
+Author:        DeepMind Antigravity Pair Programmer
+================================================================================
+
+1. OBJECTIVE & SCOPE
+--------------------------------------------------------------------------------
+Milestone 8.4 requires implementing and verifying the comprehensive cache statistics
+inspection capability in DCC (`dcc stats`), reporting:
+  - entries (total cache entry records)
+  - objects (total physical CAS objects)
+  - disk usage (objects, entries, and total disk usage)
+  - hits (total hit count aggregated across all entries)
+  - misses (total initial executions/misses)
+  - hit ratio (aggregate hit percentage)
+  - bytes restored (cumulative bytes saved and restored on hits)
+  - bytes stored (total bytes produced and stored)
+  - estimated time saved (cumulative execution duration avoided by cache hits)
+  - largest object size in bytes
+
+2. ARCHITECTURE & IMPLEMENTATION
+--------------------------------------------------------------------------------
+1. StorageStats Collection Engine (`crates/cache-storage/src/stats.rs`):
+   - Scans entries in `entries/` directory and parses `CacheEntry` metadata:
+     * `total_entries`: Count of valid JSON entries.
+     * `total_entry_size_bytes`: Aggregate filesystem bytes of entry JSON files.
+     * `total_hits`: Sum of `entry.metadata.hit_count`.
+     * `total_misses`: Count of recorded entries (each stored entry represents an initial miss).
+     * `bytes_stored`: Sum of `entry.outputs[..].size`.
+     * `bytes_restored`: Sum of `(entry.outputs[..].size * entry.metadata.hit_count)`.
+     * `estimated_time_saved_ms`: Sum of `(entry.metadata.execution.execution_time_ms * entry.metadata.hit_count)`.
+     * `hit_ratio`: `total_hits as f64 / (total_hits + total_misses) as f64`.
+   - Scans objects in `objects/` directory:
+     * `total_objects`: Count of physical blob files.
+     * `total_object_size_bytes`: Aggregate size of all CAS blobs.
+     * `largest_object_size_bytes`: Maximum single blob size.
+     * `largest_object_path`: Path to largest object.
+
+2. CLI Command Handler (`crates/cache-cli/src/main.rs`):
+   - `handle_stats(&storage, json)` formats statistics cleanly:
+     * Human-readable text format with aligned columns and unit conversions (MB, KB, seconds).
+     * Structured JSON format with `--json` flag.
+
+3. TEST SUITE & VERIFICATION RESULTS
+--------------------------------------------------------------------------------
+All tests across all crates passed with 0 failures and 0 warnings:
+
+A. Key Unit & Integration Tests for Milestone 8.4:
+   - `test_storage_inspection_apis` (`crates/cache-storage/src/stats.rs`):
+     * Tests empty cache statistics.
+     * Stores objects and cache entry.
+     * Verifies initial miss = 1, hit = 0, hit_ratio = 0.0, bytes_stored matches object size.
+     * Simulates 3 hits with 150ms execution duration.
+     * Verifies hit = 3, misses = 1, hit_ratio = 75.0%, bytes_restored = 3 * object size,
+       and estimated_time_saved_ms = 450 ms.
+   - `test_cli_stats_doctor_verify_clean_handlers` (`crates/cache-cli/src/main.rs`):
+     * Verifies `handle_stats` both in human-readable and `--json` modes.
+   - All 107 workspace tests pass.
+
+4. QUALITY GATES
+--------------------------------------------------------------------------------
+1. cargo test --workspace: PASS (107/107 passed)
+2. cargo clippy --workspace --all-targets --all-features -- -D warnings: PASS (Clean)
+3. cargo fmt --all -- --check: PASS (Clean)
+
+================================================================================
+CONCLUSION: Milestone 8.4 is complete, validated, and fully documented.
+================================================================================

@@ -1,0 +1,71 @@
+================================================================================
+DCC IMPLEMENTATION REPORT: MILESTONE 5.2 — COMMAND CHANGES
+================================================================================
+Timestamp: 2026-09-17
+Status: SUCCESS / FULLY VERIFIED
+Specification Section: Milestone 5.2 (Command Changes)
+
+1. OBJECTIVE & REQUIREMENTS
+--------------------------------------------------------------------------------
+The objective of Milestone 5.2 is to guarantee that any modification in command
+executable, command arguments, argument ordering, or argument presence creates
+strictly distinct canonical cache keys:
+
+    generator --fast  ──►  CacheKey A
+    generator --safe  ──►  CacheKey B  (Key A != Key B)
+
+Invariants:
+1. Argument Mutations: Changing flags (e.g. `--fast` vs `--safe`) alters key identity.
+2. Argument Ordering: Arguments are semantically meaningful in CLI tools; changing
+   order (e.g. `["--opt", "--debug"]` vs `["--debug", "--opt"]`) produces distinct keys.
+3. Argument Additions / Removals: Adding or removing options produces distinct keys.
+4. Executable Mutations: Changing the target executable binary / name produces distinct keys.
+5. Isolation & Re-execution: `generator --fast` and `generator --safe` store and restore
+   independent results without cross-contamination.
+6. Miss Explanation: When arguments or command changes occur, `MissExplainer` yields
+   `MissReason::ArgumentsChanged` or `MissReason::CommandChanged`.
+
+2. IMPLEMENTATION DETAILS
+--------------------------------------------------------------------------------
+- Canonical Computation Key Derivation (`CanonicalComputation`):
+  * `command` string preserves executable name.
+  * `args` `Vec<String>` preserves exact ordered CLI parameter sequence.
+  * Hashed via SHA-256 into 64-character hex `CacheKey`.
+
+- Runner & Miss Explainer:
+  * Detects when argument lists differ and reports `MissReason::ArgumentsChanged { old, new }`.
+  * Detects when executable differs and reports `MissReason::CommandChanged { old, new }`.
+
+3. TEST & VERIFICATION RESULTS
+--------------------------------------------------------------------------------
+- Comprehensive Unit Tests (`crates/cache-core/src/canonical.rs`):
+  * `test_differing_arguments_produce_different_keys`: Validates `--fast` vs `--safe`.
+  * `test_differing_command_executable_produces_different_keys`: Validates executable change.
+  * `test_argument_ordering_sensitivity_produces_different_keys`: Validates order preservation.
+  * `test_argument_addition_removal_produces_different_keys`: Validates adding `--flag`.
+
+- End-to-End Integration Tests (`crates/cache-runner/tests/integration_tests.rs`):
+  * `test_milestone_5_2_command_and_argument_changes_comprehensive`:
+    1. Runs `generator --fast` -> MISS, caches `RESULT_FAST_MODE` under `Key Fast`.
+    2. Runs `generator --safe` -> MISS, caches `RESULT_SAFE_MODE` under `Key Safe`.
+    3. Confirms `Key Fast != Key Safe`.
+    4. Wipes workspace output and runs `generator --fast` -> HIT, restores `RESULT_FAST_MODE`.
+    5. Wipes workspace output and runs `generator --safe` -> HIT, restores `RESULT_SAFE_MODE`.
+    6. Verifies `MissExplainer` produces `MissReason::ArgumentsChanged`.
+
+- Workspace Test Suite Summary:
+  * Total tests passed: 47 passed; 0 failed; 0 ignored (100% pass rate).
+  * Linter (`clippy`): 0 warnings (`-D warnings`).
+  * Formatter (`rustfmt`): Clean formatting verified.
+
+4. ARTIFACTS AND MODIFICATIONS
+--------------------------------------------------------------------------------
+- `crates/cache-core/src/canonical.rs`: Added unit tests for command and argument variation invariants.
+- `crates/cache-runner/tests/integration_tests.rs`: Added `test_milestone_5_2_command_and_argument_changes_comprehensive`.
+- `docs/report/milestone_5_2_command_changes_report.txt`: Generated Milestone 5.2 report.
+- `README.md`: Updated with Command & Argument Invalidation documentation.
+
+5. CONCLUSION
+--------------------------------------------------------------------------------
+Milestone 5.2 is completely implemented, verified, and passes all quality gates.
+================================================================================

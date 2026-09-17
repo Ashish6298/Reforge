@@ -29,12 +29,68 @@ pub struct ToolIdentity {
     pub digest: Option<Digest>,
 }
 
+impl ToolIdentity {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            version: None,
+            digest: None,
+        }
+    }
+
+    pub fn with_version(name: impl Into<String>, version: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            version: Some(version.into()),
+            digest: None,
+        }
+    }
+
+    pub fn with_digest(
+        name: impl Into<String>,
+        version: Option<String>,
+        digest: Option<Digest>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            version,
+            digest,
+        }
+    }
+
+    /// Construct tool identity by reading and hashing the executable binary at `path`.
+    pub fn from_executable(
+        name: impl Into<String>,
+        executable_path: &std::path::Path,
+        version: Option<String>,
+    ) -> Result<Self> {
+        let digest = if executable_path.is_file() {
+            let file = std::fs::File::open(executable_path)?;
+            Some(Digest::from_reader(std::io::BufReader::new(file))?)
+        } else {
+            None
+        };
+
+        Ok(Self {
+            name: name.into(),
+            version,
+            digest,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlatformConstraints {
     pub os: String,
     pub arch: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub abi: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compiler: Option<String>,
 }
 
 impl Default for PlatformConstraints {
@@ -43,7 +99,47 @@ impl Default for PlatformConstraints {
             os: std::env::consts::OS.to_string(),
             arch: std::env::consts::ARCH.to_string(),
             target: None,
+            runtime: None,
+            abi: None,
+            compiler: None,
         }
+    }
+}
+
+impl PlatformConstraints {
+    pub fn new(os: impl Into<String>, arch: impl Into<String>) -> Self {
+        Self {
+            os: os.into(),
+            arch: arch.into(),
+            target: None,
+            runtime: None,
+            abi: None,
+            compiler: None,
+        }
+    }
+
+    pub fn host() -> Self {
+        Self::default()
+    }
+
+    pub fn with_target(mut self, target: impl Into<String>) -> Self {
+        self.target = Some(target.into());
+        self
+    }
+
+    pub fn with_runtime(mut self, runtime: impl Into<String>) -> Self {
+        self.runtime = Some(runtime.into());
+        self
+    }
+
+    pub fn with_abi(mut self, abi: impl Into<String>) -> Self {
+        self.abi = Some(abi.into());
+        self
+    }
+
+    pub fn with_compiler(mut self, compiler: impl Into<String>) -> Self {
+        self.compiler = Some(compiler.into());
+        self
     }
 }
 
@@ -185,6 +281,40 @@ impl ComputationBuilder {
         self
     }
 
+    pub fn envs<I, K, V>(mut self, vars: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<String>,
+    {
+        for (k, v) in vars {
+            self.env.insert(k.into(), v.into());
+        }
+        self
+    }
+
+    /// Explicitly declare an environment variable to capture from the current process environment.
+    /// If the variable is set, it will be included in the computation's declared environment map.
+    pub fn declared_env(mut self, key: impl Into<String>) -> Self {
+        let k = key.into();
+        if let Ok(val) = std::env::var(&k) {
+            self.env.insert(k, val);
+        }
+        self
+    }
+
+    /// Explicitly declare multiple environment variables to capture from current environment.
+    pub fn declared_envs<I, S>(mut self, keys: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        for key in keys {
+            self = self.declared_env(key);
+        }
+        self
+    }
+
     pub fn tool(
         mut self,
         name: impl Into<String>,
@@ -196,6 +326,11 @@ impl ComputationBuilder {
             version,
             digest,
         });
+        self
+    }
+
+    pub fn tool_identity(mut self, tool: ToolIdentity) -> Self {
+        self.tool = Some(tool);
         self
     }
 

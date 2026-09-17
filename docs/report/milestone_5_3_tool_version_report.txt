@@ -1,0 +1,84 @@
+================================================================================
+DCC IMPLEMENTATION REPORT: MILESTONE 5.3 — TOOL VERSION
+================================================================================
+Timestamp: 2026-09-17
+Status: SUCCESS / FULLY VERIFIED
+Specification Section: Milestone 5.3 (Tool Version)
+
+1. OBJECTIVE & REQUIREMENTS
+--------------------------------------------------------------------------------
+The objective of Milestone 5.3 is to define and enforce a tool identity mechanism
+such that computations using different tool/compiler versions or binaries do not
+silently reuse results from each other:
+
+    compiler 1.80  ──►  CacheKey A
+    compiler 1.81  ──►  CacheKey B  (Key A != Key B)
+
+Guarantees & Invariants:
+1. Tool Version Sensitivity: Modifying tool version (e.g. rustc 1.80 vs 1.81)
+   strictly alters the canonical computation key.
+2. Executable Digest Sensitivity: Replacing or upgrading a tool binary on disk
+   (different SHA-256 digest) alters key identity even if the reported string matches.
+3. Tool Identity Architecture:
+   - Tool Name: Canonical identifier (e.g. "rustc", "gcc", "clang", "protoc").
+   - Tool Version: Semantic version string (e.g. "1.80.0", "13.2.0").
+   - Tool Binary Digest: SHA-256 cryptographic digest of the executable file.
+4. Miss Explanation: When tool versions differ, `MissExplainer` pinpoints the change
+   via `MissReason::ToolChanged { reason }`.
+
+2. IMPLEMENTATION DETAILS
+--------------------------------------------------------------------------------
+- Core Model (`crates/cache-core/src/computation.rs`):
+  * Defined `ToolIdentity`:
+    ```rust
+    pub struct ToolIdentity {
+        pub name: String,
+        pub version: Option<String>,
+        pub digest: Option<Digest>,
+    }
+    ```
+  * Added constructors: `new`, `with_version`, `with_digest`, and `from_executable`
+    (which streams and hashes the physical executable binary on disk).
+  * Added `tool_identity` and `tool` helpers to `ComputationBuilder`.
+
+- Command Specification (`crates/cache-runner/src/command.rs`):
+  * Added `pub tool: Option<ToolIdentity>` to `CommandSpec`.
+  * Added `tool_version`, `tool_identity`, and `tool` builder methods to `CommandSpecBuilder`.
+  * Integrated tool identity into canonical computation derivation.
+
+- Canonical Serialization (`crates/cache-core/src/canonical.rs`):
+  * Serializes `CanonicalTool` (name, version, digest) into canonical JSON before
+    SHA-256 key computation.
+
+3. TEST & VERIFICATION RESULTS
+--------------------------------------------------------------------------------
+- Unit Tests (`crates/cache-core/src/canonical.rs`):
+  * `test_differing_tool_versions_produce_different_keys`: Validates 1.80.0 vs 1.81.0.
+  * `test_tool_executable_digest_differences_produce_different_keys`: Validates binary digest changes.
+  * `test_tool_identity_strategy_composite_components`: Validates composite tool identity.
+
+- End-to-End Integration Tests (`crates/cache-runner/tests/integration_tests.rs`):
+  * `test_milestone_5_3_tool_version_invalidation_comprehensive`:
+    1. Runs with `compiler 1.80.0` -> MISS, executes, stores under `Key 80`.
+    2. Runs with `compiler 1.81.0` -> MISS, derives `Key 81 != Key 80`, executes, stores.
+    3. Reruns `compiler 1.80.0` -> HIT, restores original binary.
+    4. Confirms `MissExplainer` yields `MissReason::ToolChanged` with version diff.
+
+- Workspace Test Suite Summary:
+  * Total tests passed: 49 passed; 0 failed; 0 ignored (100% pass rate).
+  * Linter (`clippy`): 0 warnings (`-D warnings`).
+  * Formatter (`rustfmt`): Clean formatting verified.
+
+4. ARTIFACTS AND MODIFICATIONS
+--------------------------------------------------------------------------------
+- `crates/cache-core/src/computation.rs`: Added `ToolIdentity` constructors & helpers.
+- `crates/cache-core/src/canonical.rs`: Added composite tool identity tests.
+- `crates/cache-runner/src/command.rs`: Added `tool` field and methods to `CommandSpec` and `CommandSpecBuilder`.
+- `crates/cache-runner/tests/integration_tests.rs`: Added `test_milestone_5_3_tool_version_invalidation_comprehensive`.
+- `docs/report/milestone_5_3_tool_version_report.txt`: Generated Milestone 5.3 report.
+- `README.md`: Updated with Tool Identity & Version Invalidation documentation.
+
+5. CONCLUSION
+--------------------------------------------------------------------------------
+Milestone 5.3 is completely implemented, verified, and passes all quality gates.
+================================================================================

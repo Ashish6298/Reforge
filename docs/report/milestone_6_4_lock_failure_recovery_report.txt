@@ -1,0 +1,90 @@
+================================================================================
+DEVELOPER COMPUTATION CACHE (DCC) — MILESTONE 6.4 ENGINEERING & VERIFICATION REPORT
+================================================================================
+Date: 2026-09-17
+Milestone: Milestone 6.4 — Lock Failure Recovery
+Status: COMPLETED & VERIFIED
+Workspace Test Suite: 73 / 73 Passed (100% Pass Rate)
+Zero Warnings Policy: Enforced & Verified (Clippy & Fmt clean)
+================================================================================
+
+1. EXECUTIVE SUMMARY & OBJECTIVE
+--------------------------------------------------------------------------------
+Milestone 6.4 implements and validates failure recovery for computation locks,
+ensuring that abnormal process terminations, kernel crashes, timeout limits,
+corrupted lock metadata, or orphaned lock files never leave the cache permanently
+unusable or deadlocked.
+
+Core Invariant:
+"Never leave the cache permanently unusable because one process crashed."
+
+Failure Dimensions Handled:
+  1. Crashed processes & unexpected process termination
+  2. Stale / orphaned lock files left on disk
+  3. Corrupted lock metadata (e.g. malformed JSON or binary junk)
+  4. Lock acquisition timeouts and non-blocking retry backoff
+  5. Stale lock detection and pruning (`clean_stale_locks`)
+
+--------------------------------------------------------------------------------
+2. ARCHITECTURAL DESIGN & RECOVERY MECHANISMS
+--------------------------------------------------------------------------------
+- Operating System-Level Lock Release on Crash:
+  * File locking is backed by OS kernel locks via `fs2::FileExt::try_lock_exclusive`.
+  * If a process terminates abruptly (SIGKILL, panic, unhandled exception, power loss),
+    the OS kernel automatically releases all file locks associated with that process descriptor.
+  * Although the lock file `.cache/locks/<key>.lock` remains on disk, the next process
+    attempting to acquire `try_lock_exclusive()` succeeds immediately without being blocked.
+
+- Self-Healing Lock Metadata:
+  * When a process acquires a lock, it writes fresh, structured metadata:
+    `{ pid: u32, created_at: DateTime<Utc>, key: String }`.
+  * If the lock file contained corrupted data, garbage bytes, or stale metadata from
+    a dead process, the acquiring process clears and overwrites it atomically (`set_len(0)` + write).
+
+- Configurable Lock Timeout & Backoff:
+  * `ComputationLock::acquire` executes with a timeout limit (`lock_timeout`).
+  * If lock contention persists beyond the timeout, it returns a descriptive error
+    `CacheError::LockError` rather than hanging indefinitely.
+
+- Stale Lock Pruning (`ComputationLock::clean_stale_locks`):
+  * Scans `.cache/locks/` for locks older than a configurable `max_age`.
+  * Tests each candidate with `try_lock_exclusive()`. If the lock can be acquired,
+    it confirms no live process is holding it, unlocks, and safely purges the file.
+
+--------------------------------------------------------------------------------
+3. TEST SUITE & FAILURE RECOVERY VALIDATION
+--------------------------------------------------------------------------------
+
+The test harness verifies the following scenarios:
+
+1. `test_milestone_6_4_crashed_process_lock_release_and_recovery`:
+   - Simulates a dead process that created an orphaned lock file with a dead PID 5 hours ago.
+   - Verified: RunnerEngine seamlessly acquires the lock, overwrites stale state, executes
+     the computation, stores output artifacts, and leaves the cache operational.
+
+2. `test_milestone_6_4_corrupted_lock_metadata_recovery_in_runner`:
+   - Simulates corrupted lock file containing arbitrary garbage bytes.
+   - Verified: RunnerEngine recovers, overwrites valid metadata, and finishes execution cleanly.
+
+3. `test_lock_acquire_and_metadata` (`crates/cache-storage/src/lock.rs`):
+   - Verifies lock acquisition, metadata access, and clean RAII drop removal.
+
+4. `test_corrupted_lock_metadata_recovery` (`crates/cache-storage/src/lock.rs`):
+   - Direct unit test of corrupted lock metadata overwrite.
+
+5. `test_stale_lock_cleanup` (`crates/cache-storage/src/lock.rs`):
+   - Verifies scanning and pruning of lock files older than threshold.
+
+6. `test_lock_timeout_handling` (`crates/cache-storage/src/lock.rs`):
+   - Verifies timeout error generation when another process holds the lock.
+
+--------------------------------------------------------------------------------
+4. VERIFICATION METRICS
+--------------------------------------------------------------------------------
+- Test Suite: 73 passed; 0 failed; finished in 6.04s
+- Clippy: 0 warnings with `-D warnings`
+- Rustfmt: 0 formatting differences
+
+================================================================================
+END OF REPORT — MILESTONE 6.4 COMPLETED
+================================================================================

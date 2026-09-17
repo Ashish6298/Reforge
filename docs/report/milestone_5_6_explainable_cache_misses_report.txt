@@ -1,0 +1,79 @@
+===============================================================================
+DEVELOPER COMPUTATION CACHE — TEST & IMPLEMENTATION REPORT
+===============================================================================
+Milestone:       5.6 Explainable Cache Misses
+Specification:   D:\Desktop2\Developer Computation Cache — Detailed phase.txt.md (Section 5.6)
+Target Root:     D:\DC
+Report Path:     D:\DC\docs\report\milestone_5_6_explainable_cache_misses_report.txt
+Date / Time:     2026-09-17T09:58:00+05:30
+Status:          PASSED (100% Tests Passing, Strict Zero-Warning Quality Gates)
+===============================================================================
+
+1. EXECUTIVE SUMMARY & OBJECTIVE
+-------------------------------------------------------------------------------
+Milestone 5.6 requires implementing explainable, structured cache misses across the
+Developer Computation Cache (DCC) system.
+
+Cache misses must never be mysterious black boxes. When a computation does not hit
+the cache, DCC pinpointedly explains why the cache was missed (e.g. no prior entry,
+which input file mutated, command arguments added/removed, tool identity changed,
+declared environment variable changed, platform dimension changed, or cached output
+failed integrity verification).
+
+2. ARCHITECTURAL DESIGN & IMPLEMENTATION
+-------------------------------------------------------------------------------
+A. Structured Miss Reasons (`dcc_core::MissReason`):
+   Enum capturing precise miss semantics:
+   - `MissReason::NoEntryFound`: "No previous cache entry found for this computation key"
+   - `MissReason::InputChanged { path, old_digest, new_digest }`: "Input file changed: <path> (was <old>, now <new>)"
+   - `MissReason::InputAdded { path }`: "New input file declared: <path>"
+   - `MissReason::InputRemoved { path }`: "Previous input file missing: <path>"
+   - `MissReason::CommandChanged { old, new }`: "Command changed from '<old>' to '<new>'"
+   - `MissReason::ArgumentsChanged { old, new }`: "Arguments changed from <old> to <new>"
+   - `MissReason::EnvironmentChanged { key, old, new }`: "Environment variable '<key>' changed from <old> to <new>"
+   - `MissReason::ToolChanged { reason }`: "Tool identity changed: <reason>" (e.g., version, digest, or tool name diffs)
+   - `MissReason::PlatformChanged { reason }`: "Platform changed: <reason>" (e.g., OS, arch, target triple, runtime, ABI diffs)
+   - `MissReason::CorruptedCache { reason }`: "Corrupted cache entry: <reason>" (e.g., failed CAS digest / integrity verification)
+   - `MissReason::ForcedRecompute`: "Forced recompute requested by policy"
+
+B. Miss Explainer Engine (`dcc_runner::MissExplainer`):
+   - Compares the active `Computation` against prior computation metadata.
+   - Computes detailed diffs for:
+     * Command executable and ordered argument changes
+     * Input maps (hashing, added files, removed files)
+     * Declared environment variable state
+     * Composite tool identity (name, version, digest)
+     * Platform constraint dimensions (OS, arch, target, runtime, ABI, compiler)
+   - Returns structured `MissReason` with human-readable string formatting.
+
+C. Execution Engine & CLI Integration:
+   - `RunnerEngine` records `miss_reason` in `ExecutionResult`.
+   - `dcc run --explain` surfaces the structured miss reason directly to developer console
+     and JSON output streams.
+
+3. TEST EXECUTION & VERIFICATION RESULTS
+-------------------------------------------------------------------------------
+All workspace unit and integration tests passed cleanly:
+
+A. Integration Tests in `dcc-runner`:
+   - `integration_tests::test_milestone_5_6_explainable_cache_misses_comprehensive`:
+     * Tested and verified `NoEntryFound` on initial cold miss.
+     * Tested and verified `InputChanged` with specific file path ("src/parser.rs") and digest comparison.
+     * Tested and verified `CommandChanged` ("rustc" -> "clang").
+     * Tested and verified `ArgumentsChanged` (["main.rs"] -> ["main.rs", "--release"]).
+     * Tested and verified `ToolChanged` (tool version "1.80.0" -> "1.81.0").
+     * Tested and verified `EnvironmentChanged` (variable "OPTIMIZATION_LEVEL" changed from "2" to "3").
+     * Tested and verified `PlatformChanged` (target "x86_64" -> "aarch64").
+     * Tested and verified `CorruptedCache` formatting upon CAS integrity failure.
+
+B. Summary of Quality Gates:
+   - `cargo fmt --all`: PASSED
+   - `cargo test --workspace`: PASSED (60 passed; 0 failed; 0 ignored)
+   - `cargo clippy --workspace --all-targets --all-features -- -D warnings`: PASSED (0 warnings)
+
+4. COMPLIANCE & SAFETY ASSURANCE
+-------------------------------------------------------------------------------
+- Preserved existing CLI and UI functionality without breaking changes.
+- Maintained zero unwrap/panic policy across production runtime paths.
+- All reports formatted and archived in `D:\DC\docs\report\`.
+===============================================================================

@@ -1,0 +1,82 @@
+================================================================================
+DEVELOPER COMPUTATION CACHE (DCC) — MILESTONE 6.1 ENGINEERING & VERIFICATION REPORT
+================================================================================
+Date: 2026-09-17
+Milestone: Milestone 6.1 — Concurrent Reads
+Status: COMPLETED & VERIFIED
+Workspace Test Suite: 63 / 63 Passed (100% Pass Rate)
+Zero Warnings Policy: Enforced & Verified (Clippy & Fmt clean)
+================================================================================
+
+1. EXECUTIVE SUMMARY & OBJECTIVE
+--------------------------------------------------------------------------------
+Milestone 6.1 implements and validates high-concurrency read safety across all layers
+of the Developer Computation Cache (DCC):
+  1. Content-Addressed Storage (CAS) Object Layer:
+     Concurrent immutable blob streaming across dozens of simultaneous threads.
+  2. Cache Entry Metadata Layer:
+     Concurrent JSON metadata queries, identity verification, and non-blocking read
+     paths with clean Windows file-sharing descriptor lifecycle management.
+  3. Runner Engine Execution Layer:
+     High-throughput concurrent cache hit storms across isolated worker workspaces,
+     ensuring 100% immediate cache hits, zero process execution, perfect stdout/stderr
+     stream restoration, and bit-level output artifact fidelity.
+
+--------------------------------------------------------------------------------
+2. ARCHITECTURAL DESIGN & INVARIANTS
+--------------------------------------------------------------------------------
+- Immutability of CAS Objects:
+  CAS objects are identified exclusively by their cryptographic SHA-256 digests
+  and written once via atomic temporary file rename (`.tmp` -> `fsync` -> rename).
+  Once committed to disk, CAS blobs are completely immutable. Reader threads open
+  shared read-only handles (`File::open`) without needing exclusive locks, enabling
+  linear read scaling across arbitrary thread or process counts.
+
+- Metadata Handle Scope & Windows Sharing Safety:
+  During `CasStorage::get_entry`, the file handle is enclosed strictly within
+  deserialization scope, ensuring that the file descriptor is released immediately.
+  Concurrent readers updating access timestamps or hit counts operate on atomic
+  replacement without locking or blocking other reader threads.
+
+- Isolated Workspace Restoration:
+  When multiple runner processes or worker threads execute the same computation
+  concurrently, each worker restores output artifacts from immutable CAS blobs
+  into its own designated workspace without contending for write locks or corrupting
+  shared storage.
+
+--------------------------------------------------------------------------------
+3. TEST SUITE & CONCURRENCY VALIDATION
+--------------------------------------------------------------------------------
+
+The concurrency test harness (`crates/cache-runner/tests/concurrency_tests.rs`)
+verifies the following scenarios:
+
+1. `test_milestone_6_1_concurrent_reads_cas_objects_and_entries`:
+   - 32 concurrent reader threads run 20 iterations each (640 total operations)
+     reading 256 KB binary payloads from a shared CAS object and querying the
+     associated `CacheEntry`.
+   - Result: 0 contention errors, 0 sharing violations, 100% data fidelity.
+
+2. `test_milestone_6_1_concurrent_reads_runner_hit_storm`:
+   - Warm cache entry populated with multiple output artifacts and captured stdout.
+   - 16 concurrent worker threads simultaneously execute the exact same command
+     specification across separate worker workspaces.
+   - Verified Invariants:
+     * 100% of workers report `ExecutionStatus::Hit`.
+     * Execution time is 0 ms for all workers (no child process spawned).
+     * Captured stdout and stderr streams are accurately replayed.
+     * All output files restored in worker workspaces match SHA-256 digests.
+
+3. `test_storage_suite_concurrent_reads` (`crates/cache-storage/tests/storage_suite.rs`):
+   - 16 concurrent reader threads streaming and verifying CAS chunks in parallel.
+
+--------------------------------------------------------------------------------
+4. VERIFICATION METRICS
+--------------------------------------------------------------------------------
+- Test Suite: 63 passed; 0 failed; finished in 6.02s
+- Clippy: 0 warnings with `-D warnings`
+- Rustfmt: 0 formatting differences
+
+================================================================================
+END OF REPORT — MILESTONE 6.1 COMPLETED
+================================================================================

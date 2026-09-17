@@ -1,5 +1,5 @@
 use chrono::Utc;
-use dcc_core::{CacheEntry, CacheError, CacheKey, Digest, Result};
+use dcc_core::{ByteSize, CacheEntry, CacheError, CacheKey, Digest, Result, SizeParseError};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Write};
@@ -9,6 +9,33 @@ use std::path::{Path, PathBuf};
 pub struct StorageConfig {
     pub root_dir: PathBuf,
     pub max_size_bytes: Option<u64>,
+}
+
+impl StorageConfig {
+    pub fn new(root_dir: impl Into<PathBuf>) -> Self {
+        Self {
+            root_dir: root_dir.into(),
+            max_size_bytes: Some(10 * 1024 * 1024 * 1024), // 10 GB default
+        }
+    }
+
+    pub fn with_max_size(mut self, size: impl Into<ByteSize>) -> Self {
+        self.max_size_bytes = Some(size.into().as_bytes());
+        self
+    }
+
+    pub fn with_max_size_str(
+        mut self,
+        size_str: &str,
+    ) -> std::result::Result<Self, SizeParseError> {
+        let bs = ByteSize::parse(size_str)?;
+        self.max_size_bytes = Some(bs.as_bytes());
+        Ok(self)
+    }
+
+    pub fn max_size(&self) -> Option<ByteSize> {
+        self.max_size_bytes.map(ByteSize::bytes)
+    }
 }
 
 impl Default for StorageConfig {
@@ -41,6 +68,14 @@ impl CasStorage {
         let storage = Self { config };
         storage.init_dirs()?;
         Ok(storage)
+    }
+
+    pub fn config(&self) -> &StorageConfig {
+        &self.config
+    }
+
+    pub fn max_size(&self) -> Option<ByteSize> {
+        self.config.max_size()
     }
 
     pub fn root_dir(&self) -> &Path {
@@ -205,7 +240,17 @@ impl CasStorage {
     pub fn get_object_reader(&self, digest: &Digest) -> Result<BufReader<File>> {
         self.verify_object(digest)?;
         let path = self.object_path(digest);
-        let file = File::open(path)?;
+        let mut attempts = 0;
+        let file = loop {
+            match File::open(&path) {
+                Ok(f) => break f,
+                Err(e) if attempts < 5 && e.kind() == io::ErrorKind::PermissionDenied => {
+                    attempts += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(e) => return Err(CacheError::StorageError(e)),
+            }
+        };
         Ok(BufReader::new(file))
     }
 
@@ -247,7 +292,23 @@ impl CasStorage {
             return Ok(None);
         }
 
-        let file = File::open(&path)?;
+        let mut attempts = 0;
+        let file = loop {
+            match File::open(&path) {
+                Ok(f) => break f,
+                Err(e) if attempts < 5 && e.kind() == io::ErrorKind::PermissionDenied => {
+                    attempts += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(e) => {
+                    if !path.exists() {
+                        return Ok(None);
+                    }
+                    return Err(CacheError::StorageError(e));
+                }
+            }
+        };
+
         let mut entry: CacheEntry = match serde_json::from_reader(BufReader::new(file)) {
             Ok(e) => e,
             Err(e) => {
@@ -264,7 +325,16 @@ impl CasStorage {
         Ok(Some(entry))
     }
 
+    /// Delete a cache entry by key, coordinating deletion with its computation lock.
+    ///
+    /// Ensures that if a process is actively computing/writing this entry, it is not
+    /// deleted underneath it.
     pub fn delete_entry(&self, key: &CacheKey) -> Result<bool> {
+        let _lock = crate::lock::ComputationLock::acquire(
+            &self.locks_dir(),
+            key,
+            std::time::Duration::from_secs(5),
+        )?;
         let path = self.entry_path(key);
         if path.is_file() {
             fs::remove_file(path)?;
@@ -272,6 +342,40 @@ impl CasStorage {
         } else {
             Ok(false)
         }
+    }
+
+    /// Safely delete a CAS object by digest, coordinating with ObjectLock.
+    ///
+    /// If `block` is false (e.g. during background pruning/eviction), attempts to acquire
+    /// an exclusive lock without blocking and skips the object if it is currently being read.
+    /// If `block` is true, waits up to `timeout` to acquire exclusive deletion lock.
+    pub fn delete_object_safe(
+        &self,
+        digest: &Digest,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<bool> {
+        let _lock = match timeout {
+            Some(t) => crate::lock::ObjectLock::acquire_exclusive(&self.locks_dir(), digest, t)?,
+            None => {
+                match crate::lock::ObjectLock::try_acquire_exclusive(&self.locks_dir(), digest)? {
+                    Some(l) => l,
+                    None => return Ok(false), // Object currently in use by an active reader; skip deletion
+                }
+            }
+        };
+
+        let path = self.object_path(digest);
+        if path.is_file() {
+            fs::remove_file(path)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Delete a CAS object by digest safely with exclusive lock.
+    pub fn delete_object(&self, digest: &Digest) -> Result<bool> {
+        self.delete_object_safe(digest, Some(std::time::Duration::from_secs(5)))
     }
 
     /// Inspect storage and collect comprehensive metrics.
@@ -299,6 +403,84 @@ impl CasStorage {
         let stats = self.stats()?;
         Ok((stats.largest_object_size_bytes, stats.largest_object_path))
     }
+
+    /// Prune unreferenced objects no longer referenced by any active cache entry.
+    pub fn prune_unreferenced(&self) -> Result<crate::eviction::EvictionResult> {
+        let pruner = crate::eviction::Pruner::new(self);
+        pruner.prune_unreferenced_objects()
+    }
+
+    /// Verify integrity of all stored CAS objects and cache entries.
+    pub fn verify_all(&self) -> Result<VerifyResult> {
+        let mut res = VerifyResult::default();
+
+        // 1. Verify all CAS objects
+        let objects_dir = self.objects_dir();
+        if objects_dir.exists() {
+            for entry in walkdir::WalkDir::new(objects_dir)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
+                if entry.file_type().is_file() {
+                    let name = entry.file_name().to_string_lossy();
+                    if let Ok(digest) = Digest::new(name.as_ref()) {
+                        res.total_objects += 1;
+                        if self.verify_object(&digest).is_ok() {
+                            res.verified_objects += 1;
+                        } else {
+                            res.corrupted_objects += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Verify all metadata entries
+        let entries_dir = self.entries_dir();
+        if entries_dir.exists() {
+            for entry in walkdir::WalkDir::new(entries_dir)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
+                if entry.file_type().is_file()
+                    && entry.path().extension().and_then(|s| s.to_str()) == Some("json")
+                {
+                    res.total_entries += 1;
+                    if let Ok(file) = File::open(entry.path()) {
+                        if serde_json::from_reader::<_, CacheEntry>(file).is_ok() {
+                            res.valid_entries += 1;
+                        } else {
+                            res.corrupted_entries += 1;
+                        }
+                    } else {
+                        res.corrupted_entries += 1;
+                    }
+                }
+            }
+        }
+
+        Ok(res)
+    }
+
+    /// Clean the entire cache by purging all cached objects and entries, then reinitializing directories.
+    pub fn clean_all(&self) -> Result<()> {
+        let _ = fs::remove_dir_all(self.objects_dir());
+        let _ = fs::remove_dir_all(self.entries_dir());
+        let _ = fs::remove_dir_all(self.tmp_dir());
+        self.init_dirs()?;
+        Ok(())
+    }
+}
+
+/// Results of a full storage and entry verification check.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VerifyResult {
+    pub total_objects: usize,
+    pub verified_objects: usize,
+    pub corrupted_objects: usize,
+    pub total_entries: usize,
+    pub valid_entries: usize,
+    pub corrupted_entries: usize,
 }
 
 fn uuid_like_nonce() -> String {
@@ -513,5 +695,41 @@ mod tests {
 
         // Attempting to read via get_object_reader should also fail
         assert!(storage.get_object_reader(&digest).is_err());
+    }
+
+    #[test]
+    fn test_storage_config_max_size_support() {
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // 1. Default config has 10 GB max_size
+        let default_cfg = StorageConfig::default();
+        assert_eq!(default_cfg.max_size_bytes, Some(10 * 1024 * 1024 * 1024));
+        assert_eq!(
+            default_cfg.max_size().unwrap().as_bytes(),
+            10 * 1024 * 1024 * 1024
+        );
+        assert_eq!(
+            default_cfg.max_size().unwrap().to_human_readable(),
+            "10.00 GB"
+        );
+
+        // 2. Custom config with 500 MB
+        let cfg_500mb = StorageConfig::new(temp_dir.path())
+            .with_max_size_str("500 MB")
+            .unwrap();
+        assert_eq!(cfg_500mb.max_size_bytes, Some(500 * 1024 * 1024));
+        assert_eq!(cfg_500mb.max_size().unwrap().as_bytes(), 500 * 1024 * 1024);
+
+        // 3. Custom config with 2 GB
+        let cfg_2gb = StorageConfig::new(temp_dir.path()).with_max_size(ByteSize::gb(2));
+        assert_eq!(cfg_2gb.max_size_bytes, Some(2 * 1024 * 1024 * 1024));
+        assert_eq!(
+            cfg_2gb.max_size().unwrap().as_bytes(),
+            2 * 1024 * 1024 * 1024
+        );
+
+        // 4. CasStorage reflects configured max_size
+        let storage = CasStorage::new(cfg_500mb).unwrap();
+        assert_eq!(storage.max_size().unwrap().to_human_readable(), "500.00 MB");
     }
 }

@@ -1,6 +1,9 @@
 use crate::cas::CasStorage;
+use dcc_core::entry::CacheEntry;
 use dcc_core::Result;
 use serde::{Deserialize, Serialize};
+use std::fs::File;
+use std::io::BufReader;
 use std::path::PathBuf;
 use walkdir::WalkDir;
 
@@ -13,6 +16,12 @@ pub struct StorageStats {
     pub total_size_bytes: u64,
     pub largest_object_size_bytes: u64,
     pub largest_object_path: Option<PathBuf>,
+    pub total_hits: u64,
+    pub total_misses: u64,
+    pub hit_ratio: f64,
+    pub bytes_restored: u64,
+    pub bytes_stored: u64,
+    pub estimated_time_saved_ms: u64,
 }
 
 impl StorageStats {
@@ -29,8 +38,32 @@ impl StorageStats {
                     if let Ok(meta) = entry.metadata() {
                         stats.total_entry_size_bytes += meta.len();
                     }
+
+                    // Parse entry to extract hits, computation outputs size, and execution duration
+                    if let Ok(file) = File::open(entry.path()) {
+                        if let Ok(cache_entry) =
+                            serde_json::from_reader::<_, CacheEntry>(BufReader::new(file))
+                        {
+                            let entry_output_size: u64 =
+                                cache_entry.outputs.iter().map(|o| o.size).sum();
+                            let hits = cache_entry.metadata.hit_count;
+                            let exec_duration_ms = cache_entry.metadata.execution.execution_time_ms;
+
+                            stats.total_hits += hits;
+                            // Each stored entry represents 1 initial execution (miss)
+                            stats.total_misses += 1;
+                            stats.bytes_stored += entry_output_size;
+                            stats.bytes_restored += entry_output_size * hits;
+                            stats.estimated_time_saved_ms += exec_duration_ms * hits;
+                        }
+                    }
                 }
             }
+        }
+
+        let total_lookups = stats.total_hits + stats.total_misses;
+        if total_lookups > 0 {
+            stats.hit_ratio = stats.total_hits as f64 / total_lookups as f64;
         }
 
         let objects_dir = storage.objects_dir();
@@ -124,5 +157,27 @@ mod tests {
         assert_eq!(stats.total_entries, 1);
         assert_eq!(stats.total_object_size_bytes, small_size + large_size);
         assert_eq!(stats.largest_object_size_bytes, large_size);
+        assert_eq!(stats.total_misses, 1);
+        assert_eq!(stats.total_hits, 0);
+        assert_eq!(stats.hit_ratio, 0.0);
+        assert_eq!(stats.bytes_stored, small_size + large_size);
+        assert_eq!(stats.bytes_restored, 0);
+
+        // Simulate 3 hits on the entry with 150ms execution time
+        let mut entry_with_hits = entry.clone();
+        entry_with_hits.metadata.hit_count = 3;
+        entry_with_hits.metadata.execution.execution_time_ms = 150;
+        storage.store_entry(&entry_with_hits).unwrap();
+
+        let stats_after_hits = storage.stats().unwrap();
+        assert_eq!(stats_after_hits.total_hits, 3);
+        assert_eq!(stats_after_hits.total_misses, 1);
+        assert!((stats_after_hits.hit_ratio - 0.75).abs() < 1e-6);
+        assert_eq!(stats_after_hits.bytes_stored, small_size + large_size);
+        assert_eq!(
+            stats_after_hits.bytes_restored,
+            (small_size + large_size) * 3
+        );
+        assert_eq!(stats_after_hits.estimated_time_saved_ms, 150 * 3);
     }
 }

@@ -48,9 +48,13 @@ impl OutputRestorer {
             let cas_path = storage.object_path(&output.digest);
             let mut src = BufReader::new(File::open(cas_path)?);
 
-            // Write to a temporary file alongside destination
+            // Write to a uniquely named temporary file alongside destination
             let parent_dir = target_path.parent().unwrap_or(destination_dir);
-            let tmp_path = parent_dir.join(format!(".tmp_restore_{}", output.digest.prefix(8)));
+            let tmp_path = parent_dir.join(format!(
+                ".tmp_restore_{}_{}",
+                output.digest.prefix(8),
+                uuid_like_nonce()
+            ));
 
             {
                 let mut dst = BufWriter::new(
@@ -65,20 +69,27 @@ impl OutputRestorer {
                 dst.get_ref().sync_all()?;
             }
 
-            // Verify restored file checksum
-            let check_file = File::open(&tmp_path)?;
-            let check_digest = Digest::from_reader(BufReader::new(check_file))?;
-            if check_digest != output.digest {
-                let _ = fs::remove_file(&tmp_path);
-                return Err(CacheError::IntegrityError {
-                    expected: output.digest.as_str().to_string(),
-                    actual: check_digest.as_str().to_string(),
-                    path: target_path.display().to_string(),
-                });
+            // Verify restored file checksum within scoped reader
+            {
+                let check_file = File::open(&tmp_path)?;
+                let check_digest = Digest::from_reader(BufReader::new(check_file))?;
+                if check_digest != output.digest {
+                    let _ = fs::remove_file(&tmp_path);
+                    return Err(CacheError::IntegrityError {
+                        expected: output.digest.as_str().to_string(),
+                        actual: check_digest.as_str().to_string(),
+                        path: target_path.display().to_string(),
+                    });
+                }
             }
 
             // Atomically replace target
-            fs::rename(&tmp_path, &target_path)?;
+            if let Err(e) = fs::rename(&tmp_path, &target_path) {
+                let _ = fs::remove_file(&tmp_path);
+                if !target_path.exists() {
+                    return Err(CacheError::StorageError(e));
+                }
+            }
 
             #[cfg(unix)]
             if let Some(true) = output.is_executable {
@@ -91,4 +102,16 @@ impl OutputRestorer {
 
         Ok(())
     }
+}
+
+fn uuid_like_nonce() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(1);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let pid = std::process::id();
+    let c = COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{}_{}_{}", pid, now, c)
 }

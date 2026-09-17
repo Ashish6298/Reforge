@@ -1,0 +1,81 @@
+================================================================================
+DEVELOPER COMPUTATION CACHE (DCC) — MILESTONE 7.2 ENGINEERING & VERIFICATION REPORT
+================================================================================
+Date: 2026-09-17
+Milestone: Milestone 7.2 — Eviction Strategy (LRU / FIFO / LFU / Policy Enforcement)
+Status: COMPLETED & VERIFIED
+Workspace Test Suite: 101 / 101 Passed (100% Pass Rate)
+Zero Warnings Policy: Enforced & Verified (Clippy & Fmt clean)
+================================================================================
+
+1. EXECUTIVE SUMMARY & OBJECTIVE
+--------------------------------------------------------------------------------
+Milestone 7.2 establishes transparent, understandable, and robust eviction strategies
+for the Developer Computation Cache (DCC). Rather than introducing brittle, premature
+predictive algorithms, DCC standardizes on proven deterministic policies:
+  - LRU (Least Recently Used): Evicts entries with the oldest `last_accessed_at` timestamp.
+  - FIFO (First In, First Out): Evicts entries with the oldest `created_at` timestamp.
+  - LFU (Least Frequently Used): Evicts entries with the lowest `hit_count`, tie-breaking
+    by oldest access time.
+  - TTL / Expiration: Purges stale entries older than a specified duration.
+
+--------------------------------------------------------------------------------
+2. ARCHITECTURAL DESIGN & IMPLEMENTATION
+--------------------------------------------------------------------------------
+
+1. Eviction Strategy Model (`crates/cache-storage/src/eviction.rs`):
+   - Defined `EvictionStrategy`:
+     * `EvictionStrategy::Lru` (Default)
+     * `EvictionStrategy::Fifo`
+     * `EvictionStrategy::Lfu`
+   - Defined `EvictionPolicy`:
+     * `EvictionPolicy::Lru`, `EvictionPolicy::Fifo`, `EvictionPolicy::Lfu`
+     * `EvictionPolicy::MaxSizeBytes(u64)`
+     * `EvictionPolicy::StrategyAndLimit { strategy, max_size_bytes }`
+   - Defined `EvictionResult`:
+     * `deleted_entries`: Number of metadata records pruned.
+     * `deleted_objects`: Number of unreferenced CAS objects safely deleted.
+     * `freed_bytes`: Total storage volume reclaimed in bytes.
+     * `strategy`: Eviction strategy utilized for the operation.
+
+2. Coordinator Implementation (`Pruner`):
+   - `Pruner::evict_with_strategy(&self, strategy: EvictionStrategy, max_size_bytes: u64) -> Result<EvictionResult>`:
+     * Discovers all candidate cache entries across storage shards.
+     * Computes candidate storage footprints from output manifests.
+     * Sorts candidate entries according to strategy criteria:
+       - LRU: `entry.metadata.last_accessed_at` ascending.
+       - FIFO: `entry.metadata.created_at` ascending.
+       - LFU: `entry.metadata.hit_count` ascending, secondary sort on `last_accessed_at`.
+     * Iteratively removes lowest-priority entries until total output volume satisfies `max_size_bytes`.
+     * Automatically triggers CAS garbage collection to purge unreferenced data blobs.
+   - `Pruner::enforce_policy(&self, policy: EvictionPolicy) -> Result<EvictionResult>`
+   - `Pruner::evict_expired(&self, max_age: Duration) -> Result<EvictionResult>`
+
+3. CLI Integration (`crates/cache-cli`):
+   - Extended `dcc prune` with `--strategy <lru|fifo|lfu>` option (defaults to `lru`).
+   - Seamlessly integrates with human-readable size limits (e.g. `dcc prune --max-size "500 MB" --strategy fifo`).
+
+--------------------------------------------------------------------------------
+3. TEST MATRIX & VERIFICATION SUITE
+--------------------------------------------------------------------------------
+
+1. Unit Tests (`crates/cache-storage/src/eviction.rs`):
+   - `test_eviction_strategy_fifo`: Verifies FIFO eviction removes oldest-created entries regardless of recent access.
+   - `test_eviction_strategy_lfu`: Verifies LFU eviction removes low-hit-count entries, preserving high-utility hot cache keys.
+   - `test_eviction_expired_ttl`: Verifies time-based entry expiration against age thresholds.
+
+2. Integration Tests (`crates/cache-storage/tests/storage_suite.rs`):
+   - `test_storage_suite_max_size_enforcement_lru`: Validates multi-entry LRU eviction under size constraints.
+   - `test_storage_suite_eviction_strategy_fifo_vs_lru`: Validates distinct eviction behaviors between FIFO and LRU strategies.
+   - `test_storage_suite_eviction_strategy_lfu_and_policy`: Validates policy-based execution of LFU eviction with accurate reclamation of CAS blobs.
+
+--------------------------------------------------------------------------------
+4. VERIFICATION COMMANDS & OUTPUT
+--------------------------------------------------------------------------------
+- `cargo test --workspace` -> Passed 101/101 tests (100% pass rate)
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` -> Passed (0 warnings)
+- `cargo fmt --all -- --check` -> Passed (Clean formatting)
+
+================================================================================
+CONCLUSION: Milestone 7.2 Eviction Strategy is fully implemented, verified, and ready for production.
+================================================================================

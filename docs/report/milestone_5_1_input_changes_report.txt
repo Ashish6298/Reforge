@@ -1,0 +1,73 @@
+================================================================================
+DCC IMPLEMENTATION REPORT: MILESTONE 5.1 — INPUT CHANGES
+================================================================================
+Timestamp: 2026-09-16
+Status: SUCCESS / FULLY VERIFIED
+Specification Section: Milestone 5.1 (Input Changes)
+
+1. OBJECTIVE & INVARIANTS
+--------------------------------------------------------------------------------
+The objective of Milestone 5.1 is to guarantee cache correctness and deterministic
+invalidation whenever declared input files change:
+
+    If input A has hash X ──► produces Key 1
+    If input A changes to hash Y ──► MUST produce Key 2 (Key 1 != Key 2)
+
+Core Guarantees:
+1. Single and multi-file input content modifications immediately alter the canonical
+   computation key.
+2. Changes in nested subpaths (e.g. `src/deep/nested/file.rs`) propagate to key identity.
+3. Renaming input paths with identical content bytes produces distinct keys (path identity matters).
+4. Input declarations are canonically sorted, ensuring declaration order invariance.
+5. Invalidation triggers a clean cache miss, executes the command, records updated outputs,
+   and provides a structured explanation via `MissReason::InputChanged`.
+
+2. IMPLEMENTATION DETAILS
+--------------------------------------------------------------------------------
+- Canonical Computation Key Derivation (`CanonicalComputation`):
+  * Normalized relative paths (`/` standard separator).
+  * Inputs sorted alphabetically by path.
+  * SHA-256 digests of all declared input files are embedded in canonical JSON.
+  * Hashing the canonical JSON yields the 64-character hex `CacheKey`.
+
+- Miss Explainer (`MissExplainer`):
+  * Compares current input digests against prior computation manifests.
+  * Pinpoints exact input paths and digest differences:
+    `MissReason::InputChanged { path, old_digest, new_digest }`.
+
+3. TEST & VERIFICATION RESULTS
+--------------------------------------------------------------------------------
+Extensive automated unit and integration tests were executed:
+
+- Unit Tests (`crates/cache-core/src/canonical.rs`):
+  * `test_differing_inputs_produce_different_keys`: Basic input change verification.
+  * `test_multiple_inputs_single_change_produces_different_key`: Tests A=hash_x, B=hash_z
+    versus A=hash_y, B=hash_z.
+  * `test_nested_path_input_change_produces_different_key`: Tests deep nested subpaths.
+  * `test_input_path_rename_with_same_hash_produces_different_key`: Path identity verification.
+  * `test_input_order_independent_canonicalization`: Declaration order sorting.
+
+- End-to-End Integration Tests (`crates/cache-runner/tests/integration_tests.rs`):
+  * `test_milestone_5_1_input_changes_comprehensive`:
+    1. Cold run with `input_a.txt` = `PAYLOAD_CONTENT_HASH_X` -> executes, caches `Key X`.
+    2. Warm run -> hits `Key X`.
+    3. Modifies `input_a.txt` to `PAYLOAD_CONTENT_HASH_Y_DIFFERENT`.
+    4. Second run -> derives `Key Y != Key X`, forces re-execution, updates outputs on disk.
+    5. Confirms `MissExplainer` yields `MissReason::InputChanged` with exact old/new digests.
+
+- Workspace Test Suite Summary:
+  * Total tests passed: 44 passed; 0 failed; 0 ignored (100% pass rate).
+  * Linter (`clippy`): 0 warnings (`-D warnings`).
+  * Formatter (`rustfmt`): Clean formatting verified.
+
+4. ARTIFACTS AND MODIFICATIONS
+--------------------------------------------------------------------------------
+- `crates/cache-core/src/canonical.rs`: Added comprehensive input change and path identity test suite.
+- `crates/cache-runner/tests/integration_tests.rs`: Added `test_milestone_5_1_input_changes_comprehensive`.
+- `docs/report/milestone_5_1_input_changes_report.txt`: Generated Milestone 5.1 report.
+- `README.md`: Updated with Cache Correctness & Input Invalidation documentation.
+
+5. CONCLUSION
+--------------------------------------------------------------------------------
+Milestone 5.1 is completely implemented, extensively tested, and verified according to specification.
+================================================================================
