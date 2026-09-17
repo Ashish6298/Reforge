@@ -72,6 +72,14 @@ impl<'a> RunnerEngine<'a> {
         Self { storage, options }
     }
 
+    pub fn storage(&self) -> &'a CasStorage {
+        self.storage
+    }
+
+    pub fn options(&self) -> &EngineOptions {
+        &self.options
+    }
+
     /// Create a runner engine instance directly wrapping a Cache library instance.
     pub fn from_cache(cache: &'a dcc_storage::Cache, options: Option<EngineOptions>) -> Self {
         Self {

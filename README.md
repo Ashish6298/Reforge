@@ -973,6 +973,33 @@ let result = integration.execute_build_action(action)?;
 
 ---
 
+## Build Cache Benchmarking (`BenchmarkMetrics`)
+
+DCC provides built-in benchmarking utilities for measuring compiler cache acceleration and storage footprint:
+
+```rust
+use dcc_integrations::{BuildAction, GenericIntegration};
+
+let integration = GenericIntegration::new(cache_dir, workspace_dir)?;
+let metrics = integration.run_benchmark(build_action)?;
+
+println!("Cold Build:        {} ms", metrics.cold_build_time_ms);
+println!("Warm (No Cache):   {} ms", metrics.warm_build_without_cache_time_ms);
+println!("Warm (With Cache): {} ms", metrics.warm_build_with_cache_time_ms);
+println!("Lookup Time:       {} ms", metrics.cache_lookup_time_ms);
+println!("Restore Time:      {} ms", metrics.restore_time_ms);
+println!("Storage Size:      {} bytes", metrics.storage_size_bytes);
+println!("Speedup:           {:.2}x", metrics.speedup);
+```
+
+Run the benchmark example:
+
+```bash
+cargo run --example build_benchmark
+```
+
+---
+
 ## Quality Gates & Verification
 
 ```bash
@@ -983,4 +1010,5 @@ cargo fmt --all -- --check
 ```
 
 All 6 core exit criteria (deterministic computation modeling, canonical key generation, cache entry creation, retrieval, identity verification, and corrupted metadata detection) and all 11 physical storage scenarios (empty cache, single object, deduplication, corruption quarantine, interrupted write isolation, deletion, concurrent read/write races, deeply nested paths, multi-MB large files, and binary byte safety) are fully verified and tested.
+
 

@@ -178,6 +178,71 @@ impl<'a> GenericIntegration<'a> {
 
         self.execute_build_action(action)
     }
+
+    /// Execute a comprehensive build benchmark measuring cold build, warm build without cache,
+    /// and warm build with cache, reporting execution time, lookup time, restore time, storage size, and speedup (Milestone 11.4).
+    pub fn run_benchmark(&self, action: BuildAction) -> Result<BenchmarkMetrics> {
+        let comp = action.to_computation()?;
+
+        // 1. Cold Build (With Cache -> Expect MISS)
+        let cold_res = self.engine.execute(comp.clone())?;
+
+        // 2. Warm Build WITHOUT Cache (Bypass Cache -> Force recompilation)
+        let bypass_engine = RunnerEngine::new(
+            self.engine.storage(),
+            EngineOptions {
+                working_dir: self.engine.options().working_dir.clone(),
+                policy: CachePolicy::Bypass,
+                ..Default::default()
+            },
+        );
+        let warm_nocache_res = bypass_engine.execute(comp.clone())?;
+
+        // 3. Warm Build WITH Cache (Normal ReadWrite -> Expect HIT)
+        let warm_cached_res = self.engine.execute(comp)?;
+
+        let storage_stats = StorageStats::collect(self.engine.storage())?;
+        let storage_size_bytes = storage_stats.total_size_bytes;
+
+        let cold_time_ms = cold_res
+            .timings
+            .execution_time_ms
+            .max(cold_res.execution_time_ms);
+        let warm_nocache_time_ms = warm_nocache_res
+            .timings
+            .execution_time_ms
+            .max(warm_nocache_res.execution_time_ms);
+        let warm_cached_time_ms =
+            warm_cached_res.timings.lookup_time_ms + warm_cached_res.timings.restore_time_ms;
+
+        let speedup = if warm_cached_time_ms > 0 {
+            warm_nocache_time_ms as f64 / warm_cached_time_ms as f64
+        } else {
+            warm_nocache_time_ms.max(1) as f64
+        };
+
+        Ok(BenchmarkMetrics {
+            cold_build_time_ms: cold_time_ms,
+            warm_build_without_cache_time_ms: warm_nocache_time_ms,
+            warm_build_with_cache_time_ms: warm_cached_time_ms,
+            cache_lookup_time_ms: warm_cached_res.timings.lookup_time_ms,
+            restore_time_ms: warm_cached_res.timings.restore_time_ms,
+            storage_size_bytes,
+            speedup,
+        })
+    }
+}
+
+/// Comprehensive benchmark metrics report (Milestone 11.4).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BenchmarkMetrics {
+    pub cold_build_time_ms: u64,
+    pub warm_build_without_cache_time_ms: u64,
+    pub warm_build_with_cache_time_ms: u64,
+    pub cache_lookup_time_ms: u64,
+    pub restore_time_ms: u64,
+    pub storage_size_bytes: u64,
+    pub speedup: f64,
 }
 
 #[cfg(test)]
@@ -500,5 +565,56 @@ mod tests {
             std::fs::read(&out_file).unwrap().trim_ascii(),
             b"calc_v2_payload"
         );
+    }
+
+    #[test]
+    fn test_milestone_11_4_benchmark_measurements() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache_dir = temp_dir.path().join(".cache");
+        let ws_dir = temp_dir.path().join("ws");
+        std::fs::create_dir_all(&ws_dir).unwrap();
+
+        let cache = Cache::open(&cache_dir).unwrap();
+        let integration = GenericIntegration::from_cache(&cache, &ws_dir);
+
+        let src_file = ws_dir.join("main.rs");
+        let out_file = ws_dir.join("main.exe");
+        std::fs::write(&src_file, b"fn main() { println!(\"benchmark\"); }").unwrap();
+
+        #[cfg(windows)]
+        let (cmd, args) = (
+            "powershell.exe",
+            vec![
+                "-Command".to_string(),
+                format!(
+                    "Set-Content -Path '{}' -Value 'benchmark_bin_payload'",
+                    out_file.display()
+                ),
+            ],
+        );
+        #[cfg(not(windows))]
+        let (cmd, args) = (
+            "sh",
+            vec![
+                "-c".to_string(),
+                format!("echo 'benchmark_bin_payload' > '{}'", out_file.display()),
+            ],
+        );
+
+        let action = BuildAction::builder()
+            .compiler(cmd)
+            .arguments(args)
+            .source_file(&src_file)
+            .unwrap()
+            .compiler_version("rustc 1.80.0")
+            .target("x86_64-pc-windows-msvc")
+            .output("main.exe", true)
+            .build()
+            .unwrap();
+
+        let metrics = integration.run_benchmark(action).unwrap();
+
+        assert!(metrics.storage_size_bytes > 0);
+        assert!(metrics.speedup >= 1.0 || metrics.warm_build_with_cache_time_ms == 0);
     }
 }
