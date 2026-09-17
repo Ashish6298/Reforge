@@ -839,6 +839,32 @@ if let Some(entry) = cache.lookup(&key)? {
 
 ---
 
+## Ergonomic Builder API (`Computation::builder()`)
+
+DCC provides a fluent, ergonomic builder API for constructing `Computation` instances, with pre-execution validation against invalid configurations (e.g. empty operation or command, path traversal attempts):
+
+```rust
+use dcc_core::Computation;
+
+let computation = Computation::builder()
+    .operation("codegen")
+    .command("generator")
+    .args(vec!["--schema", "schema.json", "--opt"])
+    .arg("--fast")
+    .input("schema.json", digest, size)
+    .output("models.rs", true)
+    .env("TARGET_LANG", "rust")
+    .meta("author", "dcc-dev")
+    .build()?;
+```
+
+### Validation Guarantees:
+- **Operation & Command Validation**: Operation and executable command must not be empty or whitespace-only.
+- **Path Traversal Protection**: Inputs and outputs containing traversal prefixes (`../`, `..`) or absolute paths (`/`) are rejected at construction before execution starts.
+- **Canonical Ordering**: Inputs and outputs are canonically sorted by path during `.build()`.
+
+---
+
 ## Quality Gates & Verification
 
 ```bash

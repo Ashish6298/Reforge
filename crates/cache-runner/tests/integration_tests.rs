@@ -24,7 +24,7 @@ fn test_cold_miss_then_warm_hit() {
     #[cfg(not(windows))]
     let (cmd, args) = ("cp", vec!["data.txt".to_string(), "out.txt".to_string()]);
 
-    let computation = Computation::builder("copy-test", cmd)
+    let computation = Computation::builder_with("copy-test", cmd)
         .args(args)
         .input("data.txt", Digest::from_bytes(b""), 0)
         .output("out.txt", true)
@@ -77,7 +77,7 @@ fn test_input_change_causes_cache_miss() {
         vec!["input.txt".to_string(), "output.txt".to_string()],
     );
 
-    let computation = Computation::builder("diff-test", cmd)
+    let computation = Computation::builder_with("diff-test", cmd)
         .args(args)
         .input("input.txt", Digest::from_bytes(b""), 0)
         .output("output.txt", true)
@@ -110,7 +110,7 @@ fn test_input_change_causes_cache_miss() {
 
 #[test]
 fn test_path_traversal_rejection() {
-    let invalid_comp = Computation::builder("traversal", "test")
+    let invalid_comp = Computation::builder_with("traversal", "test")
         .output("../../escaped.txt", true)
         .build();
 
@@ -132,7 +132,7 @@ fn test_missing_declared_output_verification() {
     #[cfg(not(windows))]
     let (cmd, args) = ("echo", vec!["no output".to_string()]);
 
-    let computation = Computation::builder("missing-out", cmd)
+    let computation = Computation::builder_with("missing-out", cmd)
         .args(args)
         .output("never_created_output.txt", true)
         .build()
@@ -1018,7 +1018,7 @@ fn test_milestone_5_5_platform_invalidation_comprehensive() {
 #[test]
 fn test_milestone_5_6_explainable_cache_misses_comprehensive() {
     // 1. Initial State: No Entry Exists
-    let comp_base = Computation::builder("build", "rustc")
+    let comp_base = Computation::builder_with("build", "rustc")
         .arg("main.rs")
         .input(
             "src/parser.rs",
@@ -1040,7 +1040,7 @@ fn test_milestone_5_6_explainable_cache_misses_comprehensive() {
     assert!(msg.contains("No previous cache entry"));
 
     // 2. Input Changed
-    let comp_input_changed = Computation::builder("build", "rustc")
+    let comp_input_changed = Computation::builder_with("build", "rustc")
         .arg("main.rs")
         .input(
             "src/parser.rs",
@@ -1067,7 +1067,7 @@ fn test_milestone_5_6_explainable_cache_misses_comprehensive() {
     assert!(msg_input.contains("src/parser.rs"));
 
     // 3. Command Executable Changed
-    let comp_cmd_changed = Computation::builder("build", "clang")
+    let comp_cmd_changed = Computation::builder_with("build", "clang")
         .arg("main.rs")
         .input(
             "src/parser.rs",
@@ -1093,7 +1093,7 @@ fn test_milestone_5_6_explainable_cache_misses_comprehensive() {
     }
 
     // 4. Command Arguments Changed
-    let comp_args_changed = Computation::builder("build", "rustc")
+    let comp_args_changed = Computation::builder_with("build", "rustc")
         .arg("main.rs")
         .arg("--release")
         .input(
@@ -1120,7 +1120,7 @@ fn test_milestone_5_6_explainable_cache_misses_comprehensive() {
     }
 
     // 5. Tool Identity Changed
-    let comp_tool_changed = Computation::builder("build", "rustc")
+    let comp_tool_changed = Computation::builder_with("build", "rustc")
         .arg("main.rs")
         .input(
             "src/parser.rs",
@@ -1145,7 +1145,7 @@ fn test_milestone_5_6_explainable_cache_misses_comprehensive() {
     }
 
     // 6. Relevant Environment Changed
-    let comp_env_changed = Computation::builder("build", "rustc")
+    let comp_env_changed = Computation::builder_with("build", "rustc")
         .arg("main.rs")
         .input(
             "src/parser.rs",
@@ -1172,7 +1172,7 @@ fn test_milestone_5_6_explainable_cache_misses_comprehensive() {
     }
 
     // 7. Platform Changed
-    let comp_plat_changed = Computation::builder("build", "rustc")
+    let comp_plat_changed = Computation::builder_with("build", "rustc")
         .arg("main.rs")
         .input(
             "src/parser.rs",

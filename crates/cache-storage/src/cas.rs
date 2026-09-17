@@ -537,7 +537,7 @@ mod tests {
         };
         let storage = CasStorage::new(config).unwrap();
 
-        let comp = Computation::builder("op", "cmd").build().unwrap();
+        let comp = Computation::builder_with("op", "cmd").build().unwrap();
         let key = CacheKey::from_bytes(b"key-data");
         let entry = CacheEntry::new(
             key.clone(),
@@ -588,7 +588,7 @@ mod tests {
         assert!(expected_obj_path.is_file());
 
         // 3. Verify entries sharded by 2-character hex prefix
-        let comp = Computation::builder("op", "cmd").build().unwrap();
+        let comp = Computation::builder_with("op", "cmd").build().unwrap();
         let key = comp.compute_key().unwrap();
         let entry = CacheEntry::new(key.clone(), comp, Vec::new(), ExecutionMetadata::default());
         storage.store_entry(&entry).unwrap();
@@ -634,7 +634,9 @@ mod tests {
         );
 
         // Entry atomic write test
-        let comp = Computation::builder("atomic_test", "echo").build().unwrap();
+        let comp = Computation::builder_with("atomic_test", "echo")
+            .build()
+            .unwrap();
         let key = comp.compute_key().unwrap();
         let entry = CacheEntry::new(key.clone(), comp, Vec::new(), ExecutionMetadata::default());
         storage.store_entry(&entry).unwrap();

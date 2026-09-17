@@ -35,7 +35,7 @@ fn main() -> anyhow::Result<()> {
         ],
     );
 
-    let computation = Computation::builder("codegen", cmd)
+    let computation = Computation::builder_with("codegen", cmd)
         .args(args)
         .input("schema.json", Digest::from_bytes(b""), 0)
         .output("models.rs", true)

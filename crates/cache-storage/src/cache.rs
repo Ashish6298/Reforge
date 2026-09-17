@@ -288,7 +288,7 @@ mod tests {
         assert!(cache.verify_blob(&output_digest).is_ok());
 
         // 2. Build CacheEntry
-        let comp = Computation::builder("compile", "rustc")
+        let comp = Computation::builder_with("compile", "rustc")
             .arg("main.rs")
             .build()
             .unwrap();
@@ -358,7 +358,7 @@ mod tests {
         let content = b"valid content";
         let (digest, size) = cache.store_bytes(content).unwrap();
 
-        let comp = Computation::builder("test", "echo").build().unwrap();
+        let comp = Computation::builder_with("test", "echo").build().unwrap();
         let key = comp.compute_key().unwrap();
         let entry = CacheEntry::new(
             key.clone(),
@@ -389,7 +389,7 @@ mod tests {
         let input_bytes = b"input source code content";
         let input_digest = Digest::from_bytes(input_bytes);
 
-        let comp = Computation::builder("compile", "rustc")
+        let comp = Computation::builder_with("compile", "rustc")
             .arg("--crate-type=lib")
             .arg("lib.rs")
             .input("src/lib.rs", input_digest.clone(), input_bytes.len() as u64)
@@ -481,7 +481,7 @@ mod tests {
         assert!(cache_path.exists());
 
         // 2. ComputationBuilder fluent construction
-        let comp = Computation::builder("test_op", "echo")
+        let comp = Computation::builder_with("test_op", "echo")
             .arg("hello world")
             .output("out.txt", true)
             .build()

@@ -22,7 +22,7 @@ fn test_cold_miss_then_warm_hit() {
     #[cfg(not(windows))]
     let (cmd, args) = ("cp", vec!["data.txt".to_string(), "out.txt".to_string()]);
 
-    let computation = Computation::builder("copy-test", cmd)
+    let computation = Computation::builder_with("copy-test", cmd)
         .args(args)
         .input("data.txt", Digest::from_bytes(b""), 0)
         .output("out.txt", true)
@@ -72,7 +72,7 @@ fn test_input_change_causes_cache_miss() {
     #[cfg(not(windows))]
     let (cmd, args) = ("cp", vec!["input.txt".to_string(), "output.txt".to_string()]);
 
-    let computation = Computation::builder("diff-test", cmd)
+    let computation = Computation::builder_with("diff-test", cmd)
         .args(args)
         .input("input.txt", Digest::from_bytes(b""), 0)
         .output("output.txt", true)
@@ -103,7 +103,7 @@ fn test_input_change_causes_cache_miss() {
 fn test_path_traversal_rejection() {
     let env = TestEnv::new().unwrap();
 
-    let invalid_comp = Computation::builder("traversal", "test")
+    let invalid_comp = Computation::builder_with("traversal", "test")
         .output("../../escaped.txt", true)
         .build();
 
@@ -126,7 +126,7 @@ fn test_missing_declared_output_verification() {
     #[cfg(not(windows))]
     let (cmd, args) = ("echo", vec!["completed".to_string()]);
 
-    let computation = Computation::builder("missing-out-test", cmd)
+    let computation = Computation::builder_with("missing-out-test", cmd)
         .args(args)
         .output("expected_artifact.bin", true) // required output that is never generated
         .build()

@@ -55,7 +55,9 @@ impl<'a> GenericIntegration<'a> {
         ];
         args.extend_from_slice(extra_args);
 
-        let comp = Computation::builder("codegen", generator_cmd)
+        let comp = Computation::builder()
+            .operation("codegen")
+            .command(generator_cmd)
             .args(args)
             .input(schema_path, Digest::from_bytes(b""), 0)
             .output(output_path, true)
@@ -109,7 +111,9 @@ mod tests {
         );
 
         // 4. ComputationBuilder fluent API
-        let comp = Computation::builder("mock_codegen", cmd)
+        let comp = Computation::builder()
+            .operation("codegen")
+            .command(cmd)
             .args(args)
             .input(
                 "input.txt",
