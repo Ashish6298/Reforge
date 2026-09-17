@@ -535,3 +535,141 @@ fn test_milestone_6_3_duplicate_computation_avoidance_comprehensive() {
         "Underlying expensive command must run exactly once across all competing threads"
     );
 }
+
+#[test]
+fn test_milestone_6_4_crashed_process_lock_release_and_recovery() {
+    let env = Arc::new(TestEnv::new().unwrap());
+
+    env.create_input_file("input.txt", b"RECOVERY_DATA")
+        .unwrap();
+
+    #[cfg(windows)]
+    let (cmd, args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "Copy-Item input.txt -Destination output.txt".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd, args) = (
+        "cp",
+        vec!["input.txt".to_string(), "output.txt".to_string()],
+    );
+
+    let spec = dcc_runner::CommandSpec::builder(cmd)
+        .args(args.clone())
+        .current_dir(env.workspace_dir.path())
+        .input_path("input.txt")
+        .output_path("output.txt")
+        .build()
+        .unwrap();
+
+    let key = {
+        let comp = dcc_core::Computation::builder("op", cmd)
+            .args(args)
+            .build()
+            .unwrap();
+        comp.compute_key().unwrap()
+    };
+
+    // 1. Simulate a crashed process: create an orphaned lock file on disk with dead PID
+    let lock_path = env
+        .storage
+        .locks_dir()
+        .join(format!("{}.lock", key.as_str()));
+    std::fs::create_dir_all(env.storage.locks_dir()).unwrap();
+    let stale_meta = dcc_storage::lock::LockMetadata {
+        pid: 88888,
+        created_at: chrono::Utc::now() - chrono::Duration::hours(5),
+        key: key.as_str().to_string(),
+    };
+    std::fs::write(&lock_path, serde_json::to_vec(&stale_meta).unwrap()).unwrap();
+    assert!(lock_path.is_file());
+
+    // 2. Runner engine should recover seamlessly and execute without error
+    let engine = RunnerEngine::new(
+        &env.storage,
+        EngineOptions {
+            working_dir: env.workspace_dir.path().to_path_buf(),
+            ..Default::default()
+        },
+    );
+
+    let res = engine
+        .execute_command(&spec)
+        .expect("Should recover from stale lock and execute");
+    assert_eq!(res.status, ExecutionStatus::Miss);
+    assert_eq!(
+        env.read_output_file("output.txt").unwrap(),
+        b"RECOVERY_DATA"
+    );
+}
+
+#[test]
+fn test_milestone_6_4_corrupted_lock_metadata_recovery_in_runner() {
+    let env = Arc::new(TestEnv::new().unwrap());
+
+    env.create_input_file("input.txt", b"CORRUPTED_LOCK_DATA")
+        .unwrap();
+
+    #[cfg(windows)]
+    let (cmd, args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "Copy-Item input.txt -Destination output.txt".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd, args) = (
+        "cp",
+        vec!["input.txt".to_string(), "output.txt".to_string()],
+    );
+
+    let spec = dcc_runner::CommandSpec::builder(cmd)
+        .args(args.clone())
+        .current_dir(env.workspace_dir.path())
+        .input_path("input.txt")
+        .output_path("output.txt")
+        .build()
+        .unwrap();
+
+    let engine = RunnerEngine::new(
+        &env.storage,
+        EngineOptions {
+            working_dir: env.workspace_dir.path().to_path_buf(),
+            ..Default::default()
+        },
+    );
+
+    // Compute key in advance to plant corrupted lockfile
+    let key = {
+        let comp = dcc_core::Computation::builder("op", cmd)
+            .args(args)
+            .build()
+            .unwrap();
+        comp.compute_key().unwrap()
+    };
+
+    let lock_path = env
+        .storage
+        .locks_dir()
+        .join(format!("{}.lock", key.as_str()));
+    std::fs::create_dir_all(env.storage.locks_dir()).unwrap();
+    std::fs::write(
+        &lock_path,
+        b"CORRUPTED_LOCK_METADATA_NON_JSON_BYTES_!@#$%^&*()",
+    )
+    .unwrap();
+
+    // Runner must execute without failing or hanging
+    let res = engine
+        .execute_command(&spec)
+        .expect("Should recover from corrupted lock metadata");
+    assert_eq!(res.status, ExecutionStatus::Miss);
+    assert_eq!(
+        env.read_output_file("output.txt").unwrap(),
+        b"CORRUPTED_LOCK_DATA"
+    );
+}

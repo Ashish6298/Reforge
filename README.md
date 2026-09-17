@@ -430,6 +430,16 @@ A releases lock                    ↓
 - **Secondary Cache Re-check**: Upon acquiring the lock, `RunnerEngine` immediately re-checks the cache before executing the command.
 - **Deduplicated Execution**: Guaranteed that only 1 process runs the command while all other waiting processes receive instant cache hits and restore output artifacts into their respective workspaces.
 
+### Lock Failure Recovery (Milestone 6.4)
+
+DCC guarantees that abnormal process terminations, crashes, timeouts, or corrupted metadata never leave the cache permanently unusable:
+
+- **Kernel Lock Auto-Release**: File locks are backed by operating system kernel locks (`fs2::FileExt`). When a process crashes or is killed (`SIGKILL`), the OS kernel automatically releases held locks.
+- **Stale Lock Recovery**: Orphaned lock files on disk from dead processes are claimed and overwritten by the next active process without blocking.
+- **Corrupted Metadata Overwrite**: Lock files containing non-JSON or corrupted data are cleared and rewritten atomically with fresh PID and timestamp upon lock acquisition.
+- **Configurable Timeouts**: If a lock is held beyond `lock_timeout`, `acquire` returns `CacheError::LockError` instead of deadlocking indefinitely.
+- **Stale Lock Pruning**: `ComputationLock::clean_stale_locks` safely tests and purges unlocked lock files exceeding a configured age threshold.
+
 ---
 
 ## Workspace Architecture
