@@ -207,6 +207,7 @@ dependencies = [
  "dcc-storage",
  "serde",
  "serde_json",
+ "tempfile",
  "walkdir",
 ]
 

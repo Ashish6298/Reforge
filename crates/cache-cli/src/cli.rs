@@ -69,6 +69,15 @@ pub enum Commands {
         dry_run: bool,
     },
 
+    #[command(about = "Inspect or manage cache configuration")]
+    Config {
+        #[arg(
+            long,
+            help = "Display configuration setting (e.g. 'max_size', 'cache_dir')"
+        )]
+        get: Option<String>,
+    },
+
     #[command(about = "Diagnose cache health, environment, and permissions")]
     Doctor,
 

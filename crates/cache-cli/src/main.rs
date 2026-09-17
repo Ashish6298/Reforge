@@ -42,6 +42,7 @@ fn main() -> Result<()> {
             strategy,
             dry_run,
         } => handle_prune(&storage, max_size.as_deref(), &strategy, dry_run, cli.json)?,
+        Commands::Config { get } => handle_config(&storage, get.as_deref(), cli.json)?,
         Commands::Doctor => handle_doctor(&storage, cli.json)?,
         Commands::Cache { command } => match command {
             CacheCommands::Clean { key } => handle_clean(&storage, key.as_deref(), cli.json)?,
@@ -431,4 +432,168 @@ fn handle_doctor(storage: &CasStorage, json: bool) -> Result<()> {
         println!("Total Entries:      {}", stats.total_entries);
     }
     Ok(())
+}
+
+fn handle_config(storage: &CasStorage, get_key: Option<&str>, json: bool) -> Result<()> {
+    let max_size = storage
+        .max_size()
+        .map(|bs| bs.as_bytes())
+        .unwrap_or(10 * 1024 * 1024 * 1024);
+    let cache_dir = storage.root_dir();
+
+    if let Some(key) = get_key {
+        match key.to_lowercase().as_str() {
+            "max_size" | "max-size" => {
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "key": "max_size",
+                            "value_bytes": max_size,
+                            "value_human": dcc_core::ByteSize::bytes(max_size).to_human_readable()
+                        })
+                    );
+                } else {
+                    println!(
+                        "{}",
+                        dcc_core::ByteSize::bytes(max_size).to_human_readable()
+                    );
+                }
+            }
+            "cache_dir" | "cache-dir" | "dir" => {
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "key": "cache_dir",
+                            "value": cache_dir.display().to_string()
+                        })
+                    );
+                } else {
+                    println!("{}", cache_dir.display());
+                }
+            }
+            other => {
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "error": "unknown_config_key",
+                            "key": other
+                        })
+                    );
+                } else {
+                    eprintln!(
+                        "Unknown configuration key: '{}'. Supported: max_size, cache_dir",
+                        other
+                    );
+                }
+                std::process::exit(5);
+            }
+        }
+    } else if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "cache_dir": cache_dir.display().to_string(),
+                "max_size_bytes": max_size,
+                "max_size_human": dcc_core::ByteSize::bytes(max_size).to_human_readable(),
+                "objects_dir": storage.objects_dir().display().to_string(),
+                "entries_dir": storage.entries_dir().display().to_string(),
+                "locks_dir": storage.locks_dir().display().to_string(),
+                "tmp_dir": storage.tmp_dir().display().to_string()
+            })
+        );
+    } else {
+        println!("=== DCC Configuration ===");
+        println!("Cache Directory: {}", cache_dir.display());
+        println!(
+            "Max Cache Size:  {}",
+            dcc_core::ByteSize::bytes(max_size).to_human_readable()
+        );
+        println!("Objects Dir:     {}", storage.objects_dir().display());
+        println!("Entries Dir:     {}", storage.entries_dir().display());
+        println!("Locks Dir:       {}", storage.locks_dir().display());
+        println!("Tmp Dir:         {}", storage.tmp_dir().display());
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dcc_core::entry::{CacheEntry, ExecutionMetadata, OutputManifestItem};
+
+    #[test]
+    fn test_cli_init_and_config_handlers() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = StorageConfig {
+            root_dir: temp_dir.path().to_path_buf(),
+            max_size_bytes: Some(2 * 1024 * 1024 * 1024),
+        };
+        let storage = CasStorage::new(config).unwrap();
+
+        // 1. handle_init
+        assert!(handle_init(&storage, Some("500 MB"), false).is_ok());
+        assert!(handle_init(&storage, None, true).is_ok());
+
+        // 2. handle_config
+        assert!(handle_config(&storage, None, false).is_ok());
+        assert!(handle_config(&storage, None, true).is_ok());
+        assert!(handle_config(&storage, Some("max_size"), false).is_ok());
+        assert!(handle_config(&storage, Some("cache_dir"), true).is_ok());
+    }
+
+    #[test]
+    fn test_cli_stats_doctor_verify_clean_handlers() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = StorageConfig {
+            root_dir: temp_dir.path().to_path_buf(),
+            max_size_bytes: Some(10 * 1024 * 1024 * 1024),
+        };
+        let storage = CasStorage::new(config).unwrap();
+        storage.init_dirs().unwrap();
+
+        // 1. handle_doctor
+        assert!(handle_doctor(&storage, false).is_ok());
+        assert!(handle_doctor(&storage, true).is_ok());
+
+        // 2. handle_stats on empty cache
+        assert!(handle_stats(&storage, false).is_ok());
+        assert!(handle_stats(&storage, true).is_ok());
+
+        // 3. Populate an entry and verify
+        let (d, s) = storage.store_object_bytes(b"cli test artifact").unwrap();
+        let comp = Computation::builder("cli_test", "echo").build().unwrap();
+        let key = comp.compute_key().unwrap();
+        let entry = CacheEntry::new(
+            key.clone(),
+            comp,
+            vec![OutputManifestItem {
+                path: "out.txt".into(),
+                digest: d,
+                size: s,
+                is_executable: None,
+            }],
+            ExecutionMetadata::default(),
+        );
+        storage.store_entry(&entry).unwrap();
+
+        // 4. handle_inspect
+        assert!(handle_inspect(&storage, key.as_str(), false).is_ok());
+        assert!(handle_inspect(&storage, key.as_str(), true).is_ok());
+
+        // 5. handle_verify
+        assert!(handle_verify(&storage, false).is_ok());
+        assert!(handle_verify(&storage, true).is_ok());
+
+        // 6. handle_prune
+        assert!(handle_prune(&storage, None, "lru", true, false).is_ok());
+        assert!(handle_prune(&storage, Some("1 GB"), "fifo", false, true).is_ok());
+
+        // 7. handle_clean specific key and all
+        assert!(handle_clean(&storage, Some(key.as_str()), false).is_ok());
+        assert!(handle_clean(&storage, None, true).is_ok());
+    }
 }

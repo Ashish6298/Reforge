@@ -558,6 +558,34 @@ To prevent race conditions and data corruption across concurrent processes, obje
 
 ---
 
+---
+
+## Professional CLI (Milestone 8)
+
+The Developer Computation Cache engine is exposed through a polished, robust command-line interface (`dcc`):
+
+| Command | Purpose | Key Flags / Arguments |
+| :--- | :--- | :--- |
+| `dcc init` | Initialize local cache directory & configuration | `--max-size <limit>` |
+| `dcc run` | Execute computation with sandboxed caching | `--input <f>`, `--output <f>`, `--env <k=v>`, `--explain`, `--policy <p>`, `-- <cmd...>` |
+| `dcc inspect <key>` | Inspect detailed computation metadata and I/O manifests | `<key>`, `--json` |
+| `dcc stats` | Inspect entry count, CAS objects, disk usage, and largest blob | `--json` |
+| `dcc verify` | Cryptographically audit CAS objects and metadata integrity | `--json` |
+| `dcc clean` | Wipe all cached data or remove specific computation key | `--key <key>`, `--json` |
+| `dcc prune` | Garbage collect unreferenced objects and enforce max size | `--max-size <limit>`, `--strategy <lru/fifo/lfu>`, `--dry-run`, `--json` |
+| `dcc config` | Inspect active storage configuration and path layout | `--get <max_size/cache_dir>`, `--json` |
+| `dcc doctor` | Perform comprehensive environment and health diagnostics | `--json` |
+
+### Stable Exit Codes
+- `0`: Success / Cache HIT
+- `1`: Computation failed / Cache entry not found
+- `2`: Invalid configuration
+- `3`: Cache storage or I/O error
+- `4`: Cryptographic or metadata integrity failure
+- `5`: Invalid CLI arguments or unrecognized option
+
+---
+
 ## CLI Usage
 
 ```bash
@@ -570,21 +598,28 @@ dcc run --input src/schema.json --output generated/models.rs -- generator src/sc
 # Explain cache miss reasons
 dcc run --explain --input src/schema.json --output generated/models.rs -- generator src/schema.json
 
-# View cache storage statistics
-dcc cache stats  # or: dcc stats
+# View cache storage statistics (human-readable or JSON)
+dcc stats
+dcc stats --json
 
 # Inspect a specific computation by key
 dcc inspect <key>
+dcc inspect <key> --json
+
+# Inspect cache configuration
+dcc config
+dcc config --get max_size
 
 # Verify storage integrity
-dcc cache verify # or: dcc verify
+dcc verify
 
 # Prune unreferenced objects and enforce max size limit
-dcc cache prune --max-size "500 MB" --dry-run
+dcc prune --max-size "500 MB" --dry-run
+dcc prune --strategy lru --max-size "2 GB"
 
 # Clean specific key or entire cache
-dcc cache clean --key <key>
-dcc cache clean
+dcc clean --key <key>
+dcc clean
 
 # Run health diagnostics
 dcc doctor
