@@ -878,6 +878,12 @@ cargo run --example cached_analysis
 
 # 3. Data Transformation & Asset Minification (CSV -> JSON Pipeline)
 cargo run --example cached_transform
+
+# 4. Rust Compiler Build Action Integration (Source + Compiler Config + Tool Identity)
+cargo run --example cached_rust_build
+
+# 5. Milestone 11.3 Reproducible Build Demonstration (Build #1 MISS -> Build #2 HIT -> Build #3 Source Mod MISS)
+cargo run --example build_demonstration
 ```
 
 Each example illustrates:
@@ -933,6 +939,67 @@ When integrating DCC into custom build systems, compilers, linters, or code gene
 
 ---
 
+## Build Action Model (`BuildAction`)
+
+DCC provides a dedicated action-oriented build caching model (`BuildAction`) representing compiler invocations:
+
+```rust
+use dcc_integrations::{BuildAction, Cache, GenericIntegration};
+
+let action = BuildAction::builder()
+    .compiler("rustc")
+    .arguments(vec!["src/main.rs", "--crate-type", "bin", "-O"])
+    .source_input("src/main.rs", source_digest, source_size)
+    .dependency_input("target/deps/libcore.rlib", dep_digest, dep_size)
+    .compiler_version("1.80.0")
+    .target("x86_64-unknown-linux-gnu")
+    .env("RUSTFLAGS", "-C opt-level=3")
+    .output("target/main", true)
+    .build()?;
+
+let key = action.compute_key()?;
+let result = integration.execute_build_action(action)?;
+```
+
+### Build Action Components:
+1. **Compiler**: Target compiler binary executable (`rustc`, `gcc`, `clang`, `cl.exe`).
+2. **Arguments**: Full list of compiler flags, target definitions, and optimization switches.
+3. **Source Inputs**: Primary source files (`.rs`, `.c`, `.cpp`) with cryptographic content digests.
+4. **Dependency Inputs**: Intermediate libraries, header files, and crate archives (`.rlib`, `.a`, `.h`).
+5. **Compiler Version & Tool Digest**: Explicit version string and tool binary hash.
+6. **Target & Platform**: Target triple (`x86_64-unknown-linux-gnu`, `aarch64-apple-darwin`, etc.).
+7. **Environment**: Declared compilation environment variables (`RUSTFLAGS`, `CFLAGS`, `CC`).
+8. **Outputs**: Expected build artifacts (`.exe`, `.rlib`, `.so`, `.o`, `.pdb`).
+
+---
+
+## Build Cache Benchmarking (`BenchmarkMetrics`)
+
+DCC provides built-in benchmarking utilities for measuring compiler cache acceleration and storage footprint:
+
+```rust
+use dcc_integrations::{BuildAction, GenericIntegration};
+
+let integration = GenericIntegration::new(cache_dir, workspace_dir)?;
+let metrics = integration.run_benchmark(build_action)?;
+
+println!("Cold Build:        {} ms", metrics.cold_build_time_ms);
+println!("Warm (No Cache):   {} ms", metrics.warm_build_without_cache_time_ms);
+println!("Warm (With Cache): {} ms", metrics.warm_build_with_cache_time_ms);
+println!("Lookup Time:       {} ms", metrics.cache_lookup_time_ms);
+println!("Restore Time:      {} ms", metrics.restore_time_ms);
+println!("Storage Size:      {} bytes", metrics.storage_size_bytes);
+println!("Speedup:           {:.2}x", metrics.speedup);
+```
+
+Run the benchmark example:
+
+```bash
+cargo run --example build_benchmark
+```
+
+---
+
 ## Quality Gates & Verification
 
 ```bash
@@ -943,4 +1010,5 @@ cargo fmt --all -- --check
 ```
 
 All 6 core exit criteria (deterministic computation modeling, canonical key generation, cache entry creation, retrieval, identity verification, and corrupted metadata detection) and all 11 physical storage scenarios (empty cache, single object, deduplication, corruption quarantine, interrupted write isolation, deletion, concurrent read/write races, deeply nested paths, multi-MB large files, and binary byte safety) are fully verified and tested.
+
 

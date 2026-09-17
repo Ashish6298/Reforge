@@ -1,0 +1,80 @@
+================================================================================
+DCC VERIFICATION REPORT: MILESTONE 11.3 — BUILD DEMONSTRATION
+================================================================================
+Date: 2026-09-17
+Workspace: D:\DC
+Report Path: D:\DC\docs\report\milestone_11_3_build_demonstration_report.txt
+
+1. OBJECTIVE & REQUIREMENTS
+--------------------------------------------------------------------------------
+Milestone 11.3 requires executing a reproducible benchmark build demonstration:
+- Create a benchmark project with realistic multi-source compilation structure.
+- Execute the exact 3-step reproducible build cycle:
+  * Build #1: Initial cold execution -> MISS -> compile -> store in CAS.
+  * Build #2: Identical sources and configuration -> HIT -> restore binary from CAS.
+  * Build #3: Modify one source file -> MISS -> compile -> store new version in CAS.
+- Verify reproducibility, deterministic key separation, and exact binary content matches.
+- Maintain existing CLI and UI functionality without breaking changes.
+
+2. IMPLEMENTATION SUMMARY
+--------------------------------------------------------------------------------
+- Created Benchmark Project Demonstration:
+  * `examples/build_demonstration.rs`:
+    Implements a multi-file benchmark project (`src/main.rs`, `src/math.rs`).
+    - Build #1: Cold build execution, verifies exit code 0, stores output binary artifact, and asserts `ExecutionStatus::Miss`.
+    - Build #2: Local binary is deleted, build action executed with unmodified sources, asserts `ExecutionStatus::Hit`, identical `CacheKey`, and exact byte-for-byte binary content restoration.
+    - Build #3: Modifies `src/math.rs`, generates a new `BuildAction`, asserts `ExecutionStatus::Miss`, and proves key divergence (`key_1 != key_3`).
+- Added Automated Integration Test:
+  * `crates/cache-integrations/src/lib.rs`: Added `test_milestone_11_3_build_demonstration_reproducible`.
+- Configured Cargo Manifest:
+  * `crates/cache-integrations/Cargo.toml`: Added `[[example]]` target for `build_demonstration`.
+- Updated Project Documentation:
+  * `README.md`: Added `build_demonstration` example run command and description.
+
+3. TEST & DEMONSTRATION VERIFICATION RESULTS
+--------------------------------------------------------------------------------
+1. Executing `cargo run --example build_demonstration`:
+   Status: SUCCESS (Exit Code 0)
+   Output Transcript:
+   ===============================================================
+   === DCC MILESTONE 11.3: REPRODUCIBLE BUILD DEMONSTRATION ===
+   ===============================================================
+
+   >>> RUNNING BUILD #1 (Initial Cold Build)
+       Result:       Miss
+       Action:       MISS -> compile -> store in CAS
+       Cache Key:    d57268fcf443422400e43069a91fad28b205c2e7b61a4b97d5e062dbd656d709
+       Exit Code:    0
+       Duration:     258 ms
+       Output Size:  39 bytes
+
+   >>> RUNNING BUILD #2 (Identical Sources & Config)
+       Result:       Hit
+       Action:       HIT -> restore from CAS
+       Cache Key:    d57268fcf443422400e43069a91fad28b205c2e7b61a4b97d5e062dbd656d709
+       Exit Code:    0
+       Restored:     1 output artifacts
+       Integrity:    Exact binary content match verified!
+
+   >>> MODIFYING ONE SOURCE FILE (src/math.rs)...
+   >>> RUNNING BUILD #3 (After Modifying src/math.rs)
+       Result:       Miss
+       Action:       MISS -> compile -> store new version in CAS
+       Cache Key:    326c149fe00bfa6d300769351bbef853ab4b2acaeff97015d51a108a1f89f6d2
+       Exit Code:    0
+       Distinct Key: Verified new canonical key for modified source!
+
+   ===============================================================
+   === MILESTONE 11.3 BUILD DEMONSTRATION PASSED (REPRODUCIBLE) ===
+   ===============================================================
+
+2. Automated Test Matrix:
+   - `dcc-integrations` tests: 4 tests passed (`test_milestone_11_3_build_demonstration_reproducible` PASSED).
+   - `cargo test --workspace --examples`: PASSED (132 total test targets).
+   - `cargo clippy --workspace --all-targets --all-features`: PASSED (0 warnings).
+   - `cargo fmt --all -- --check`: PASSED (clean formatting).
+
+4. CONCLUSION
+--------------------------------------------------------------------------------
+Milestone 11.3 (Build Demonstration) is fully implemented, verified, reproducible, and documented.
+================================================================================

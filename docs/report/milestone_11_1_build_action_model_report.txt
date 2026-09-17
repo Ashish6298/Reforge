@@ -1,0 +1,63 @@
+================================================================================
+DCC VERIFICATION REPORT: MILESTONE 11.1 — BUILD ACTION MODEL
+================================================================================
+Date: 2026-09-17
+Workspace: D:\DC
+Report Path: D:\DC\docs\report\milestone_11_1_build_action_model_report.txt
+
+1. OBJECTIVE & REQUIREMENTS
+--------------------------------------------------------------------------------
+Milestone 11.1 establishes the action-oriented build caching model:
+- Represent a build action encapsulating:
+  * compiler (compiler executable, e.g. rustc, gcc, clang)
+  * arguments (compiler options, flags, optimization levels)
+  * source inputs (primary source files with content digests)
+  * dependency inputs (compiled libraries, headers, rlibs)
+  * compiler version (explicit tool identity and version string)
+  * target (target triple / platform constraints)
+  * environment (declared compiler environment variables)
+  * outputs (expected output binaries, libraries, manifests)
+- Map `BuildAction` to canonical `Computation` for deterministic hashing and execution.
+- Maintain pre-execution validation and canonical path normalization.
+- Ensure integration into `dcc-integrations` without breaking existing UI or CLI functionality.
+
+2. IMPLEMENTATION SUMMARY
+--------------------------------------------------------------------------------
+- Created `crates/cache-core/src/build_action.rs`:
+  * Defined `BuildAction` struct with all 8 action-oriented build dimensions.
+  * Implemented `BuildActionBuilder` with chainable fluent methods:
+    `.compiler(...)`, `.argument(...)`, `.arguments(...)`, `.source_input(...)`, `.source_file(...)`,
+    `.dependency_input(...)`, `.dependency_file(...)`, `.compiler_version(...)`, `.compiler_digest(...)`,
+    `.target(...)`, `.env(...)`, `.envs(...)`, `.output(...)`, `.outputs(...)`, `.working_dir(...)`,
+    `.build()`.
+  * Implemented `.to_computation() -> Result<Computation>` and `.compute_key() -> Result<CacheKey>`.
+  * Added validation ensuring non-empty compiler and path traversal rejections.
+  * Added unit tests covering model conversion, source changes, dependency changes, compiler version changes, target changes, and validation rejections.
+- Enhanced `crates/cache-integrations/src/lib.rs`:
+  * Re-exported `BuildAction` and `BuildActionBuilder`.
+  * Added `GenericIntegration::execute_build_action(&self, action: BuildAction) -> Result<ExecutionResult>`.
+  * Added integration test `test_milestone_11_1_build_action_integration`.
+- Updated `README.md` with Build Action Model documentation, architecture components, and usage examples.
+
+3. TEST EXECUTION RESULTS
+--------------------------------------------------------------------------------
+- `dcc-core` unit tests: 47 passed (0 failed)
+  * `test_milestone_11_1_build_action_model_and_key_generation`: PASSED
+  * `test_milestone_11_1_build_action_source_change_changes_key`: PASSED
+  * `test_milestone_11_1_build_action_dependency_change_changes_key`: PASSED
+  * `test_milestone_11_1_build_action_compiler_version_change_changes_key`: PASSED
+  * `test_milestone_11_1_build_action_target_change_changes_key`: PASSED
+  * `test_milestone_11_1_build_action_validation`: PASSED
+- `dcc-integrations` tests: 2 passed (0 failed)
+  * `test_milestone_11_1_build_action_integration`: PASSED
+- Full workspace test suite: 130 tests passed across all packages.
+- Quality Gates:
+  * `cargo check --workspace`: PASSED
+  * `cargo test --workspace --examples`: PASSED
+  * `cargo clippy --workspace --all-targets --all-features`: PASSED (0 warnings)
+  * `cargo fmt --all -- --check`: PASSED
+
+4. CONCLUSION
+--------------------------------------------------------------------------------
+Milestone 11.1 (Build Action Model) is fully implemented, verified, and integrated without regressions.
+================================================================================

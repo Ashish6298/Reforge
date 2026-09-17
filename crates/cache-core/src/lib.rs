@@ -1,3 +1,4 @@
+pub mod build_action;
 pub mod canonical;
 pub mod computation;
 pub mod digest;
@@ -6,6 +7,7 @@ pub mod error;
 pub mod event;
 pub mod size;
 
+pub use build_action::{BuildAction, BuildActionBuilder};
 pub use canonical::CanonicalComputation;
 pub use computation::{
     Computation, ComputationBuilder, InputFile, OutputFile, PlatformConstraints, ToolIdentity,

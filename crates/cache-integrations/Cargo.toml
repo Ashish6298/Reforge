@@ -29,3 +29,15 @@ path = "../../examples/cached_analysis.rs"
 name = "cached_transform"
 path = "../../examples/cached_transform.rs"
 
+[[example]]
+name = "cached_rust_build"
+path = "../../examples/cached_rust_build.rs"
+
+[[example]]
+name = "build_demonstration"
+path = "../../examples/build_demonstration.rs"
+
+[[example]]
+name = "build_benchmark"
+path = "../../examples/build_benchmark.rs"
+
