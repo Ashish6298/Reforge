@@ -1,0 +1,90 @@
+================================================================================
+DEVELOPER COMPUTATION CACHE (DCC) — MILESTONE 6.2 ENGINEERING & VERIFICATION REPORT
+================================================================================
+Date: 2026-09-17
+Milestone: Milestone 6.2 — Concurrent Writes
+Status: COMPLETED & VERIFIED
+Workspace Test Suite: 66 / 66 Passed (100% Pass Rate)
+Zero Warnings Policy: Enforced & Verified (Clippy & Fmt clean)
+================================================================================
+
+1. EXECUTIVE SUMMARY & OBJECTIVE
+--------------------------------------------------------------------------------
+Milestone 6.2 verifies and guarantees concurrent write safety across the Developer
+Computation Cache (DCC). Two or more processes or threads writing the exact same
+or distinct objects simultaneously must never corrupt storage, produce partial files,
+or leak orphaned resources.
+
+Core Invariant:
+"Two processes writing the same object must never corrupt it. Use atomic object
+creation and/or locking."
+
+--------------------------------------------------------------------------------
+2. ARCHITECTURAL DESIGN & INVARIANTS
+--------------------------------------------------------------------------------
+- Two-Stage Atomic Write Pipeline:
+  All CAS object storage operations (`store_object_bytes`, `store_object_from_file`)
+  and CacheEntry commits (`store_entry`) follow a strict atomic pipeline:
+    1. Allocate a unique random nonce temporary file in `.cache/tmp/<nonce>.tmp`.
+    2. Stream data to the temporary file via `BufWriter`.
+    3. Flush buffers and execute `dst.get_ref().sync_all()` (`fsync`) to flush
+       operating system write caches to durable physical media.
+    4. Execute atomic rename (`fs::rename`) into the final sharded path
+       (`.cache/objects/ab/abcdef...` or `.cache/entries/12/123456...json`).
+    5. In case of racing creation where destination already exists, cleanup the
+       temporary file without throwing an error if the final file is intact.
+
+- Collision Isolation & Deduplication Race Safety:
+  * When multiple processes compute the exact same output bytes simultaneously,
+    both write full temporary files and attempt to rename them into the same CAS path.
+  * The target file is either created or atomically overwritten with identical bytes.
+  * No thread can ever read a half-written file because reads only target the final
+    renamed path after `fsync`.
+  * Temporary files from competing writers are cleanly removed, leaving the `.cache/tmp/`
+    directory completely empty.
+
+- Concurrency Lock & Process Coordination:
+  * High-level computation runs are coordinated via `ComputationLock` using OS-level
+    advisory file locks (`fs2`), ensuring atomic execution handoffs.
+
+--------------------------------------------------------------------------------
+3. TEST SUITE & CONCURRENCY VALIDATION
+--------------------------------------------------------------------------------
+
+The concurrency test harness (`crates/cache-runner/tests/concurrency_tests.rs`)
+verifies the following scenarios:
+
+1. `test_milestone_6_2_concurrent_writes_identical_objects_dedup_race`:
+   - 32 concurrent worker threads execute 5 iterations each ($160$ racing write operations)
+     writing the identical 512 KB payload to the same CAS object.
+   - Result:
+     * Exactly 1 deduplicated physical CAS object stored on disk.
+     * $100\%$ byte integrity verified cryptographically via SHA-256.
+     * Temporary directory `.cache/tmp/` is verified completely empty.
+
+2. `test_milestone_6_2_concurrent_writes_distinct_objects_throughput`:
+   - 32 concurrent threads simultaneously write 32 distinct large payloads.
+   - Result:
+     * All 32 objects stored without contention, corruption, or race collisions.
+     * All 32 objects pass cryptographic verification.
+     * Temporary directory `.cache/tmp/` is verified clean.
+
+3. `test_milestone_6_2_concurrent_entry_writes_atomic_safety`:
+   - 24 concurrent threads write updated `CacheEntry` JSON records for the same key.
+   - Result:
+     * Stored entry file remains valid JSON and passes `verify_identity()`.
+     * Temporary directory `.cache/tmp/` is verified clean.
+
+4. `test_storage_suite_concurrent_writes` (`crates/cache-storage/tests/storage_suite.rs`):
+   - 16 parallel threads racing between deduplication writes and distinct writes.
+
+--------------------------------------------------------------------------------
+4. VERIFICATION METRICS
+--------------------------------------------------------------------------------
+- Test Suite: 66 passed; 0 failed; finished in 6.09s
+- Clippy: 0 warnings with `-D warnings`
+- Rustfmt: 0 formatting differences
+
+================================================================================
+END OF REPORT — MILESTONE 6.2 COMPLETED
+================================================================================

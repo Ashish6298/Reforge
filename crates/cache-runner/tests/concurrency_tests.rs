@@ -270,3 +270,151 @@ fn test_milestone_6_1_concurrent_reads_runner_hit_storm() {
         handle.join().unwrap();
     }
 }
+
+#[test]
+fn test_milestone_6_2_concurrent_writes_identical_objects_dedup_race() {
+    let env = Arc::new(TestEnv::new().unwrap());
+    let payload = vec![0xEE; 512 * 1024]; // 512 KB payload
+    let expected_digest = Digest::from_bytes(&payload);
+
+    let num_threads = 32;
+    let mut handles = Vec::new();
+
+    for thread_id in 0..num_threads {
+        let env_clone = Arc::clone(&env);
+        let payload_clone = payload.clone();
+        let expected_digest_clone = expected_digest.clone();
+
+        let handle = thread::spawn(move || {
+            for iter in 0..5 {
+                let (digest, size) = env_clone
+                    .storage
+                    .store_object_bytes(&payload_clone)
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "Thread {} iter {} failed to store object: {}",
+                            thread_id, iter, e
+                        )
+                    });
+                assert_eq!(digest, expected_digest_clone);
+                assert_eq!(size, payload_clone.len() as u64);
+                assert!(env_clone.storage.verify_object(&digest).is_ok());
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    // Invariants:
+    // 1. Storage has exactly 1 physical CAS object (deduplicated)
+    assert_eq!(env.storage.count_objects().unwrap(), 1);
+    // 2. The object is 100% intact and passes cryptographic verification
+    assert!(env.storage.verify_object(&expected_digest).is_ok());
+    // 3. Tmp directory is completely empty
+    let mut tmp_entries = std::fs::read_dir(env.storage.tmp_dir()).unwrap();
+    assert!(
+        tmp_entries.next().is_none(),
+        "tmp directory must be completely clean after concurrent racing writes"
+    );
+}
+
+#[test]
+fn test_milestone_6_2_concurrent_writes_distinct_objects_throughput() {
+    let env = Arc::new(TestEnv::new().unwrap());
+    let num_threads = 32;
+    let mut handles = Vec::new();
+
+    for thread_id in 0..num_threads {
+        let env_clone = Arc::clone(&env);
+
+        let handle = thread::spawn(move || {
+            let unique_payload = format!(
+                "DISTINCT_CONCURRENT_WRITE_PAYLOAD_FOR_THREAD_{}_{}",
+                thread_id,
+                "X".repeat(16 * 1024)
+            )
+            .into_bytes();
+            let (digest, size) = env_clone
+                .storage
+                .store_object_bytes(&unique_payload)
+                .unwrap();
+            assert_eq!(size, unique_payload.len() as u64);
+            assert!(env_clone.storage.verify_object(&digest).is_ok());
+            (digest, size)
+        });
+        handles.push(handle);
+    }
+
+    let mut stored_digests = Vec::new();
+    for handle in handles {
+        let (digest, _) = handle.join().unwrap();
+        stored_digests.push(digest);
+    }
+
+    // Invariants:
+    // 1. All 32 distinct objects are physically present
+    assert_eq!(env.storage.count_objects().unwrap(), num_threads);
+    // 2. All 32 objects pass cryptographic verification
+    for d in &stored_digests {
+        assert!(env.storage.verify_object(d).is_ok());
+    }
+    // 3. Tmp directory is clean
+    let mut tmp_entries = std::fs::read_dir(env.storage.tmp_dir()).unwrap();
+    assert!(tmp_entries.next().is_none());
+}
+
+#[test]
+fn test_milestone_6_2_concurrent_entry_writes_atomic_safety() {
+    let env = Arc::new(TestEnv::new().unwrap());
+
+    let comp = Computation::builder("atomic_concurrent_op", "compiler")
+        .arg("--opt")
+        .build()
+        .unwrap();
+    let key = comp.compute_key().unwrap();
+
+    let num_writers = 24;
+    let mut handles = Vec::new();
+
+    for writer_id in 0..num_writers {
+        let env_clone = Arc::clone(&env);
+        let comp_clone = comp.clone();
+        let key_clone = key.clone();
+
+        let handle = thread::spawn(move || {
+            let entry = dcc_core::CacheEntry::new(
+                key_clone,
+                comp_clone,
+                Vec::new(),
+                dcc_core::ExecutionMetadata {
+                    exit_code: 0,
+                    execution_time_ms: 10 + writer_id as u64,
+                    stdout_digest: None,
+                    stderr_digest: None,
+                },
+            );
+            env_clone.storage.store_entry(&entry).unwrap();
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    // Invariants:
+    // 1. CacheEntry on disk is perfectly valid JSON and satisfies verify_identity
+    let retrieved_entry = env
+        .storage
+        .get_entry(&key)
+        .unwrap()
+        .expect("Entry must exist");
+    assert_eq!(retrieved_entry.key, key);
+    assert!(retrieved_entry.verify_identity().is_ok());
+    // 2. Tmp directory is clean
+    let mut tmp_entries = std::fs::read_dir(env.storage.tmp_dir()).unwrap();
+    assert!(tmp_entries.next().is_none());
+}

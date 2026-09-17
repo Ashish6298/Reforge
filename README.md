@@ -404,6 +404,12 @@ Terminal C -> computation Y
 - **Lock-Free Read Scaling**: Dozens of concurrent threads or processes can stream the same CAS object or inspect metadata simultaneously.
 - **Concurrent Cache Hit Storms**: When multiple concurrent runner processes execute identical computations on a warm cache, 100% of workers experience immediate cache hits (`ExecutionStatus::Hit`), $0\text{ ms}$ execution duration, no child process spawning, and atomic output restoration into their respective workspaces.
 
+### Concurrent Writes (Milestone 6.2)
+
+- **Two-Stage Atomic Write Pipeline**: CAS objects and cache entries are written to unique nonce temporary files in `.cache/tmp/`, fully flushed and synced to disk via `fsync` (`sync_all`), and committed via atomic rename (`fs::rename`).
+- **Deduplication Race Safety**: When two processes compute identical outputs simultaneously, both write temporary files and rename to the same CAS path. The destination object is guaranteed to be 100% intact and deduplicated to a single physical file.
+- **Zero Partial Reads & Clean Tmp Invariant**: Other processes cannot observe partial or corrupted files because writes occur in `.tmp/` before the atomic rename. Competing temporary files are automatically purged.
+
 ---
 
 ## Workspace Architecture
