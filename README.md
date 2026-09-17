@@ -585,6 +585,34 @@ Creates and validates the local cache environment:
 - **Validate Storage**: Performs an atomic probe to confirm filesystem writability and storage integrity.
 - **Print Configuration Summary**: Outputs clear, human-readable layout summary or structured JSON (`--json`).
 
+### `dcc run` (Milestone 8.3)
+
+Executes computations through content-addressed caching:
+
+```bash
+dcc run \
+  --input src/schema.json \
+  --output generated/client.rs \
+  -- generator src/schema.json
+```
+
+#### Execution Lifecycle
+```text
+calculate key
+→ lookup
+→ HIT: restore
+→ MISS: execute
+→ validate
+→ store
+```
+
+1. **Calculate Key**: Hashes declared inputs, normalizes arguments, environment, tool identity, and platform runtime to form a canonical SHA-256 `CacheKey`.
+2. **Lookup**: Checks CAS storage for matching `CacheEntry`.
+3. **HIT: Restore**: Safely restores all declared output artifacts via atomic staging and re-streams stdout/stderr without re-running the command (`execution_time_ms = 0`).
+4. **MISS: Execute**: Spawns command, captures stdout/stderr, monitors exit code.
+5. **Validate**: Confirms all declared required output files exist and are intact.
+6. **Store**: Hashes outputs into CAS objects, writes `CacheEntry` JSON atomically, and records execution metadata.
+
 ### Stable Exit Codes
 - `0`: Success / Cache HIT
 - `1`: Computation failed / Cache entry not found

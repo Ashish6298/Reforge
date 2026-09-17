@@ -125,7 +125,7 @@ pub enum CacheCommands {
     Stats,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct RunArgs {
     #[arg(short, long = "input", action = clap::ArgAction::Append, help = "Declared input files")]
     pub inputs: Vec<String>,

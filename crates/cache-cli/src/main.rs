@@ -635,4 +635,70 @@ mod tests {
         assert!(handle_clean(&storage, Some(key.as_str()), false).is_ok());
         assert!(handle_clean(&storage, None, true).is_ok());
     }
+
+    #[test]
+    fn test_cli_handle_run_hit_and_miss_lifecycle() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = StorageConfig {
+            root_dir: temp_dir.path().to_path_buf(),
+            max_size_bytes: Some(10 * 1024 * 1024 * 1024),
+        };
+        let storage = CasStorage::new(config).unwrap();
+        storage.init_dirs().unwrap();
+
+        let ws_dir = tempfile::tempdir().unwrap();
+        let input_path = ws_dir.path().join("input.txt");
+        let output_path = ws_dir.path().join("output.txt");
+        fs::write(&input_path, b"milestone 8.3 run payload").unwrap();
+
+        #[cfg(windows)]
+        let cmd = vec![
+            "powershell.exe".to_string(),
+            "-Command".to_string(),
+            format!(
+                "Copy-Item '{}' -Destination '{}'",
+                input_path.display(),
+                output_path.display()
+            ),
+        ];
+
+        #[cfg(not(windows))]
+        let cmd = vec![
+            "cp".to_string(),
+            input_path.to_str().unwrap().to_string(),
+            output_path.to_str().unwrap().to_string(),
+        ];
+
+        let run_args = RunArgs {
+            inputs: vec![input_path.to_str().unwrap().to_string()],
+            outputs: vec![output_path.to_str().unwrap().to_string()],
+            env: vec![],
+            operation: "copy_test_8_3".to_string(),
+            policy: "read-write".to_string(),
+            explain: true,
+            command: cmd.clone(),
+        };
+
+        // 1. MISS execution
+        let run_res_1 = handle_run(&storage, run_args.clone(), false);
+        assert!(run_res_1.is_ok());
+        assert!(output_path.is_file());
+        assert_eq!(
+            fs::read(&output_path).unwrap(),
+            b"milestone 8.3 run payload"
+        );
+
+        // Delete generated output to verify HIT restoration
+        fs::remove_file(&output_path).unwrap();
+        assert!(!output_path.exists());
+
+        // 2. HIT restoration
+        let run_res_2 = handle_run(&storage, run_args, true);
+        assert!(run_res_2.is_ok());
+        assert!(output_path.is_file());
+        assert_eq!(
+            fs::read(&output_path).unwrap(),
+            b"milestone 8.3 run payload"
+        );
+    }
 }
