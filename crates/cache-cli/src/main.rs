@@ -9,7 +9,7 @@ use std::time::Duration;
 use walkdir::WalkDir;
 
 mod cli;
-use cli::{CacheCommands, Cli, Commands, RunArgs};
+use cli::{CacheCommands, Cli, Commands, ExitCode, RunArgs};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -138,7 +138,7 @@ fn handle_init(storage: &CasStorage, max_size_str: Option<&str>, json: bool) -> 
 fn handle_run(storage: &CasStorage, args: RunArgs, json: bool) -> Result<()> {
     if args.command.is_empty() {
         eprintln!("Error: No command specified to run.");
-        std::process::exit(5);
+        ExitCode::InvalidArguments.exit();
     }
 
     let cmd_exe = &args.command[0];
@@ -305,7 +305,7 @@ fn handle_inspect(storage: &CasStorage, key_str: &str, json: bool) -> Result<()>
             } else {
                 println!("No cache entry found for key: {}", key_str);
             }
-            std::process::exit(1);
+            ExitCode::ComputationFailed.exit();
         }
     }
     Ok(())
@@ -394,7 +394,7 @@ fn handle_verify(storage: &CasStorage, json: bool) -> Result<()> {
     }
 
     if corrupted > 0 {
-        std::process::exit(4);
+        ExitCode::IntegrityFailure.exit();
     }
 
     Ok(())
@@ -563,7 +563,7 @@ fn handle_config(storage: &CasStorage, get_key: Option<&str>, json: bool) -> Res
                         other
                     );
                 }
-                std::process::exit(5);
+                ExitCode::InvalidArguments.exit();
             }
         }
     } else if json {
@@ -793,5 +793,15 @@ mod tests {
         // 8. dcc clean --json
         assert!(handle_clean(&storage, Some(key.as_str()), true).is_ok());
         assert!(handle_clean(&storage, None, true).is_ok());
+    }
+
+    #[test]
+    fn test_cli_stable_exit_codes() {
+        assert_eq!(ExitCode::Success.as_i32(), 0);
+        assert_eq!(ExitCode::ComputationFailed.as_i32(), 1);
+        assert_eq!(ExitCode::InvalidConfiguration.as_i32(), 2);
+        assert_eq!(ExitCode::CacheError.as_i32(), 3);
+        assert_eq!(ExitCode::IntegrityFailure.as_i32(), 4);
+        assert_eq!(ExitCode::InvalidArguments.as_i32(), 5);
     }
 }

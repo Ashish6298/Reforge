@@ -675,13 +675,18 @@ dcc clean --json
 
 Enables seamless integration with CI/CD runners, build automation pipelines, and metrics aggregators.
 
-### Stable Exit Codes
-- `0`: Success / Cache HIT
-- `1`: Computation failed / Cache entry not found
-- `2`: Invalid configuration
-- `3`: Cache storage or I/O error
-- `4`: Cryptographic or metadata integrity failure
-- `5`: Invalid CLI arguments or unrecognized option
+### Stable Exit Codes (Milestone 8.7)
+
+DCC implements documented, stable exit codes for deterministic process orchestration:
+
+| Exit Code | Constant / Identifier | Meaning & Triggers |
+| :--- | :--- | :--- |
+| `0` | `ExitCode::Success` | Clean execution, successful cache HIT restoration, or valid maintenance operation |
+| `1` | `ExitCode::ComputationFailed` | Target computation process exited with non-zero code, or cache entry key not found during inspect |
+| `2` | `ExitCode::InvalidConfiguration` | Invalid configuration parameters or unparseable max size string |
+| `3` | `ExitCode::CacheError` | Storage system I/O error or permission denied |
+| `4` | `ExitCode::IntegrityFailure` | Corrupted CAS object detected, hash mismatch, or invalid computation entry integrity |
+| `5` | `ExitCode::InvalidArguments` | Missing required CLI arguments, unrecognized command options, or invalid subcommands |
 
 ---
 

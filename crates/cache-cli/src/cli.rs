@@ -1,6 +1,36 @@
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
+/// Documented stable CLI exit codes for `dcc`
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+#[allow(dead_code)]
+pub enum ExitCode {
+    /// 0 = success / cache hit
+    Success = 0,
+    /// 1 = computation failed / cache entry not found
+    ComputationFailed = 1,
+    /// 2 = invalid configuration
+    InvalidConfiguration = 2,
+    /// 3 = cache storage or I/O error
+    CacheError = 3,
+    /// 4 = cryptographic or metadata integrity failure
+    IntegrityFailure = 4,
+    /// 5 = invalid arguments or unrecognized option
+    InvalidArguments = 5,
+}
+
+#[allow(dead_code)]
+impl ExitCode {
+    pub fn as_i32(self) -> i32 {
+        self as i32
+    }
+
+    pub fn exit(self) -> ! {
+        std::process::exit(self as i32)
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "dcc", version, about = "Developer Computation Cache", long_about = None)]
 pub struct Cli {
