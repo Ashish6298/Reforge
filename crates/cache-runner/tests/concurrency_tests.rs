@@ -418,3 +418,120 @@ fn test_milestone_6_2_concurrent_entry_writes_atomic_safety() {
     let mut tmp_entries = std::fs::read_dir(env.storage.tmp_dir()).unwrap();
     assert!(tmp_entries.next().is_none());
 }
+
+#[test]
+fn test_milestone_6_3_duplicate_computation_avoidance_comprehensive() {
+    use std::sync::Barrier;
+
+    let env = Arc::new(TestEnv::new().unwrap());
+
+    // Create shared execution tracking file in a common directory
+    let counter_dir = tempfile::tempdir().unwrap();
+    let counter_file = counter_dir.path().join("execution_counter.log");
+    let counter_file_str = counter_file.to_str().unwrap().replace('\\', "/");
+
+    // Command sleeps for 200ms and appends a line to execution_counter.log
+    #[cfg(windows)]
+    let (cmd, args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            format!(
+                "Start-Sleep -Milliseconds 200; Add-Content -Path '{}' -Value 'EXEC_ENTRY'; [System.IO.File]::WriteAllText('output.txt', 'EXPENSIVE_COMPUTATION_OUTPUT')",
+                counter_file_str
+            ),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd, args) = (
+        "sh",
+        vec![
+            "-c".to_string(),
+            format!(
+                "sleep 0.2 && echo 'EXEC_ENTRY' >> '{}' && echo -n 'EXPENSIVE_COMPUTATION_OUTPUT' > output.txt",
+                counter_file_str
+            ),
+        ],
+    );
+
+    let num_threads = 6;
+    let barrier = Arc::new(Barrier::new(num_threads));
+    let mut handles = Vec::new();
+
+    for thread_idx in 0..num_threads {
+        let env_clone = Arc::clone(&env);
+        let barrier_clone = Arc::clone(&barrier);
+        let cmd_clone = cmd.to_string();
+        let args_clone = args.clone();
+
+        let handle = thread::spawn(move || {
+            let worker_temp = tempfile::tempdir().unwrap();
+            let worker_dir = worker_temp.path().to_path_buf();
+
+            let spec = dcc_runner::CommandSpec::builder(cmd_clone)
+                .args(args_clone)
+                .current_dir(&worker_dir)
+                .output_path("output.txt")
+                .build()
+                .unwrap();
+
+            let engine = RunnerEngine::new(
+                &env_clone.storage,
+                EngineOptions {
+                    working_dir: worker_dir.clone(),
+                    lock_timeout: std::time::Duration::from_secs(30),
+                    ..Default::default()
+                },
+            );
+
+            // Synchronize all threads to start simultaneously on an empty cache
+            barrier_clone.wait();
+
+            let res = engine
+                .execute_command(&spec)
+                .unwrap_or_else(|e| panic!("Thread {} failed: {}", thread_idx, e));
+
+            // Verify output was correctly created or restored
+            let out_data = std::fs::read(worker_dir.join("output.txt")).unwrap();
+            assert_eq!(
+                String::from_utf8_lossy(&out_data).trim(),
+                "EXPENSIVE_COMPUTATION_OUTPUT"
+            );
+
+            res.status
+        });
+        handles.push(handle);
+    }
+
+    let mut miss_count = 0;
+    let mut hit_count = 0;
+
+    for handle in handles {
+        match handle.join().unwrap() {
+            ExecutionStatus::Miss => miss_count += 1,
+            ExecutionStatus::Hit => hit_count += 1,
+            _ => {}
+        }
+    }
+
+    // Invariants:
+    // 1. Exactly 1 thread executes the expensive computation (MISS)
+    // 2. All remaining threads wait on lock, re-check cache, and obtain a HIT
+    assert_eq!(
+        miss_count, 1,
+        "Exactly 1 thread should execute the computation"
+    );
+    assert_eq!(
+        hit_count,
+        num_threads - 1,
+        "All other threads must receive a cache HIT after waiting on lock"
+    );
+
+    // 3. The underlying expensive command ran exactly 1 time
+    let counter_content = std::fs::read_to_string(&counter_file).unwrap();
+    let execution_runs = counter_content.lines().filter(|l| !l.is_empty()).count();
+    assert_eq!(
+        execution_runs, 1,
+        "Underlying expensive command must run exactly once across all competing threads"
+    );
+}

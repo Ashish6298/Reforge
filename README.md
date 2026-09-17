@@ -410,6 +410,26 @@ Terminal C -> computation Y
 - **Deduplication Race Safety**: When two processes compute identical outputs simultaneously, both write temporary files and rename to the same CAS path. The destination object is guaranteed to be 100% intact and deduplicated to a single physical file.
 - **Zero Partial Reads & Clean Tmp Invariant**: Other processes cannot observe partial or corrupted files because writes occur in `.tmp/` before the atomic rename. Competing temporary files are automatically purged.
 
+### Duplicate Computation Avoidance (Milestone 6.3)
+
+When multiple processes or threads simultaneously miss the same computation key, DCC coordinates execution using per-key computation locks (`ComputationLock`) to prevent redundant work:
+
+```text
+A -> MISS                    B -> MISS
+      ↓                            ↓
+A obtains lock               B waits on lock
+A executes command                 :
+A stores result to CAS             :
+A releases lock                    ↓
+                             B acquires lock
+                             B re-checks cache
+                             B receives HIT (0 ms)
+```
+
+- **Locking Mechanism**: Advisory file locking via `fs2` on `.cache/locks/<key>.lock` with RAII lock release and configurable timeouts.
+- **Secondary Cache Re-check**: Upon acquiring the lock, `RunnerEngine` immediately re-checks the cache before executing the command.
+- **Deduplicated Execution**: Guaranteed that only 1 process runs the command while all other waiting processes receive instant cache hits and restore output artifacts into their respective workspaces.
+
 ---
 
 ## Workspace Architecture
