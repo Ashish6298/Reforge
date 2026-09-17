@@ -210,7 +210,7 @@ fn handle_run(storage: &CasStorage, args: RunArgs, json: bool) -> Result<()> {
                 );
                 if args.explain {
                     if let Some(reason) = &result.miss_reason {
-                        println!("Reason: {}", reason);
+                        println!("\n{}", reason.format_explain());
                     }
                 }
                 if !result.stdout.is_empty() {

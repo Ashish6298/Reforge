@@ -719,6 +719,28 @@ DCC tracks granular lifecycle timings for both cache misses and cache hits:
 - **`time saved` (`time_saved_ms`)**: Net time saved on a cache hit, calculated as:
   $$\text{Time Saved} = \text{Execution Time} - (\text{Lookup Time} + \text{Restore Time})$$
 
+### Explain Mode (Milestone 9.3)
+
+With `dcc run --explain`, developers get clear, actionable root-cause analysis answering *"Why didn't my cache work?"*:
+
+```text
+Cache lookup
+
+Result: MISS
+
+Reason:
+  input changed
+
+Changed:
+  src/parser.rs
+
+Previous:
+  sha256: abc...
+
+Current:
+  sha256: def...
+```
+
 ---
 
 ## CLI Usage
