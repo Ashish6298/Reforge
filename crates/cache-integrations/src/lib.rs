@@ -390,4 +390,115 @@ mod tests {
             b"rlib_compiled_binary_payload"
         );
     }
+
+    #[test]
+    fn test_milestone_11_3_build_demonstration_reproducible() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache_dir = temp_dir.path().join(".cache");
+        let ws_dir = temp_dir.path().join("ws");
+        std::fs::create_dir_all(&ws_dir).unwrap();
+
+        let cache = Cache::open(&cache_dir).unwrap();
+        let integration = GenericIntegration::from_cache(&cache, &ws_dir);
+
+        let src_file = ws_dir.join("calc.rs");
+        let out_file = ws_dir.join("calc.bin");
+        std::fs::write(&src_file, b"pub fn calculate() -> i32 { 42 }").unwrap();
+
+        #[cfg(windows)]
+        let (cmd, args) = (
+            "powershell.exe",
+            vec![
+                "-Command".to_string(),
+                format!(
+                    "Set-Content -Path '{}' -Value 'calc_v1_payload'",
+                    out_file.display()
+                ),
+            ],
+        );
+        #[cfg(not(windows))]
+        let (cmd, args) = (
+            "sh",
+            vec![
+                "-c".to_string(),
+                format!("echo 'calc_v1_payload' > '{}'", out_file.display()),
+            ],
+        );
+
+        let action_1 = BuildAction::builder()
+            .compiler(cmd)
+            .arguments(args.clone())
+            .source_file(&src_file)
+            .unwrap()
+            .compiler_version("rustc 1.80.0")
+            .target("x86_64-pc-windows-msvc")
+            .output("calc.bin", true)
+            .build()
+            .unwrap();
+
+        // 1. Build #1: MISS -> compile -> store
+        let res1 = integration.execute_build_action(action_1.clone()).unwrap();
+        assert_eq!(res1.status, ExecutionStatus::Miss);
+        assert!(out_file.is_file());
+        assert_eq!(
+            std::fs::read(&out_file).unwrap().trim_ascii(),
+            b"calc_v1_payload"
+        );
+
+        // Delete output
+        std::fs::remove_file(&out_file).unwrap();
+        assert!(!out_file.exists());
+
+        // 2. Build #2: HIT -> restore
+        let res2 = integration.execute_build_action(action_1.clone()).unwrap();
+        assert_eq!(res2.status, ExecutionStatus::Hit);
+        assert_eq!(res1.key, res2.key);
+        assert!(out_file.is_file());
+        assert_eq!(
+            std::fs::read(&out_file).unwrap().trim_ascii(),
+            b"calc_v1_payload"
+        );
+
+        // 3. Modify source file -> Build #3: MISS -> compile -> store
+        std::fs::write(&src_file, b"pub fn calculate() -> i32 { 100 }").unwrap();
+        #[cfg(windows)]
+        let (cmd_v2, args_v2) = (
+            "powershell.exe",
+            vec![
+                "-Command".to_string(),
+                format!(
+                    "Set-Content -Path '{}' -Value 'calc_v2_payload'",
+                    out_file.display()
+                ),
+            ],
+        );
+        #[cfg(not(windows))]
+        let (cmd_v2, args_v2) = (
+            "sh",
+            vec![
+                "-c".to_string(),
+                format!("echo 'calc_v2_payload' > '{}'", out_file.display()),
+            ],
+        );
+
+        let action_3 = BuildAction::builder()
+            .compiler(cmd_v2)
+            .arguments(args_v2)
+            .source_file(&src_file)
+            .unwrap()
+            .compiler_version("rustc 1.80.0")
+            .target("x86_64-pc-windows-msvc")
+            .output("calc.bin", true)
+            .build()
+            .unwrap();
+
+        let res3 = integration.execute_build_action(action_3).unwrap();
+        assert_eq!(res3.status, ExecutionStatus::Miss);
+        assert_ne!(res1.key, res3.key);
+        assert!(out_file.is_file());
+        assert_eq!(
+            std::fs::read(&out_file).unwrap().trim_ascii(),
+            b"calc_v2_payload"
+        );
+    }
 }

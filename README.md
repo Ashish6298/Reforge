@@ -881,6 +881,9 @@ cargo run --example cached_transform
 
 # 4. Rust Compiler Build Action Integration (Source + Compiler Config + Tool Identity)
 cargo run --example cached_rust_build
+
+# 5. Milestone 11.3 Reproducible Build Demonstration (Build #1 MISS -> Build #2 HIT -> Build #3 Source Mod MISS)
+cargo run --example build_demonstration
 ```
 
 Each example illustrates:

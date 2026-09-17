@@ -33,3 +33,7 @@ path = "../../examples/cached_transform.rs"
 name = "cached_rust_build"
 path = "../../examples/cached_rust_build.rs"
 
+[[example]]
+name = "build_demonstration"
+path = "../../examples/build_demonstration.rs"
+
