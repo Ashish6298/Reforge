@@ -49,5 +49,10 @@ path = "../../examples/performance_benchmarks.rs"
 name = "large_files_benchmark"
 path = "../../examples/large_files_benchmark.rs"
 
+[[example]]
+name = "large_cache_benchmark"
+path = "../../examples/large_cache_benchmark.rs"
+
+
 
 

@@ -771,4 +771,39 @@ mod tests {
         assert!(restored_file.is_file());
         assert_eq!(std::fs::metadata(&restored_file).unwrap().len(), size_bytes);
     }
+
+    #[test]
+    fn test_milestone_13_3_large_cache_scalability() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache_dir = temp_dir.path().join(".dcc_cache");
+        let cache = Cache::open(&cache_dir).unwrap();
+
+        let num_entries = 100;
+        let mut keys = Vec::with_capacity(num_entries);
+
+        for i in 0..num_entries {
+            let digest_i = Digest::hash_bytes(format!("input_payload_{}", i).as_bytes());
+            let comp = Computation::builder_with("bench_op", "compiler")
+                .input(format!("src/input_{}.rs", i), digest_i, 50)
+                .build()
+                .unwrap();
+            let key = comp.compute_key().unwrap();
+            let entry = CacheEntry::new(key.clone(), comp, vec![], ExecutionMetadata::default());
+            cache.store(&entry).unwrap();
+            keys.push(key);
+        }
+
+        // Verify point lookup efficiency across sharded storage
+        for k in &keys {
+            assert!(cache.lookup(k).unwrap().is_some());
+        }
+
+        // Verify negative lookup
+        let fake_key = CacheKey::from_bytes(b"non_existent");
+        assert!(cache.lookup(&fake_key).unwrap().is_none());
+
+        // Verify storage stats collection
+        let stats = dcc_storage::stats::StorageStats::collect(cache.storage()).unwrap();
+        assert_eq!(stats.total_entries, num_entries);
+    }
 }
