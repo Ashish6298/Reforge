@@ -15,15 +15,19 @@
 //! - Final Decision: GO / NO-GO
 
 use std::fs;
-use std::path::Path;
+use std::path::PathBuf;
 
 #[test]
 fn test_audit_20_7_release_audit_report_contents() {
-    let report_path = Path::new("docs/v1.0.0-release-audit.md");
-    assert!(
-        report_path.is_file(),
-        "Release audit document must exist at docs/v1.0.0-release-audit.md"
-    );
+    let candidates = [
+        PathBuf::from("docs/v1.0.0-release-audit.md"),
+        PathBuf::from("../../docs/v1.0.0-release-audit.md"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/v1.0.0-release-audit.md"),
+    ];
+    let report_path = candidates
+        .iter()
+        .find(|p| p.is_file())
+        .expect("Release audit document must exist at docs/v1.0.0-release-audit.md");
 
     let content = fs::read_to_string(report_path).expect("Read release audit report");
 
