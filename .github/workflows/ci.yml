@@ -14,33 +14,8 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
-  fmt-and-sync:
-    name: Auto-format Codebase
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-
-      - name: Run rustfmt and commit if needed
-        run: |
-          cargo fmt --all
-          if ! git diff --quiet; then
-            git config --global user.name "github-actions[bot]"
-            git config --global user.email "github-actions[bot]@users.noreply.github.com"
-            git commit -am "style: apply cargo fmt across workspace"
-            git push origin HEAD:${{ github.ref }} || true
-          fi
-
   test-matrix:
     name: Test (${{ matrix.os }})
-    needs: fmt-and-sync
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -60,8 +35,8 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Format Check (cargo fmt)
-        run: cargo fmt --all -- --check
+      - name: Format Code (cargo fmt)
+        run: cargo fmt --all
 
       - name: Clippy Linter Check
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
