@@ -37,7 +37,11 @@ fn test_audit_20_6_path_traversal_rejection() {
 
     for p in malicious_paths {
         let is_safe = PathUtils::is_safe_relative_path(p);
-        assert!(!is_safe, "PathUtils must reject path traversal attempt: {}", p);
+        assert!(
+            !is_safe,
+            "PathUtils must reject path traversal attempt: {}",
+            p
+        );
     }
 }
 
@@ -59,7 +63,10 @@ fn test_audit_20_6_cache_poisoning_tamper_detection() {
 
     // Verify CAS integrity validation rejects the poisoned file
     let verify = env.storage.verify_object(&digest).unwrap();
-    assert!(!verify.is_valid, "Integrity validation must detect and fail poisoned CAS objects");
+    assert!(
+        !verify.is_valid,
+        "Integrity validation must detect and fail poisoned CAS objects"
+    );
 }
 
 // ============================================================================

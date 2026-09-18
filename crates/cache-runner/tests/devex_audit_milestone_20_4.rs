@@ -107,6 +107,9 @@ fn test_audit_20_4_configuration_predictable() {
         .with_auto_cleanup(true);
 
     assert_eq!(custom_cfg.root, PathBuf::from("/tmp/custom_cache"));
-    assert_eq!(custom_cfg.max_size.unwrap().as_bytes(), 5 * 1024 * 1024 * 1024);
+    assert_eq!(
+        custom_cfg.max_size.unwrap().as_bytes(),
+        5 * 1024 * 1024 * 1024
+    );
     assert!(custom_cfg.auto_cleanup);
 }

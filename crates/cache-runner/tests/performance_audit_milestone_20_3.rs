@@ -22,7 +22,8 @@ use tempfile::tempdir;
 #[test]
 fn test_audit_20_3_measure_performance_metrics() {
     let env = TestEnv::new().unwrap();
-    env.create_input_file("perf_in.txt", b"PERFORMANCE_TEST_INPUT").unwrap();
+    env.create_input_file("perf_in.txt", b"PERFORMANCE_TEST_INPUT")
+        .unwrap();
 
     #[cfg(windows)]
     let (cmd, args) = (
@@ -80,7 +81,9 @@ fn test_audit_20_3_measure_performance_metrics() {
     let out_digest = &entry.outputs[0].digest;
     let restore_target = env.workspace_dir.path().join("perf_restored.txt");
     let start_restore = Instant::now();
-    env.storage.restore_object(out_digest, &restore_target).unwrap();
+    env.storage
+        .restore_object(out_digest, &restore_target)
+        .unwrap();
     let restore_duration = start_restore.elapsed();
     assert!(restore_target.exists());
 
@@ -103,7 +106,9 @@ fn test_audit_20_3_measure_performance_metrics() {
 
     let large_restore_target = env.workspace_dir.path().join("large_restored.bin");
     let start_large_restore = Instant::now();
-    env.storage.restore_object(&large_digest, &large_restore_target).unwrap();
+    env.storage
+        .restore_object(&large_digest, &large_restore_target)
+        .unwrap();
     let large_restore_duration = start_large_restore.elapsed();
 
     // 7. Large cache measurement (500 entries lookup & index traversal)
@@ -112,12 +117,7 @@ fn test_audit_20_3_measure_performance_metrics() {
     for i in 0..500 {
         let comp = Computation::new("bench", vec![format!("arg_{}", i)]);
         let key = comp.compute_key().unwrap();
-        let entry = CacheEntry::new(
-            key,
-            comp,
-            vec![],
-            ExecutionMetadata::default(),
-        );
+        let entry = CacheEntry::new(key, comp, vec![], ExecutionMetadata::default());
         storage_large.put_entry(entry).unwrap();
     }
     let start_large_cache_lookup = Instant::now();

@@ -8,7 +8,9 @@
 //! 6. Cache deletion (re-creating directory structure on the fly)
 //! 7. Large cache (eviction enforcement under high storage load)
 
-use dcc_core::{ByteSize, CacheEntry, CacheError, Computation, Digest, ExecutionMetadata, OutputManifestItem};
+use dcc_core::{
+    ByteSize, CacheEntry, CacheError, Computation, Digest, ExecutionMetadata, OutputManifestItem,
+};
 use dcc_runner::{CommandSpec, EngineOptions, ExecutionStatus, RunnerEngine};
 use dcc_storage::{CasStorage, Storage, StorageConfig};
 use dcc_test_utils::TestEnv;
@@ -25,7 +27,8 @@ use tempfile::tempdir;
 #[test]
 fn test_audit_20_2_process_crash_resilience() {
     let env = TestEnv::new().unwrap();
-    env.create_input_file("crash_input.txt", b"crash test").unwrap();
+    env.create_input_file("crash_input.txt", b"crash test")
+        .unwrap();
 
     #[cfg(windows)]
     let (cmd, args) = (
@@ -65,7 +68,10 @@ fn test_audit_20_2_process_crash_resilience() {
     if let Ok(r) = res {
         assert_ne!(r.exit_code, 0);
         let entry = env.storage.get_entry(&r.key).unwrap();
-        assert!(entry.is_none(), "Crashed process must not be committed to cache");
+        assert!(
+            entry.is_none(),
+            "Crashed process must not be committed to cache"
+        );
     }
 
     // Verify storage remains uncorrupted
@@ -122,7 +128,10 @@ fn test_audit_20_2_disk_failure_and_capacity_limit() {
 
     let res = engine.execute_command(&spec);
     // Command executes and returns result or handles storage limit safely without crashing
-    assert!(res.is_ok(), "Engine must safely handle storage limits without panicking");
+    assert!(
+        res.is_ok(),
+        "Engine must safely handle storage limits without panicking"
+    );
 }
 
 // ============================================================================
@@ -136,7 +145,11 @@ fn test_audit_20_2_partial_write_atomicity() {
     let digest = Digest::hash_bytes(data);
 
     // Simulate an interrupted write in temporary staging area
-    let tmp_path = env.storage.root().join("objects").join(format!(".tmp_partial_{}", digest));
+    let tmp_path = env
+        .storage
+        .root()
+        .join("objects")
+        .join(format!(".tmp_partial_{}", digest));
     fs::create_dir_all(tmp_path.parent().unwrap()).unwrap();
     fs::write(&tmp_path, b"INCOMPLETE_PARTIAL_BYTES").unwrap();
 
@@ -158,7 +171,8 @@ fn test_audit_20_2_partial_write_atomicity() {
 #[test]
 fn test_audit_20_2_concurrent_processes_and_locking() {
     let env = Arc::new(TestEnv::new().unwrap());
-    env.create_input_file("concurrent_input.txt", b"shared input").unwrap();
+    env.create_input_file("concurrent_input.txt", b"shared input")
+        .unwrap();
 
     let num_threads = 6;
     let barrier = Arc::new(Barrier::new(num_threads));
@@ -236,7 +250,10 @@ fn test_audit_20_2_cache_corruption_detection() {
 
     // Verify corruption detection
     let verify_res = env.storage.verify_object(&digest).unwrap();
-    assert!(!verify_res.is_valid, "Corrupted object must fail integrity verification");
+    assert!(
+        !verify_res.is_valid,
+        "Corrupted object must fail integrity verification"
+    );
 }
 
 // ============================================================================
@@ -256,7 +273,10 @@ fn test_audit_20_2_cache_deletion_and_recovery() {
 
     // Reconnect / initialize storage on deleted location
     let storage2 = CasStorage::new(StorageConfig::new(&cache_dir)).unwrap();
-    assert!(cache_dir.exists(), "Storage must auto-create directories on initialization");
+    assert!(
+        cache_dir.exists(),
+        "Storage must auto-create directories on initialization"
+    );
 
     let stats = storage2.stats().unwrap();
     assert_eq!(stats.entry_count, 0);

@@ -30,12 +30,16 @@ use tempfile::tempdir;
 #[test]
 fn test_audit_20_1_same_computation_same_key() {
     let mut comp1 = Computation::new("cargo", vec!["test".to_string()]);
-    comp1.env_vars.insert("RUST_BACKTRACE".to_string(), "1".to_string());
+    comp1
+        .env_vars
+        .insert("RUST_BACKTRACE".to_string(), "1".to_string());
     comp1.add_input_file("src/lib.rs", Digest::hash_bytes(b"fn main() {}"), 12);
     comp1.add_output_file("target/out.bin", false);
 
     let mut comp2 = Computation::new("cargo", vec!["test".to_string()]);
-    comp2.env_vars.insert("RUST_BACKTRACE".to_string(), "1".to_string());
+    comp2
+        .env_vars
+        .insert("RUST_BACKTRACE".to_string(), "1".to_string());
     comp2.add_input_file("src/lib.rs", Digest::hash_bytes(b"fn main() {}"), 12);
     comp2.add_output_file("target/out.bin", false);
 
@@ -75,7 +79,8 @@ fn test_audit_20_1_changed_input_causes_cache_miss() {
         "powershell.exe",
         vec![
             "-Command".to_string(),
-            "[System.IO.File]::WriteAllText('out.txt', (Get-Content input.txt) + '_processed')".to_string(),
+            "[System.IO.File]::WriteAllText('out.txt', (Get-Content input.txt) + '_processed')"
+                .to_string(),
         ],
     );
     #[cfg(not(windows))]
@@ -112,7 +117,8 @@ fn test_audit_20_1_changed_input_causes_cache_miss() {
     assert_eq!(res2.status, ExecutionStatus::Hit);
 
     // Modify input file content
-    env.create_input_file("input.txt", b"v2_data_changed").unwrap();
+    env.create_input_file("input.txt", b"v2_data_changed")
+        .unwrap();
 
     // 3rd Execution: Changed input -> Cache MISS
     let res3 = engine.execute_command(&spec).unwrap();
@@ -121,16 +127,23 @@ fn test_audit_20_1_changed_input_causes_cache_miss() {
         ExecutionStatus::Miss,
         "Audit 20.1: Changed input must trigger a cache miss"
     );
-    assert_ne!(res1.key, res3.key, "Keys must differ between input revisions");
+    assert_ne!(
+        res1.key, res3.key,
+        "Keys must differ between input revisions"
+    );
 }
 
 #[test]
 fn test_audit_20_1_changed_relevant_environment_causes_cache_miss() {
     let mut comp1 = Computation::new("gcc", vec!["-c".to_string(), "main.c".to_string()]);
-    comp1.env_vars.insert("CFLAGS".to_string(), "-O2".to_string());
+    comp1
+        .env_vars
+        .insert("CFLAGS".to_string(), "-O2".to_string());
 
     let mut comp2 = Computation::new("gcc", vec!["-c".to_string(), "main.c".to_string()]);
-    comp2.env_vars.insert("CFLAGS".to_string(), "-O3".to_string());
+    comp2
+        .env_vars
+        .insert("CFLAGS".to_string(), "-O3".to_string());
 
     let key1 = comp1.compute_key().unwrap();
     let key2 = comp2.compute_key().unwrap();
@@ -169,7 +182,8 @@ fn test_audit_20_1_changed_tool_identity_causes_cache_miss() {
 #[test]
 fn test_audit_20_1_corrupted_cache_detected_and_safely_quarantined() {
     let env = TestEnv::new().unwrap();
-    env.create_input_file("source.c", b"int main() { return 0; }").unwrap();
+    env.create_input_file("source.c", b"int main() { return 0; }")
+        .unwrap();
 
     #[cfg(windows)]
     let (cmd, args) = (
@@ -245,7 +259,8 @@ fn test_audit_20_1_missing_cache_is_safe_miss() {
 #[test]
 fn test_audit_20_1_failed_computation_not_cached_by_default() {
     let env = TestEnv::new().unwrap();
-    env.create_input_file("fail_input.txt", b"bad code").unwrap();
+    env.create_input_file("fail_input.txt", b"bad code")
+        .unwrap();
 
     #[cfg(windows)]
     let (cmd, args) = (

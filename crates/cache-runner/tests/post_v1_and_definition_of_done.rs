@@ -8,12 +8,17 @@
 //! 6. Complete 20-Point Definition of Done Validation
 
 use dcc_core::{
-    ByteSize, CacheEntry, CacheError, CacheKey, CachePolicy, Computation, Digest, ExecutionMetadata,
-    FailurePolicy, MissReason, OutputManifestItem, ToolIdentity, TrustMode,
+    ByteSize, CacheEntry, CacheError, CacheKey, CachePolicy, Computation, Digest,
+    ExecutionMetadata, FailurePolicy, MissReason, OutputManifestItem, ToolIdentity, TrustMode,
 };
 use dcc_integrations::DccActionBuilder;
-use dcc_runner::{CommandSpec, EngineOptions, ExecutionResult, ExecutionStatus, MissExplainer, RunnerEngine};
-use dcc_storage::{BlobMetadata, CasStorage, LocalFilesystemStorage, RemoteStorage, Storage, StorageConfig, TieredCache};
+use dcc_runner::{
+    CommandSpec, EngineOptions, ExecutionResult, ExecutionStatus, MissExplainer, RunnerEngine,
+};
+use dcc_storage::{
+    BlobMetadata, CasStorage, LocalFilesystemStorage, RemoteStorage, Storage, StorageConfig,
+    TieredCache,
+};
 use dcc_test_utils::TestEnv;
 use std::collections::HashMap;
 use std::fs;
@@ -44,7 +49,9 @@ fn test_post_v1_1_advanced_diagnostics_diff_and_explain() {
     let explanation = explainer.diff_computations(&comp1, &comp2);
 
     assert!(
-        explanation.contains("compiler version") || explanation.contains("rustc") || explanation.contains("1.90"),
+        explanation.contains("compiler version")
+            || explanation.contains("rustc")
+            || explanation.contains("1.90"),
         "Advanced diagnostic diff must clearly pinpoint tool/compiler changes"
     );
 }
@@ -111,10 +118,16 @@ fn test_post_v1_4_advanced_cache_policies() {
     #[cfg(windows)]
     let (cmd, args) = (
         "powershell.exe",
-        vec!["-Command".to_string(), "[System.IO.File]::WriteAllText('out.txt', 'RES')".to_string()],
+        vec![
+            "-Command".to_string(),
+            "[System.IO.File]::WriteAllText('out.txt', 'RES')".to_string(),
+        ],
     );
     #[cfg(not(windows))]
-    let (cmd, args) = ("sh", vec!["-c".to_string(), "echo -n 'RES' > out.txt".to_string()]);
+    let (cmd, args) = (
+        "sh",
+        vec!["-c".to_string(), "echo -n 'RES' > out.txt".to_string()],
+    );
 
     let spec = CommandSpec::builder(cmd)
         .args(args)
@@ -167,7 +180,8 @@ fn test_complete_20_point_definition_of_done() {
     assert!(env.storage.root().exists());
 
     // 2. Define computation
-    env.create_input_file("input.txt", b"dod_input_data").unwrap();
+    env.create_input_file("input.txt", b"dod_input_data")
+        .unwrap();
     #[cfg(windows)]
     let (cmd, args) = (
         "powershell.exe",
@@ -179,7 +193,10 @@ fn test_complete_20_point_definition_of_done() {
     #[cfg(not(windows))]
     let (cmd, args) = (
         "sh",
-        vec!["-c".to_string(), "echo -n 'DOD_OUTPUT' > dod_out.txt".to_string()],
+        vec![
+            "-c".to_string(),
+            "echo -n 'DOD_OUTPUT' > dod_out.txt".to_string(),
+        ],
     );
 
     let spec = CommandSpec::builder(cmd)
@@ -210,7 +227,8 @@ fn test_complete_20_point_definition_of_done() {
     assert_eq!(res2.status, ExecutionStatus::Hit);
 
     // 6. Modify input -> MISS
-    env.create_input_file("input.txt", b"dod_input_data_modified").unwrap();
+    env.create_input_file("input.txt", b"dod_input_data_modified")
+        .unwrap();
     let res3 = engine.execute_command(&spec).unwrap();
     assert_eq!(res3.status, ExecutionStatus::Miss);
 
