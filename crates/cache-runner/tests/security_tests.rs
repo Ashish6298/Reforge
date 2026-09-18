@@ -238,3 +238,144 @@ fn test_milestone_14_1_tampered_output_staging_rollback() {
         "Destination file must never be materialized on integrity error"
     );
 }
+
+#[test]
+fn test_milestone_14_2_path_traversal_relative_parent_escape_rejection() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let workspace = temp_dir.path().join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+
+    // Critical test targets from specification: "../../important-file", "..\..\important-file"
+    let malicious_escape_paths = vec![
+        "../../important-file",
+        r"..\..\important-file",
+        "../important-file",
+        r"..\important-file",
+        "sub/../../important-file",
+        "sub/dir/../../../important-file",
+        "a/b/c/../../../../escaped.txt",
+        "..",
+        "../",
+        r"..\.",
+    ];
+
+    for bad_path in malicious_escape_paths {
+        let res = dcc_core::PathUtils::sanitize_relative_path(&workspace, bad_path);
+        assert!(
+            res.is_err(),
+            "PathUtils::sanitize_relative_path must reject traversal: '{}'",
+            bad_path
+        );
+    }
+}
+
+#[test]
+fn test_milestone_14_2_path_traversal_absolute_paths_rejection() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let workspace = temp_dir.path().join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+
+    let malicious_absolute_paths = vec![
+        "/etc/passwd",
+        "/var/run/secrets.key",
+        r"C:\Windows\System32\cmd.exe",
+        r"C:\important-file",
+        "D:/secrets.txt",
+        r"\\server\share\file.txt",
+        r"\\?\C:\secret.txt",
+    ];
+
+    for abs_path in malicious_absolute_paths {
+        let res = dcc_core::PathUtils::sanitize_relative_path(&workspace, abs_path);
+        assert!(
+            res.is_err(),
+            "PathUtils::sanitize_relative_path must reject absolute or prefixed path: '{}'",
+            abs_path
+        );
+    }
+}
+
+#[test]
+fn test_milestone_14_2_path_traversal_runner_and_cache_restore_rejection() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let cache_dir = temp_dir.path().join(".dcc_cache");
+    let workspace_dir = temp_dir.path().join("workspace");
+    let sensitive_victim_dir = temp_dir.path().join("sensitive");
+    std::fs::create_dir_all(&workspace_dir).unwrap();
+    std::fs::create_dir_all(&sensitive_victim_dir).unwrap();
+
+    let victim_file = sensitive_victim_dir.join("important-file.txt");
+    std::fs::write(&victim_file, b"CRITICAL_SENSITIVE_SYSTEM_DATA").unwrap();
+
+    let cache = dcc_storage::Cache::open(&cache_dir).unwrap();
+
+    // 1. Store a CAS object payload
+    let (blob_digest, blob_size) = cache
+        .storage()
+        .store_object_bytes(b"MALICIOUS_OVERWRITE_PAYLOAD")
+        .unwrap();
+
+    // Builder rejects traversal path at build time
+    let builder_res = Computation::builder_with("exploit", "tool")
+        .input("src.txt", blob_digest.clone(), blob_size)
+        .output("../sensitive/important-file.txt", true)
+        .build();
+    assert!(
+        builder_res.is_err(),
+        "ComputationBuilder must reject escaping path declarations"
+    );
+
+    // If constructed manually, Cache::restore and OutputRestorer::restore_entry must reject
+    let malicious_entry = dcc_core::CacheEntry::new(
+        dcc_core::CacheKey::from_bytes(b"malicious_key"),
+        Computation {
+            schema_version: 1,
+            operation: "exploit".to_string(),
+            command: "tool".to_string(),
+            args: vec![],
+            inputs: vec![],
+            outputs: vec![dcc_core::OutputFile {
+                path: "../../sensitive/important-file.txt".to_string(),
+                required: true,
+            }],
+            env: std::collections::BTreeMap::new(),
+            platform: dcc_core::PlatformConstraints::default(),
+            tool: None,
+            policy: dcc_core::CachePolicy::ReadWrite,
+            working_dir: None,
+            metadata: std::collections::BTreeMap::new(),
+        },
+        vec![dcc_core::OutputManifestItem {
+            path: "../../sensitive/important-file.txt".to_string(),
+            digest: blob_digest,
+            size: blob_size,
+            is_executable: None,
+        }],
+        dcc_core::ExecutionMetadata::default(),
+    );
+
+    // 3. Attempt Cache::restore into workspace_dir
+    let restore_res = cache.restore(&malicious_entry, &workspace_dir);
+    assert!(
+        restore_res.is_err(),
+        "Cache::restore must reject output path escaping workspace"
+    );
+
+    // 4. Attempt OutputRestorer::restore_entry into workspace_dir
+    let restorer_res = dcc_runner::OutputRestorer::restore_entry(
+        cache.storage(),
+        &malicious_entry,
+        &workspace_dir,
+    );
+    assert!(
+        restorer_res.is_err(),
+        "OutputRestorer must reject output path escaping workspace"
+    );
+
+    // 5. Verify victim file was NEVER overwritten or modified
+    assert_eq!(
+        std::fs::read(&victim_file).unwrap(),
+        b"CRITICAL_SENSITIVE_SYSTEM_DATA",
+        "Sensitive file outside workspace must remain strictly intact and unpoisoned"
+    );
+}

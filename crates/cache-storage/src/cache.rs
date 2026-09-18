@@ -326,25 +326,7 @@ impl Cache {
     }
 
     fn sanitize_path(&self, base_dir: &Path, rel_path: &str) -> Result<PathBuf> {
-        let norm = rel_path.replace('\\', "/");
-        if norm.starts_with('/') || norm.starts_with("../") || norm.contains("/../") || norm == ".."
-        {
-            return Err(CacheError::PathTraversal(format!(
-                "Illegal path component in output path: {}",
-                rel_path
-            )));
-        }
-
-        let full_path = base_dir.join(rel_path);
-        if !full_path.starts_with(base_dir) {
-            return Err(CacheError::PathTraversal(format!(
-                "Path {} escapes base directory {}",
-                rel_path,
-                base_dir.display()
-            )));
-        }
-
-        Ok(full_path)
+        dcc_core::PathUtils::sanitize_relative_path(base_dir, rel_path)
     }
 }
 

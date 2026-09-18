@@ -1187,6 +1187,37 @@ DCC enforces multi-layered cryptographic verification across all access and rest
 
 ---
 
+### Path Traversal Defense (Milestone 14.2)
+
+DCC guarantees that cached output metadata can **never** restore files outside the intended workspace, preventing arbitrary file overwrite and directory escape vulnerabilities.
+
+```text
+       [ Manifest Output Path ]
+                 │
+       PathUtils::sanitize_relative_path()
+                 ├── Starts with / or C:\ ?   ──► REJECT (Absolute paths forbidden)
+                 ├── Starts with \\ or // ?   ──► REJECT (UNC network shares forbidden)
+                 ├── Injected \0 byte ?       ──► REJECT (Null byte injection forbidden)
+                 └── Depth check (.. escapes) ──► REJECT (Parent directory traversal forbidden)
+                 │
+                 ▼
+       [ Normalized Safe Workspace-Relative Path ]
+                 │
+       OutputRestorer::restore_entry()
+                 ▼
+       [ Atomic Extraction to Workspace Subdirectory ]
+```
+
+1. **Parent Directory Escape Prevention**:
+   - Rejects traversal sequences such as `../../important-file` and `..\..\escaped.txt`.
+   - Normalizes path separators cross-platform (`/` and `\`) and tracks logical descent depth; any sequence resolving above the workspace root returns `DccError::InvalidPath`.
+2. **Absolute & UNC Path Rejection**:
+   - Strictly forbids root-bound paths (e.g. `/etc/passwd`, `C:\Windows\System32\...`), drive-relative notations (`C:foo`), and network UNC shares (`\\server\share\file`).
+3. **Workspace Boundary Containment**:
+   - All restored artifacts are verified against the canonical workspace boundary prior to atomic disk placement, ensuring external directories and host environments remain completely untouched.
+
+---
+
 ## Quality Gates & Verification
 
 ```bash
