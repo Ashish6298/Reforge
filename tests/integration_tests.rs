@@ -147,3 +147,76 @@ fn test_missing_declared_output_verification() {
     );
     assert!(matches!(res.unwrap_err(), dcc_core::CacheError::MissingOutput(_)));
 }
+
+#[test]
+fn test_milestone_16_1_ci_behavior_matrix() {
+    let env = TestEnv::new().unwrap();
+    env.create_input_file("ci_source.txt", b"CI compilation source content")
+        .unwrap();
+
+    #[cfg(windows)]
+    let (cmd, args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "Copy-Item ci_source.txt -Destination ci_out.txt".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd, args) = (
+        "cp",
+        vec!["ci_source.txt".to_string(), "ci_out.txt".to_string()],
+    );
+
+    let computation = Computation::builder_with("ci-job", cmd)
+        .args(args)
+        .input("ci_source.txt", Digest::from_bytes(b""), 0)
+        .output("ci_out.txt", true)
+        .build()
+        .unwrap();
+
+    let engine = RunnerEngine::new(
+        &env.storage,
+        EngineOptions {
+            working_dir: env.workspace_dir.path().to_path_buf(),
+            ..Default::default()
+        },
+    );
+
+    // 1. Cold Run / Cache Unavailable -> Executes cleanly
+    let res_cold = engine.execute(computation.clone()).unwrap();
+    assert_eq!(res_cold.status, ExecutionStatus::Miss);
+    assert_eq!(res_cold.exit_code, 0);
+
+    // 2. Warm Run / Cache Available -> Hits cleanly
+    fs::remove_file(env.workspace_dir.path().join("ci_out.txt")).unwrap();
+    let res_warm = engine.execute(computation.clone()).unwrap();
+    assert_eq!(res_warm.status, ExecutionStatus::Hit);
+
+    // 3. Corrupted Cache -> Detects and safely falls back
+    let out_digest = &res_warm.outputs[0].digest;
+    let cas_path = env.storage.object_path(out_digest);
+    fs::write(&cas_path, b"CORRUPTED_DATA").unwrap();
+    fs::remove_file(env.workspace_dir.path().join("ci_out.txt")).unwrap();
+
+    let res_corrupted = engine.execute(computation.clone()).unwrap();
+    assert_eq!(res_corrupted.status, ExecutionStatus::Miss);
+    assert_eq!(res_corrupted.exit_code, 0);
+    assert_eq!(
+        env.read_output_file("ci_out.txt").unwrap(),
+        b"CI compilation source content"
+    );
+
+    // 4. Partially Available Cache -> Detects missing blob and falls back
+    let valid_out_digest = &res_corrupted.outputs[0].digest;
+    let valid_cas_path = env.storage.object_path(valid_out_digest);
+    if valid_cas_path.exists() {
+        fs::remove_file(&valid_cas_path).unwrap();
+    }
+    fs::remove_file(env.workspace_dir.path().join("ci_out.txt")).unwrap();
+
+    let res_partial = engine.execute(computation).unwrap();
+    assert_eq!(res_partial.status, ExecutionStatus::Miss);
+    assert_eq!(res_partial.exit_code, 0);
+}
+

@@ -1376,6 +1376,27 @@ The remote cache architecture and protocol design are detailed in [`docs/remote-
 - **Multi-Tenancy**: Namespace isolation for Action Cache metadata with cross-namespace global CAS deduplication.
 - **Failure Resilience**: Strict non-blocking guarantees; remote timeouts and failures fall back transparently to local execution without breaking builds.
 
+### CI/CD Behavioral Matrix & Automated Environments (Milestone 16.1)
+
+DCC provides robust operational guarantees across all 4 operational states in CI/CD pipelines:
+
+```text
+                               CI Pipeline Run
+                                      │
+              ┌───────────────────────┼───────────────────────┐
+              ▼                       ▼                       ▼
+      [ Warm Cache ]           [ Cold Cache ]         [ Corrupted Cache ]
+      (Cache Available)      (Cache Unavailable)      (Integrity Mismatch)
+              │                       │                       │
+         Cache HIT                Cache MISS             Quarantine Entry
+       Fast Restore            Execute & Store           Fallback Recompute
+```
+
+1. **State 1 — Cache Available (Warm Hit)**: Restores outputs with 0ms execution time, drastically reducing pipeline wall-clock time.
+2. **State 2 — Cache Unavailable (Cold Miss / Clean Runner)**: Executes computation, records outputs, and populates cache seamlessly.
+3. **State 3 — Cache Corrupted (Tampered / Invalid Data)**: Automatically detects checksum or identity mismatches, evicts damaged records, and executes cleanly without failing the job.
+4. **State 4 — Cache Partially Available (Missing Individual Blobs)**: Identifies missing artifacts in partial cache fetches and falls back to computation safely.
+
 ---
 
 

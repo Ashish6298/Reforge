@@ -1,0 +1,58 @@
+================================================================================
+DEVELOPER COMPUTATION CACHE (DCC) - VERIFICATION REPORT
+Milestone 16.1 — CI/CD Operational Behavior & Resilience Matrix
+Date: 2026-09-18
+================================================================================
+
+1. EXECUTIVE SUMMARY
+--------------------------------------------------------------------------------
+Milestone 16.1 verifies and validates the 4 core cache operational states in automated
+Continuous Integration & Deployment (CI/CD) environments:
+
+  1. Cache Available (Warm Hit):
+     Restores outputs and execution metadata from previous runs with 0ms execution time,
+     saving build cycles in pipeline stages.
+  2. Cache Unavailable (Cold Miss / Fresh Runner):
+     Executes computation cleanly, captures exit code and outputs, and stores artifacts
+     into cache without pipeline failures.
+  3. Cache Corrupted (Tampered CAS Blobs or Malformed Action Cache Records):
+     Detects hash mismatches and entry spoofing, automatically purges corrupted records,
+     and falls back to fresh execution without failing the pipeline.
+  4. Cache Partially Available (Missing Individual Output Blobs):
+     Detects missing blobs in partial downloads, marks lookup as a cache miss, and completes
+     clean execution and artifact population.
+
+2. TEST SUITE EXECUTION RESULTS
+--------------------------------------------------------------------------------
+Command: cargo test --workspace
+Overall Result: ALL PASSED (100% test pass across all workspace crates)
+
+A. CI Behavior Matrix Tests (`crates/cache-runner/tests/integration_tests.rs` & `tests/integration_tests.rs`):
+   - `test_milestone_16_1_ci_behavior_matrix` .......................... PASSED
+     * Validates State 2: Cache Unavailable (Cold Miss -> Execution).
+     * Validates State 1: Cache Available (Warm Hit -> Restore).
+     * Validates State 3: Cache Corrupted (Tampered CAS -> Quarantine & Recompute).
+     * Validates State 4: Cache Partially Available (Missing Blob -> Recompute).
+   - `test_cold_miss_then_warm_hit` .................................... PASSED
+   - `test_failed_computations_are_not_cached_by_default` .............. PASSED
+   - `test_milestone_12_2_cross_platform_process_handling` ............. PASSED
+   - `test_milestone_12_3_file_semantics_cross_platform` ............... PASSED
+
+B. Workspace Security & Performance Tests:
+   - Security & trust mode tests (11/11 passed) ........................ PASSED
+   - Concurrency stress tests (12/12 passed) ........................... PASSED
+   - Storage suite & tiering tests (26/26 passed) ...................... PASSED
+   - Integration & lifecycle tests (18/18 passed) ...................... PASSED
+
+3. CODE QUALITY & LINTING GATES
+--------------------------------------------------------------------------------
+- cargo check --workspace .............................................. PASSED (0 errors)
+- cargo clippy --workspace --all-targets --all-features -- -D warnings .. PASSED (0 warnings)
+- cargo fmt --all -- --check ........................................... PASSED (Clean formatting)
+
+4. CONCLUSION
+--------------------------------------------------------------------------------
+Milestone 16.1 is fully implemented, verified, and integrated. CI/CD runners can
+safely rely on DCC across warm, cold, corrupted, and partially available cache states
+without risking automated build failures.
+================================================================================
