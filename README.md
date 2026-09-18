@@ -1326,6 +1326,24 @@ DCC abstracts physical storage through the unified `Storage` trait, separating c
 - **Pluggable Architecture**:
   Both `LocalFilesystemStorage` and `RemoteStorage` implement the unified `Storage` interface (`put`, `put_file`, `get`, `get_bytes`, `exists`, `delete`, `metadata`, `verify`), enabling seamless backend switching via dynamic (`Box<dyn Storage>`) or static dispatch without changing computation models.
 
+### Backend Capabilities & Batch Acceleration (Milestone 15.2)
+
+DCC formalizes backend capability descriptors and batch operation primitives:
+
+```text
+                     StorageCapabilities
+ ┌───────────┬───────────┬───────────┬───────────┬───────────┬───────────┬───────────┐
+ │   read    │   write   │  delete   │  exists   │  stream   │ batch_get │ batch_put │
+ └───────────┴───────────┴───────────┴───────────┴───────────┴───────────┴───────────┘
+```
+
+1. **Explicit Capability Descriptors (`StorageCapabilities`)**:
+   - Backends expose fine-grained flags via `storage.capabilities()`: `read`, `write`, `delete`, `exists`, `stream`, `batch_get`, `batch_put`.
+   - Pre-configured presets include `StorageCapabilities::all()`, `StorageCapabilities::read_only()`, and `StorageCapabilities::basic()`.
+2. **Batch I/O Acceleration**:
+   - `batch_put(&[&[u8]]) -> Result<Vec<(Digest, u64)>>`: Computes cryptographic digests and stores multiple objects in a single batch pass.
+   - `batch_get(&[Digest]) -> Result<Vec<(Digest, Option<Vec<u8>>)>>`: Queries and retrieves multiple blobs concurrently, returning `None` for un-cached objects without aborting the entire request.
+
 ---
 
 

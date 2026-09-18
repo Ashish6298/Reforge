@@ -2,6 +2,68 @@ use dcc_core::{Digest, Result};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+/// Backend storage capabilities descriptor (Milestone 15.2).
+///
+/// Defines fine-grained capability flags supported by a storage backend:
+/// `read`, `write`, `delete`, `exists`, `stream`, `batch_get`, `batch_put`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StorageCapabilities {
+    pub read: bool,
+    pub write: bool,
+    pub delete: bool,
+    pub exists: bool,
+    pub stream: bool,
+    pub batch_get: bool,
+    pub batch_put: bool,
+}
+
+impl StorageCapabilities {
+    /// Full capabilities supported by standard read-write storage backends.
+    pub const fn all() -> Self {
+        Self {
+            read: true,
+            write: true,
+            delete: true,
+            exists: true,
+            stream: true,
+            batch_get: true,
+            batch_put: true,
+        }
+    }
+
+    /// Read-only capabilities (read, exists, stream, batch_get).
+    pub const fn read_only() -> Self {
+        Self {
+            read: true,
+            write: false,
+            delete: false,
+            exists: true,
+            stream: true,
+            batch_get: true,
+            batch_put: false,
+        }
+    }
+
+    /// Basic storage capabilities (read, write, delete, exists, stream) without batch acceleration.
+    pub const fn basic() -> Self {
+        Self {
+            read: true,
+            write: true,
+            delete: true,
+            exists: true,
+            stream: true,
+            batch_get: false,
+            batch_put: false,
+        }
+    }
+}
+
+impl Default for StorageCapabilities {
+    fn default() -> Self {
+        Self::all()
+    }
+}
+
 /// Metadata regarding a stored blob in Content-Addressed Storage.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlobMetadata {
@@ -13,19 +75,23 @@ pub struct BlobMetadata {
 /// Abstract storage trait defining the physical storage engine interface.
 ///
 /// Decouples *what* is cached from *where* and *how* cached bytes are stored.
-/// The primary implementation is local filesystem CAS (`LocalCasStorage` / `CasStorage`),
-/// while remaining future-extensible for alternative backends (e.g., S3, memory, network cache).
+/// Supports both individual and batch operations with capability interrogation.
 pub trait Storage: Send + Sync {
-    /// Put raw bytes into the storage, returning the computed digest and stored size.
+    /// Return the capability flags supported by this backend (Milestone 15.2).
+    fn capabilities(&self) -> StorageCapabilities {
+        StorageCapabilities::all()
+    }
+
+    /// Put raw bytes into the storage, returning the computed digest and stored size (Capability: `write`).
     fn put(&self, bytes: &[u8]) -> Result<(Digest, u64)>;
 
-    /// Put content from a local file into storage, returning the computed digest and stored size.
+    /// Put content from a local file into storage, returning the computed digest and stored size (Capability: `write`, `stream`).
     fn put_file(&self, source_path: &Path) -> Result<(Digest, u64)>;
 
-    /// Retrieve a readable stream for a blob by digest after verifying its integrity.
+    /// Retrieve a readable stream for a blob by digest after verifying its integrity (Capability: `read`, `stream`).
     fn get(&self, digest: &Digest) -> Result<Box<dyn Read + Send>>;
 
-    /// Retrieve raw bytes for a blob by digest.
+    /// Retrieve raw bytes for a blob by digest (Capability: `read`).
     fn get_bytes(&self, digest: &Digest) -> Result<Vec<u8>> {
         let mut reader = self.get(digest)?;
         let mut buf = Vec::new();
@@ -33,10 +99,10 @@ pub trait Storage: Send + Sync {
         Ok(buf)
     }
 
-    /// Check if a blob with the specified digest exists in storage.
+    /// Check if a blob with the specified digest exists in storage (Capability: `exists`).
     fn exists(&self, digest: &Digest) -> bool;
 
-    /// Delete a blob by its digest. Returns true if the blob was present and deleted.
+    /// Delete a blob by its digest. Returns true if the blob was present and deleted (Capability: `delete`).
     fn delete(&self, digest: &Digest) -> Result<bool>;
 
     /// Retrieve metadata for a blob if present.
@@ -44,6 +110,27 @@ pub trait Storage: Send + Sync {
 
     /// Verify cryptographic integrity of the blob against its expected digest.
     fn verify(&self, digest: &Digest) -> Result<()>;
+
+    /// Batch retrieve multiple blobs in one operation (Milestone 15.2: `batch_get`).
+    /// Returns a vector of tuples containing (Digest, Option<Vec<u8>>).
+    fn batch_get(&self, digests: &[Digest]) -> Result<Vec<(Digest, Option<Vec<u8>>)>> {
+        let mut results = Vec::with_capacity(digests.len());
+        for digest in digests {
+            let data = self.get_bytes(digest).ok();
+            results.push((digest.clone(), data));
+        }
+        Ok(results)
+    }
+
+    /// Batch store multiple byte slices in one operation (Milestone 15.2: `batch_put`).
+    /// Returns a vector of tuples containing computed (Digest, size_in_bytes).
+    fn batch_put(&self, items: &[&[u8]]) -> Result<Vec<(Digest, u64)>> {
+        let mut results = Vec::with_capacity(items.len());
+        for item in items {
+            results.push(self.put(item)?);
+        }
+        Ok(results)
+    }
 }
 
 impl Storage for crate::cas::CasStorage {
@@ -313,5 +400,54 @@ mod tests {
             boxed.get_bytes(&file_digest).unwrap(),
             b"file content for remote"
         );
+    }
+
+    #[test]
+    fn test_milestone_15_2_backend_capabilities() {
+        let local_storage = CasStorage::new(StorageConfig {
+            root_dir: tempfile::tempdir().unwrap().path().to_path_buf(),
+            max_size_bytes: None,
+        })
+        .unwrap();
+        let remote_storage = RemoteStorage::new();
+
+        // 1. Verify capability descriptor queries
+        let local_caps = local_storage.capabilities();
+        assert!(local_caps.read);
+        assert!(local_caps.write);
+        assert!(local_caps.delete);
+        assert!(local_caps.exists);
+        assert!(local_caps.stream);
+        assert!(local_caps.batch_get);
+        assert!(local_caps.batch_put);
+
+        let remote_caps = remote_storage.capabilities();
+        assert_eq!(remote_caps, StorageCapabilities::all());
+
+        // 2. Test batch_put capability
+        let items: Vec<&[u8]> = vec![b"batch item alpha", b"batch item beta", b"batch item gamma"];
+        let put_results = remote_storage.batch_put(&items).unwrap();
+        assert_eq!(put_results.len(), 3);
+        let digests: Vec<Digest> = put_results.iter().map(|(d, _)| d.clone()).collect();
+
+        // 3. Test batch_get capability
+        let mut query_digests = digests.clone();
+        query_digests.push(Digest::from_bytes(b"non-existent-digest"));
+
+        let get_results = remote_storage.batch_get(&query_digests).unwrap();
+        assert_eq!(get_results.len(), 4);
+        assert_eq!(
+            get_results[0].1.as_deref(),
+            Some(b"batch item alpha".as_slice())
+        );
+        assert_eq!(
+            get_results[1].1.as_deref(),
+            Some(b"batch item beta".as_slice())
+        );
+        assert_eq!(
+            get_results[2].1.as_deref(),
+            Some(b"batch item gamma".as_slice())
+        );
+        assert_eq!(get_results[3].1, None); // non-existent item returns None
     }
 }
