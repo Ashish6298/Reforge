@@ -1480,3 +1480,72 @@ fn test_milestone_5_7_correctness_test_matrix_comprehensive() {
         b"BASELINE_PAYLOAD_V1"
     );
 }
+
+#[test]
+fn test_milestone_12_2_cross_platform_process_handling() {
+    use dcc_runner::ProcessExecutor;
+    use std::collections::BTreeMap;
+    use std::time::Duration;
+
+    // 1. Executable discovery
+    #[cfg(windows)]
+    {
+        let cmd_exe = ProcessExecutor::discover_executable("cmd");
+        assert!(cmd_exe.is_some());
+        let powershell = ProcessExecutor::discover_executable("powershell");
+        assert!(powershell.is_some());
+    }
+
+    #[cfg(not(windows))]
+    {
+        let sh = ProcessExecutor::discover_executable("sh");
+        assert!(sh.is_some());
+    }
+
+    // 2. Cross-platform stdout/stderr and exit code capture
+    #[cfg(windows)]
+    let (cmd, args) = (
+        "cmd.exe",
+        vec!["/C".to_string(), "echo cross_platform_stdout".to_string()],
+    );
+
+    #[cfg(not(windows))]
+    let (cmd, args) = (
+        "sh",
+        vec!["-c".to_string(), "echo cross_platform_stdout".to_string()],
+    );
+
+    let mut env = BTreeMap::new();
+    env.insert("DCC_TEST_VAR".to_string(), "TEST_ENV_OK".to_string());
+
+    let out = ProcessExecutor::execute(cmd, &args, &env, None).unwrap();
+    assert_eq!(out.exit_code, 0);
+    assert!(!out.timed_out);
+    let stdout_str = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout_str.contains("cross_platform_stdout"));
+
+    // 3. Process timeout termination handling
+    #[cfg(windows)]
+    let (sleep_cmd, sleep_args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "Start-Sleep -Milliseconds 1200".to_string(),
+        ],
+    );
+
+    #[cfg(not(windows))]
+    let (sleep_cmd, sleep_args) = ("sleep", vec!["1.2".to_string()]);
+
+    let timeout_res = ProcessExecutor::execute_with_timeout(
+        sleep_cmd,
+        &sleep_args,
+        &BTreeMap::new(),
+        None,
+        Some(Duration::from_millis(100)),
+    )
+    .unwrap();
+
+    assert!(timeout_res.timed_out);
+    assert_eq!(timeout_res.exit_code, -1);
+}

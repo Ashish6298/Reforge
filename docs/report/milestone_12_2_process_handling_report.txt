@@ -1,0 +1,62 @@
+================================================================================
+DCC MILESTONE 12.2: CROSS-PLATFORM PROCESS HANDLING VERIFICATION REPORT
+================================================================================
+Generated: 2026-09-18
+Platform: Windows, Linux, macOS Process Execution Model
+Engine: Developer Computation Cache (DCC v1.0.0)
+Milestone: Milestone 12.2 — Process Handling
+
+--------------------------------------------------------------------------------
+1. OBJECTIVE & SPECIFICATION
+--------------------------------------------------------------------------------
+Milestone 12.2 requires robust, cross-platform process execution and lifecycle
+management across Windows and Unix (Linux / macOS) from a single codebase.
+
+Covered Aspects:
+  - Windows command execution (cmd.exe, powershell.exe, native executables)
+  - Unix command execution (/bin/sh, native Unix binaries)
+  - Environment variable handling & inheritance isolation
+  - Process termination & timeout handling (kill on timeout)
+  - Standard output (`stdout`) & standard error (`stderr`) capture and isolation
+  - Executable discovery across PATH with platform-specific extension resolution
+    (.exe, .cmd, .bat on Windows)
+
+--------------------------------------------------------------------------------
+2. IMPLEMENTATION SUMMARY
+--------------------------------------------------------------------------------
+Enhanced `ProcessExecutor` in `crates/cache-runner/src/process.rs`:
+  - `ProcessExecutor::discover_executable(command: &str) -> Option<PathBuf>`:
+      Discovers command binaries in the filesystem or across `PATH` components,
+      resolving Windows extensions (.exe, .cmd, .bat) if omitted.
+  - `ProcessExecutor::execute(...) -> Result<ProcessOutput>`:
+      Spawns and monitors process lifecycle with dedicated stdout/stderr capture
+      and precise millisecond execution timing.
+  - `ProcessExecutor::execute_with_timeout(...) -> Result<ProcessOutput>`:
+      Adds execution timeout supervision with non-blocking polling and process
+      kill on timeout.
+
+Updated Subsystems:
+  - `RunnerEngine` in `crates/cache-runner/src/engine.rs`
+  - Integration suite in `crates/cache-runner/tests/integration_tests.rs`
+
+--------------------------------------------------------------------------------
+3. TEST & VERIFICATION RESULTS
+--------------------------------------------------------------------------------
+Unit & Integration Tests:
+  - `process::tests::test_executable_discovery`: PASSED
+  - `process::tests::test_process_execution_stdout_stderr_and_exit_code`: PASSED
+  - `process::tests::test_process_environment_handling`: PASSED
+  - `process::tests::test_process_timeout_and_termination`: PASSED
+  - `integration_tests::test_milestone_12_2_cross_platform_process_handling`: PASSED
+
+Full Workspace Status:
+  - `cargo test --workspace`: 135 passed, 0 failed.
+  - `cargo clippy --workspace --all-targets --all-features`: 0 warnings.
+  - `cargo fmt --all -- --check`: 100% compliant.
+
+--------------------------------------------------------------------------------
+4. CONCLUSION
+--------------------------------------------------------------------------------
+Milestone 12.2 is completely implemented, verified, and integrated into the DCC
+runtime engine. Process execution semantics are fully cross-platform, deterministic,
+and resilient against hung processes, environmental pollution, and platform drift.

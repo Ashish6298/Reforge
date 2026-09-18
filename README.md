@@ -1021,6 +1021,33 @@ let safe_path = PathUtils::sanitize_relative_path(Path::new("./workspace"), "dis
 
 ---
 
+## Cross-Platform Process Execution (`ProcessExecutor`)
+
+DCC provides robust, platform-agnostic process spawning, environment isolation, executable discovery, and lifecycle supervision across Windows, Linux, and macOS:
+
+```rust
+use dcc_runner::ProcessExecutor;
+use std::collections::BTreeMap;
+use std::time::Duration;
+
+// Executable discovery across PATH with platform extension resolution (.exe, .cmd, .bat)
+let rustc_bin = ProcessExecutor::discover_executable("rustc");
+
+// Execute command with stdout/stderr capture and timeout protection
+let output = ProcessExecutor::execute_with_timeout(
+    "rustc",
+    &["--version".to_string()],
+    &BTreeMap::new(),
+    None,
+    Some(Duration::from_secs(10)),
+)?;
+
+println!("Exit code: {}", output.exit_code);
+println!("Stdout: {}", String::from_utf8_lossy(&output.stdout));
+```
+
+---
+
 ## Quality Gates & Verification
 
 ```bash
@@ -1031,6 +1058,7 @@ cargo fmt --all -- --check
 ```
 
 All 6 core exit criteria (deterministic computation modeling, canonical key generation, cache entry creation, retrieval, identity verification, and corrupted metadata detection) and all 11 physical storage scenarios (empty cache, single object, deduplication, corruption quarantine, interrupted write isolation, deletion, concurrent read/write races, deeply nested paths, multi-MB large files, and binary byte safety) are fully verified and tested.
+
 
 
 
