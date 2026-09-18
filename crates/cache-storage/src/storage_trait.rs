@@ -295,6 +295,188 @@ impl Storage for RemoteStorage {
     }
 }
 
+/// Identifiers for Cache Hierarchy Tiers (Milestone 15.3).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+pub enum CacheTier {
+    /// L1: Ultra-fast in-memory cache
+    L1Memory,
+    /// L2: Local persistent filesystem CAS on disk (v1 default)
+    L2LocalDisk,
+    /// L3: Remote distributed network/cloud cache (optional extension)
+    L3RemoteCache,
+}
+
+/// Tiered Local-First Storage Coordinator (Milestone 15.3).
+///
+/// Implements a multi-tier local-first cache hierarchy:
+/// - **L1 Memory**: Instantaneous RAM lookup for active in-process workflows.
+/// - **L2 Local Disk**: Persistent content-addressed disk storage (primary engine).
+/// - **L3 Remote Cache**: Optional remote storage tier for cross-machine artifact sharing.
+///
+/// In v1, operation defaults exclusively to L1 Memory + L2 Local Disk without requiring
+/// external network services.
+pub struct TieredCache {
+    l1: RemoteStorage,
+    l2: LocalFilesystemStorage,
+    l3: Option<std::sync::Arc<dyn Storage>>,
+}
+
+impl TieredCache {
+    /// Create a new local-first tiered cache with L1 Memory and L2 Local Disk.
+    pub fn new(local_disk: LocalFilesystemStorage) -> Self {
+        Self {
+            l1: RemoteStorage::new(),
+            l2: local_disk,
+            l3: None,
+        }
+    }
+
+    /// Attach an optional L3 remote cache backend.
+    pub fn with_remote_tier(mut self, remote: std::sync::Arc<dyn Storage>) -> Self {
+        self.l3 = Some(remote);
+        self
+    }
+
+    /// Access the L1 in-memory tier.
+    pub fn l1(&self) -> &RemoteStorage {
+        &self.l1
+    }
+
+    /// Access the L2 local filesystem tier.
+    pub fn l2(&self) -> &LocalFilesystemStorage {
+        &self.l2
+    }
+
+    /// Access the optional L3 remote tier.
+    pub fn l3(&self) -> Option<&std::sync::Arc<dyn Storage>> {
+        self.l3.as_ref()
+    }
+
+    /// Find which tier contains the blob for a given digest.
+    /// Traverses hierarchy in order: L1 Memory -> L2 Local Disk -> L3 Remote Cache.
+    pub fn locate_tier(&self, digest: &Digest) -> Option<CacheTier> {
+        if self.l1.exists(digest) {
+            return Some(CacheTier::L1Memory);
+        }
+        if self.l2.exists(digest) {
+            return Some(CacheTier::L2LocalDisk);
+        }
+        if let Some(ref remote) = self.l3 {
+            if remote.exists(digest) {
+                return Some(CacheTier::L3RemoteCache);
+            }
+        }
+        None
+    }
+}
+
+impl Storage for TieredCache {
+    fn put(&self, bytes: &[u8]) -> Result<(Digest, u64)> {
+        // Store in L1 RAM and L2 Local Disk
+        let (digest, size) = self.l1.put(bytes)?;
+        self.l2.put(bytes)?;
+        // If L3 Remote is configured, opportunistically sync
+        if let Some(ref remote) = self.l3 {
+            let _ = remote.put(bytes);
+        }
+        Ok((digest, size))
+    }
+
+    fn put_file(&self, source_path: &Path) -> Result<(Digest, u64)> {
+        let (digest, size) = self.l2.put_file(source_path)?;
+        if let Ok(bytes) = std::fs::read(source_path) {
+            let _ = self.l1.put(&bytes);
+            if let Some(ref remote) = self.l3 {
+                let _ = remote.put(&bytes);
+            }
+        }
+        Ok((digest, size))
+    }
+
+    fn get(&self, digest: &Digest) -> Result<Box<dyn Read + Send>> {
+        // 1. Try L1 Memory
+        if self.l1.exists(digest) {
+            return self.l1.get(digest);
+        }
+
+        // 2. Try L2 Local Disk
+        if self.l2.exists(digest) {
+            let bytes = self.l2.get_bytes(digest)?;
+            // Promote to L1 Memory
+            let _ = self.l1.put(&bytes);
+            return Ok(Box::new(std::io::Cursor::new(bytes)));
+        }
+
+        // 3. Try L3 Remote Cache (if attached)
+        if let Some(ref remote) = self.l3 {
+            if remote.exists(digest) {
+                let bytes = remote.get_bytes(digest)?;
+                // Populate both L2 Local Disk and L1 Memory (local-first promotion)
+                let _ = self.l2.put(&bytes);
+                let _ = self.l1.put(&bytes);
+                return Ok(Box::new(std::io::Cursor::new(bytes)));
+            }
+        }
+
+        Err(dcc_core::CacheError::StorageError(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("Blob not found in any cache tier: {}", digest),
+        )))
+    }
+
+    fn exists(&self, digest: &Digest) -> bool {
+        self.locate_tier(digest).is_some()
+    }
+
+    fn delete(&self, digest: &Digest) -> Result<bool> {
+        let mut deleted = false;
+        if self.l1.delete(digest)? {
+            deleted = true;
+        }
+        if self.l2.delete(digest)? {
+            deleted = true;
+        }
+        if let Some(ref remote) = self.l3 {
+            if remote.delete(digest)? {
+                deleted = true;
+            }
+        }
+        Ok(deleted)
+    }
+
+    fn metadata(&self, digest: &Digest) -> Result<Option<BlobMetadata>> {
+        if let Ok(Some(meta)) = self.l1.metadata(digest) {
+            return Ok(Some(meta));
+        }
+        if let Ok(Some(meta)) = self.l2.metadata(digest) {
+            return Ok(Some(meta));
+        }
+        if let Some(ref remote) = self.l3 {
+            if let Ok(Some(meta)) = remote.metadata(digest) {
+                return Ok(Some(meta));
+            }
+        }
+        Ok(None)
+    }
+
+    fn verify(&self, digest: &Digest) -> Result<()> {
+        if self.l1.exists(digest) {
+            self.l1.verify(digest)?;
+        }
+        if self.l2.exists(digest) {
+            self.l2.verify(digest)?;
+        }
+        if let Some(ref remote) = self.l3 {
+            if remote.exists(digest) {
+                remote.verify(digest)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -449,5 +631,60 @@ mod tests {
             Some(b"batch item gamma".as_slice())
         );
         assert_eq!(get_results[3].1, None); // non-existent item returns None
+    }
+
+    #[test]
+    fn test_milestone_15_3_local_first_tiered_cache() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let local_disk = CasStorage::new(StorageConfig {
+            root_dir: temp_dir.path().to_path_buf(),
+            max_size_bytes: None,
+        })
+        .unwrap();
+
+        // 1. Instantiate TieredCache with L1 Memory and L2 Local Disk
+        let tiered = TieredCache::new(local_disk);
+        let payload = b"tiered local-first cache data payload";
+
+        // Store into tiered cache (populates L1 RAM and L2 Disk)
+        let (digest, size) = tiered.put(payload).unwrap();
+        assert_eq!(size, payload.len() as u64);
+
+        // Verify tier location
+        assert_eq!(tiered.locate_tier(&digest), Some(CacheTier::L1Memory));
+        assert!(tiered.exists(&digest));
+
+        // 2. Clear L1 Memory to test L2 Local Disk retrieval and automatic L1 promotion
+        tiered.l1().clear();
+        assert_eq!(tiered.locate_tier(&digest), Some(CacheTier::L2LocalDisk));
+
+        let retrieved_from_l2 = tiered.get_bytes(&digest).unwrap();
+        assert_eq!(retrieved_from_l2, payload);
+
+        // Verification after retrieval confirms promotion back to L1 Memory
+        assert_eq!(tiered.locate_tier(&digest), Some(CacheTier::L1Memory));
+
+        // 3. Attach optional L3 Remote Cache tier
+        let remote_tier = std::sync::Arc::new(RemoteStorage::new());
+        let remote_payload = b"payload originally in remote cloud";
+        let (remote_digest, _) = remote_tier.put(remote_payload).unwrap();
+
+        let tiered_with_l3 = tiered.with_remote_tier(remote_tier);
+        assert_eq!(
+            tiered_with_l3.locate_tier(&remote_digest),
+            Some(CacheTier::L3RemoteCache)
+        );
+
+        // Retrieve from L3 -> promotes to both L2 Local Disk and L1 Memory
+        let retrieved_remote = tiered_with_l3.get_bytes(&remote_digest).unwrap();
+        assert_eq!(retrieved_remote, remote_payload);
+
+        // Now local tiers contain it
+        assert!(tiered_with_l3.l1().exists(&remote_digest));
+        assert!(tiered_with_l3.l2().exists(&remote_digest));
+        assert_eq!(
+            tiered_with_l3.locate_tier(&remote_digest),
+            Some(CacheTier::L1Memory)
+        );
     }
 }

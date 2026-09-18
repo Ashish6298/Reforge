@@ -1344,6 +1344,29 @@ DCC formalizes backend capability descriptors and batch operation primitives:
    - `batch_put(&[&[u8]]) -> Result<Vec<(Digest, u64)>>`: Computes cryptographic digests and stores multiple objects in a single batch pass.
    - `batch_get(&[Digest]) -> Result<Vec<(Digest, Option<Vec<u8>>)>>`: Queries and retrieves multiple blobs concurrently, returning `None` for un-cached objects without aborting the entire request.
 
+### Local-First Tiered Architecture (Milestone 15.3)
+
+DCC implements a 3-tier local-first cache hierarchy (`TieredCache`):
+
+```text
+                  ┌───────────────────────────────┐
+                  │    TieredCache Coordinator    │
+                  └───────────────┬───────────────┘
+                                  │
+         ┌────────────────────────┼────────────────────────┐
+         ▼                        ▼                        ▼
+  [ L1: Memory ]           [ L2: Local Disk ]       [ L3: Remote Cache ]
+  - In-process RAM cache   - Persistent CAS on disk  - Optional cloud/network
+  - Zero filesystem I/O    - Primary engine (v1)     - Cross-machine sharing
+```
+
+1. **Local-First Guarantee**:
+   - In v1, operation requires only local disk (`L2`) and in-memory cache (`L1`). The engine runs completely offline without requiring any remote server.
+2. **Hierarchical Traversal & Local Promotion**:
+   - Lookup order: `L1 Memory` ──► `L2 Local Disk` ──► `L3 Remote Cache`.
+   - Remote cache hits automatically promote and populate both L2 Local Disk and L1 Memory.
+   - Cache location queries via `tiered_cache.locate_tier(&digest)` return the active tier (`CacheTier::L1Memory`, `CacheTier::L2LocalDisk`, `CacheTier::L3RemoteCache`).
+
 ---
 
 
