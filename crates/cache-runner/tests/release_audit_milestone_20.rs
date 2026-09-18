@@ -12,9 +12,7 @@
 //! - 20.2 Reliability & Fault Tolerance
 //! - 20.6 Security & Integrity Validation
 
-use dcc_core::{
-    Computation, Digest, FailurePolicy, SensitiveDataDetector, ToolIdentity,
-};
+use dcc_core::{Computation, Digest, FailurePolicy, SensitiveDataDetector, ToolIdentity};
 use dcc_runner::{CommandSpec, EngineOptions, ExecutionStatus, RunnerEngine};
 use dcc_test_utils::TestEnv;
 use std::fs;

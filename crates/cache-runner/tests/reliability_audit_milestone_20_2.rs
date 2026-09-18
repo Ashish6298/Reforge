@@ -8,9 +8,7 @@
 //! 6. Cache deletion (re-creating directory structure on the fly)
 //! 7. Large cache (eviction enforcement under high storage load)
 
-use dcc_core::{
-    ByteSize, CacheEntry, Computation, Digest, ExecutionMetadata, OutputManifestItem,
-};
+use dcc_core::{ByteSize, CacheEntry, Computation, Digest, ExecutionMetadata, OutputManifestItem};
 use dcc_runner::{CommandSpec, EngineOptions, RunnerEngine};
 use dcc_storage::{CasStorage, StorageConfig};
 use dcc_test_utils::TestEnv;

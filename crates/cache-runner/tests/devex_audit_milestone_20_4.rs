@@ -116,8 +116,7 @@ fn test_audit_20_4_configuration_predictable() {
     assert!(default_cfg.root_dir.ends_with(".dcc_cache"));
     assert!(default_cfg.max_size().is_some());
 
-    let custom_cfg = StorageConfig::new("/tmp/custom_cache")
-        .with_max_size(ByteSize::gb(5));
+    let custom_cfg = StorageConfig::new("/tmp/custom_cache").with_max_size(ByteSize::gb(5));
 
     assert_eq!(custom_cfg.root_dir, PathBuf::from("/tmp/custom_cache"));
     assert_eq!(
