@@ -37,15 +37,14 @@ jobs:
       - name: Run Workspace Tests
         shell: bash
         run: |
-          set +e
-          cargo test --workspace -- --nocapture > test_output.txt 2>&1
-          STATUS=$?
-          echo "## Test Output (${{ matrix.os }})" >> $GITHUB_STEP_SUMMARY
-          echo '```text' >> $GITHUB_STEP_SUMMARY
-          tail -n 120 test_output.txt >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          cat test_output.txt
-          exit $STATUS
+          cargo test --workspace -- --nocapture 2>&1 | tee test_output.txt
+
+      - name: Upload Test Output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-output-${{ matrix.os }}
+          path: test_output.txt
 
       - name: Clippy Linter Check
         run: cargo clippy --workspace --all-targets --all-features
