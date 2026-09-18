@@ -1,4 +1,4 @@
-/! Public Rust API Audit Test Suite for Milestone 20.5
+//! Public Rust API Audit Test Suite for Milestone 20.5
 //! Validates:
 //! 1. Essential Types (Computation, CacheKey, Digest, CacheEntry, RunnerEngine, CasStorage)
 //! 2. Clean Naming & Idiomatic Rust conventions
