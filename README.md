@@ -1560,6 +1560,20 @@ DCC enforces strict infrastructure-grade unit test coverage across all 8 fundame
 | **7. Configuration** | `StorageConfig` initialization, `ByteSize` string parsing (`KB`, `MB`, `GB`, `GiB`, fractional, raw bytes), limit comparison, and boundary arithmetic. |
 | **8. Eviction** | Eviction strategies (`LRU`, `FIFO`, `LFU`), TTL expiration, and reachability graph garbage collection pruning unreferenced CAS objects safely. |
 
+### Complete Integration Test Flows (Milestone 18.2)
+
+DCC enforces exhaustive end-to-end integration test coverage across all 7 complete execution flows:
+
+| Flow | Verified Integration Behavior |
+| :--- | :--- |
+| **1. Command Miss** | Cold run executes command, validates outputs, streams CAS blobs, atomically commits `CacheEntry` JSON, returns `ExecutionStatus::Miss`. |
+| **2. Command Hit** | Warm run with identical inputs skips process execution (`0 ms`), cryptographically validates CAS digests, restores output artifacts, returns `ExecutionStatus::Hit`. |
+| **3. Input Changed** | Modifying input file bytes derives a distinct canonical `CacheKey`, produces a cold miss, and re-executes cleanly without stale artifact leakage. |
+| **4. Output Missing** | Commands exiting with 0 that fail to produce declared required output files trigger strict error rejection (`CacheError::MissingOutput`). |
+| **5. Cache Corruption** | Bitrotted or tampered CAS blobs/metadata are cryptographically detected, quarantined (`*.corrupted`), and safely fall back to re-computation. |
+| **6. Concurrent Access** | Concurrent cold requests are coordinated via advisory `ComputationLock`—exactly 1 process executes while waiting workers receive 0 ms warm hits. |
+| **7. Failed Command** | Commands exiting with non-zero exit codes capture error diagnostics but are strictly excluded from storage (`DO NOT CACHE` policy). |
+
 ---
 
 ## Quality Gates & Verification
@@ -1571,7 +1585,7 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo fmt --all -- --check
 ```
 
-All 6 core exit criteria (deterministic computation modeling, canonical key generation, cache entry creation, retrieval, identity verification, and corrupted metadata detection), all 11 physical storage scenarios (empty cache, single object, deduplication, corruption quarantine, interrupted write isolation, deletion, concurrent read/write races, deeply nested paths, multi-MB large files, and binary byte safety), and all 8 unit test infrastructure domains are fully verified and tested.
+All 6 core exit criteria (deterministic computation modeling, canonical key generation, cache entry creation, retrieval, identity verification, and corrupted metadata detection), all 11 physical storage scenarios (empty cache, single object, deduplication, corruption quarantine, interrupted write isolation, deletion, concurrent read/write races, deeply nested paths, multi-MB large files, and binary byte safety), all 8 unit test infrastructure domains, and all 7 complete integration flows are fully verified and tested.
 
 
 
