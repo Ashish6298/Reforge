@@ -1589,6 +1589,19 @@ DCC is validated against 8 operational fault scenarios to guarantee fail-safe sy
 | **7. Missing Output** | Successful commands omitting declared required outputs trigger strict validation errors (`CacheError::MissingOutput`). |
 | **8. Invalid Configuration** | Unparseable sizes, empty commands, or denied sensitive secrets fail safely before process execution. |
 
+### Exhaustive Concurrency Tests (Milestone 18.4)
+
+DCC guarantees thread safety, deduplication correctness, and safe garbage collection across 6 fundamental concurrent access patterns:
+
+| Concurrency Scenario | Invariant & Verified Multithreaded Behavior |
+| :--- | :--- |
+| **1. Many Readers** | 32 concurrent reader threads streaming shared CAS objects and querying entry metadata simultaneously with zero read contention, torn buffers, or lock degradation. |
+| **2. Many Writers** | 32 concurrent writers storing distinct payloads and racing on identical payloads achieve zero-cost CAS deduplication and complete temporary file cleanup. |
+| **3. Same-Key Writers** | Concurrent racing computations on identical keys synchronize via `ComputationLock` and secondary cache re-check, executing exactly 1 process (Miss) and yielding (N-1) 0 ms Hits. |
+| **4. Different-Key Writers** | Parallel computations on distinct keys execute with zero mutual interference, deadlock, or lock starvation. |
+| **5. Reader + Writer** | Simultaneous reader threads continuously streaming CAS objects and writer threads inserting new entries operate safely without torn reads or storage corruption. |
+| **6. Pruner + Reader** | Active readers holding shared `ObjectLock` handles prevent the garbage collection `Pruner` from deleting in-use CAS objects mid-stream, ensuring atomic stream safety. |
+
 ---
 
 ## Quality Gates & Verification
@@ -1600,7 +1613,7 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo fmt --all -- --check
 ```
 
-All 6 core exit criteria (deterministic computation modeling, canonical key generation, cache entry creation, retrieval, identity verification, and corrupted metadata detection), all 11 physical storage scenarios (empty cache, single object, deduplication, corruption quarantine, interrupted write isolation, deletion, concurrent read/write races, deeply nested paths, multi-MB large files, and binary byte safety), all 8 unit test infrastructure domains, all 7 complete integration flows, and all 8 failure injection scenarios are fully verified and tested.
+All 6 core exit criteria (deterministic computation modeling, canonical key generation, cache entry creation, retrieval, identity verification, and corrupted metadata detection), all 11 physical storage scenarios (empty cache, single object, deduplication, corruption quarantine, interrupted write isolation, deletion, concurrent read/write races, deeply nested paths, multi-MB large files, and binary byte safety), all 8 unit test infrastructure domains, all 7 complete integration flows, all 8 failure injection scenarios, and all 6 concurrency stress patterns are fully verified and tested.
 
 
 
