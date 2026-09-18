@@ -1545,20 +1545,33 @@ A complete CI/CD integration guide and GitHub Actions workflow is provided in [`
 - **GitHub Actions Reference**: Demonstrates automated cache restore and save (`actions/cache/restore@v4` and `actions/cache/save@v4`) targeting the `.dcc_cache/` directory.
 - **Provider-Neutral Support**: Works across GitHub Actions, GitLab CI, Jenkins, and containerized Docker build environments.
 
+### Comprehensive Unit Testing & Quality Audit (Milestone 18.1)
+
+DCC enforces strict infrastructure-grade unit test coverage across all 8 fundamental system domains:
+
+| Domain | Verified Unit Test Behaviors |
+| :--- | :--- |
+| **1. Hashing** | Streaming SHA-256 digests, 64 KB chunk boundaries, empty byte digests, deterministic directory traversal, and parallel batch file hashing. |
+| **2. Key Generation** | Canonical serialization, argument order sensitivity, input ordering invariance, platform constraints, and tool identity tracking. |
+| **3. Serialization** | Full roundtrip JSON serde of `CacheEntry`, `Computation`, `OutputManifest`, `ExecutionMetadata`, `TimingMetrics`, and schema stability. |
+| **4. Validation** | Path traversal rejection (`../`, `..\`, `/`, `C:\`, `\\server\share`, null-bytes), workspace boundary enforcement, and secret scanning (`SensitiveDataDetector`). |
+| **5. Storage** | `Storage` trait operations (`put`, `put_file`, `get`, `get_bytes`, `exists`, `delete`, `metadata`, `verify`), 256-shard hex partitioning, and batch I/O operations. |
+| **6. Metadata** | `CacheEntry` creation, `verify_identity()` cryptographic detection against forged metadata / spoofed keys, hit count tracking, and access timestamps. |
+| **7. Configuration** | `StorageConfig` initialization, `ByteSize` string parsing (`KB`, `MB`, `GB`, `GiB`, fractional, raw bytes), limit comparison, and boundary arithmetic. |
+| **8. Eviction** | Eviction strategies (`LRU`, `FIFO`, `LFU`), TTL expiration, and reachability graph garbage collection pruning unreferenced CAS objects safely. |
+
 ---
-
-
 
 ## Quality Gates & Verification
 
 ```bash
 cargo check --workspace
 cargo test --workspace
-cargo clippy --workspace --all-targets --all-features
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo fmt --all -- --check
 ```
 
-All 6 core exit criteria (deterministic computation modeling, canonical key generation, cache entry creation, retrieval, identity verification, and corrupted metadata detection) and all 11 physical storage scenarios (empty cache, single object, deduplication, corruption quarantine, interrupted write isolation, deletion, concurrent read/write races, deeply nested paths, multi-MB large files, and binary byte safety) are fully verified and tested.
+All 6 core exit criteria (deterministic computation modeling, canonical key generation, cache entry creation, retrieval, identity verification, and corrupted metadata detection), all 11 physical storage scenarios (empty cache, single object, deduplication, corruption quarantine, interrupted write isolation, deletion, concurrent read/write races, deeply nested paths, multi-MB large files, and binary byte safety), and all 8 unit test infrastructure domains are fully verified and tested.
 
 
 
