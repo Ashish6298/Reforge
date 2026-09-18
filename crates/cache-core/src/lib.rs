@@ -24,3 +24,14 @@ pub use event::{EventKind, EventSubscriber, StructuredEvent};
 pub use paths::PathUtils;
 pub use sensitive::{SensitiveDataDetector, SensitiveDataPolicy, SENSITIVE_KEY_PATTERNS};
 pub use size::{ByteSize, SizeParseError};
+
+/// Current SemVer version of DCC (Milestone 19.1).
+pub const DCC_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Current canonical computation schema version (Milestone 19.1 & Milestone 2.2).
+pub const DCC_SCHEMA_VERSION: u32 = 1;
+
+/// Checks if a schema version is compatible with this version of the DCC engine.
+pub fn is_schema_compatible(version: u32) -> bool {
+    version == DCC_SCHEMA_VERSION
+}

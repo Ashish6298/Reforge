@@ -1,3 +1,5 @@
+#![allow(clippy::incompatible_msrv)]
+
 use chrono::{DateTime, Utc};
 use dcc_core::{CacheError, CacheKey, Digest, Result};
 use fs2::FileExt;

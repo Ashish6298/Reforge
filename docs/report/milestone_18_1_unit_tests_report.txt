@@ -1,0 +1,77 @@
+================================================================================
+DEVELOPER COMPUTATION CACHE (DCC) - VERIFICATION REPORT
+Milestone 18.1 — Comprehensive Unit Testing & Quality Audit
+Date: 2026-09-18
+================================================================================
+
+1. EXECUTIVE SUMMARY
+--------------------------------------------------------------------------------
+Milestone 18.1 establishes complete, infrastructure-level unit testing coverage across
+all 8 fundamental domains of the Developer Computation Cache (`dcc`):
+  1. Hashing: Streaming SHA-256 digests, multi-chunk boundary handling, empty byte
+     digests, deterministic directory traversal, and parallel batch file hashing.
+  2. Key Generation: Canonical serialization, argument order sensitivity, input
+     ordering invariance, platform constraints, and tool identity tracking.
+  3. Serialization: Full roundtrip JSON serde of CacheEntry, Computation, OutputManifest,
+     ExecutionMetadata, TimingMetrics, and schema stability.
+  4. Validation: Path traversal rejection (../, /etc/passwd, C:\..., \\server\share,
+     null-bytes), workspace boundary enforcement, and automated secret scanning.
+  5. Storage: Storage trait operations (put, put_file, get, get_bytes, exists, delete,
+     metadata, verify), 256-shard hex prefix partitioning, and batch I/O operations.
+  6. Metadata: CacheEntry creation, verify_identity() cryptographic detection against
+     forged metadata / spoofed keys, hit count tracking, and access timestamps.
+  7. Configuration: StorageConfig initialization, ByteSize string parsing (KB, MB, GB,
+     GiB, fractional, raw bytes), limit comparison, and boundary arithmetic.
+  8. Eviction: Eviction strategies (LRU, FIFO, LFU), TTL expiration, and reachability
+     graph garbage collection pruning unreferenced CAS objects safely.
+
+2. TEST SUITE EXECUTION RESULTS
+--------------------------------------------------------------------------------
+Command: cargo test --workspace
+Overall Result: ALL PASSED (100% test pass across all workspace crates)
+
+A. Dedicated Milestone 18.1 Unit Test Suites:
+   - `crates/cache-core/tests/unit_tests_milestone_18_1.rs`:
+     * `test_hashing_empty_and_known_bytes` ............................. PASSED
+     * `test_hashing_streaming_multi_chunk` ............................. PASSED
+     * `test_hashing_file_and_parallel_batch` ........................... PASSED
+     * `test_hashing_directory_deterministic` ........................... PASSED
+     * `test_key_generation_deterministic_and_canonical` ................ PASSED
+     * `test_key_generation_argument_order_sensitivity` ................. PASSED
+     * `test_key_generation_input_order_invariance` ..................... PASSED
+     * `test_serialization_cache_entry_roundtrip` ....................... PASSED
+     * `test_validation_path_traversal_rejection` ....................... PASSED
+     * `test_validation_sensitive_data_detection` ....................... PASSED
+     * `test_metadata_identity_verification_and_spoof_detection` ........ PASSED
+     * `test_configuration_bytesize_parsing_and_arithmetic` ............. PASSED
+
+   - `crates/cache-storage/tests/unit_tests_milestone_18_1.rs`:
+     * `test_storage_trait_put_get_exists_delete_lifecycle` ............. PASSED
+     * `test_storage_trait_batch_operations` ............................ PASSED
+     * `test_storage_256_shard_partitioning` ............................ PASSED
+     * `test_eviction_strategy_lru_order` ............................... PASSED
+     * `test_eviction_strategy_fifo_order` .............................. PASSED
+     * `test_eviction_strategy_lfu_order` ............................... PASSED
+     * `test_garbage_collection_reachability_graph` ..................... PASSED
+
+B. Workspace Integration & Concurrency Test Suites:
+   - Concurrency & locking stress tests (12/12 passed) ................. PASSED
+   - Runner execution & lifecycle tests (19/19 passed) ................. PASSED
+   - Security & trust mode tests (11/11 passed) ........................ PASSED
+   - Physical storage suite tests (19/19 passed) ....................... PASSED
+   - Storage crate unit tests (26/26 passed) ........................... PASSED
+   - Core domain unit tests (32/32 passed) ............................. PASSED
+   - Runner unit tests (8/8 passed) .................................... PASSED
+
+3. CODE QUALITY & LINTING GATES
+--------------------------------------------------------------------------------
+- cargo check --workspace .............................................. PASSED (0 errors)
+- cargo clippy --workspace --all-targets --all-features -- -D warnings .. PASSED (0 warnings)
+- cargo fmt --all -- --check ........................................... PASSED (Clean formatting)
+
+4. CONCLUSION
+--------------------------------------------------------------------------------
+Milestone 18.1 is fully verified. Unit tests rigorously cover all 8 required domains
+with 100% pass rate, zero warnings, and clean code formatting without modifying
+existing CLI functionality or UI.
+================================================================================

@@ -1,0 +1,111 @@
+================================================================================
+DCC TEST REPORT: MILESTONE 18.4 — CONCURRENCY TESTS
+================================================================================
+Timestamp: 2026-09-18T14:11:45+05:30
+Workspace: D:\DC
+Test Target: crates/cache-runner/tests/concurrency_suite_milestone_18_4.rs & concurrency_tests.rs
+Status: PASSED (100% Passing, 0 Failures, 0 Warnings)
+
+--------------------------------------------------------------------------------
+1. OBJECTIVE & SPECIFICATION
+--------------------------------------------------------------------------------
+Milestone 18.4 mandates exhaustive verification of the system under high-concurrency
+and multithreaded stress across 6 critical operational scenarios:
+
+1. Many Readers:
+   Multiple reader threads concurrently accessing, streaming, and verifying
+   the same CAS objects and metadata records simultaneously with zero lock contention
+   or torn reads.
+
+2. Many Writers:
+   Multiple writer threads simultaneously committing distinct objects and racing
+   on identical payloads to verify lock-free atomic deduplication and temp directory
+   hygiene.
+
+3. Same-Key Writers:
+   Multiple concurrent runners computing and storing the exact same computation key
+   simultaneously. Verifies advisory `ComputationLock` synchronization and secondary
+   cache re-check so that the expensive computation executes exactly once (1 Miss)
+   while remaining threads wait and receive 0 ms cache Hits.
+
+4. Different-Key Writers:
+   Multiple concurrent runners computing independent keys concurrently, verifying
+   parallel execution without mutual blocking or deadlock.
+
+5. Reader + Writer:
+   Simultaneous execution of active reader threads streaming existing objects and
+   metadata while active writer threads insert new entries and CAS objects.
+
+6. Pruner + Reader:
+   Active reader threads holding shared `ObjectLock` read handles while garbage
+   collection (`Pruner`) runs, verifying that objects currently in active use are
+   safely preserved and never deleted mid-stream.
+
+--------------------------------------------------------------------------------
+2. TEST IMPLEMENTATION & SCENARIO RESULTS
+--------------------------------------------------------------------------------
+
+Scenario 1: Many Readers
+- Test Name: `test_milestone_18_4_many_readers`
+- Configuration: 32 concurrent reader threads, 15 iterations each, 128 KB payload.
+- Invariants Verified:
+  * 100% bitwise cryptographic integrity on every read stream.
+  * Entry metadata successfully fetched and validated.
+  * Zero read contention or torn buffers.
+- Result: PASSED
+
+Scenario 2: Many Writers
+- Test Name: `test_milestone_18_4_many_writers`
+- Configuration: 32 concurrent writer threads writing distinct payloads (8 KB) and racing on shared payload.
+- Invariants Verified:
+  * 32 distinct objects + 1 shared deduplicated object created (33 total).
+  * All 33 objects pass cryptographic verification (`verify_object`).
+  * Temp staging directory (`.dcc_cache/tmp`) is 100% clean with zero leaked files.
+- Result: PASSED
+
+Scenario 3: Same-Key Writers
+- Test Name: `test_milestone_18_4_same_key_writers`
+- Configuration: 8 concurrent threads racing on identical computation with 150ms execution delay.
+- Invariants Verified:
+  * Exactly 1 thread executes the command (ExecutionStatus::Miss).
+  * Exactly 7 threads wait on lock, re-check cache, and obtain ExecutionStatus::Hit.
+  * Execution log confirms underlying process ran exactly 1 time across all threads.
+- Result: PASSED
+
+Scenario 4: Different-Key Writers
+- Test Name: `test_milestone_18_4_different_key_writers`
+- Configuration: 12 concurrent threads executing distinct commands and keys simultaneously.
+- Invariants Verified:
+  * All 12 threads execute concurrently without blocking.
+  * All 12 entries created and verified via `verify_identity()`.
+  * Total entries count matches 12.
+- Result: PASSED
+
+Scenario 5: Reader + Writer
+- Test Name: `test_milestone_18_4_reader_plus_writer`
+- Configuration: 16 concurrent reader threads + 8 concurrent writer threads operating simultaneously.
+- Invariants Verified:
+  * Readers complete 25 read cycles of base object and entry without errors.
+  * Writers successfully commit 10 iterations of new objects and entries each.
+  * Temp directory completely clean after completion.
+- Result: PASSED
+
+Scenario 6: Pruner + Reader
+- Test Name: `test_milestone_18_4_pruner_plus_reader`
+- Configuration: Reader acquires shared `ObjectLock` on unreferenced CAS object. Pruner runs garbage collection while read lock is held.
+- Invariants Verified:
+  * Pruner safely skips active object (0 deleted) while shared read lock is held.
+  * Reader streams full 100 KB payload cleanly without mid-stream deletion.
+  * Once reader drops shared lock, subsequent Pruner execution cleans unreferenced object.
+- Result: PASSED
+
+--------------------------------------------------------------------------------
+3. SUMMARY OF TEST SUITES EXECUTED
+--------------------------------------------------------------------------------
+- `concurrency_suite_milestone_18_4.rs`: 6 / 6 tests passed (100%)
+- `concurrency_tests.rs`: 12 / 12 tests passed (including 10, 50, 100 process stress tests)
+- Total concurrency test executions: 18 / 18 tests passed
+
+================================================================================
+END OF REPORT
+================================================================================

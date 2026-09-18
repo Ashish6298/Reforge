@@ -1,0 +1,85 @@
+================================================================================
+DCC TEST REPORT: MILESTONE 18.5 — CROSS-PLATFORM TESTS
+================================================================================
+Timestamp: 2026-09-18T14:14:05+05:30
+Workspace: D:\DC
+Test Target: crates/cache-runner/tests/cross_platform_suite_milestone_18_5.rs & integration_tests.rs
+Status: PASSED (100% Passing, 0 Failures, 0 Warnings)
+
+--------------------------------------------------------------------------------
+1. OBJECTIVE & SPECIFICATION
+--------------------------------------------------------------------------------
+Milestone 18.5 mandates that every supported operating system (Windows, Linux, macOS)
+must pass the exact same essential test suite across:
+
+1. Path Handling (Milestone 12.1):
+   - Platform-agnostic relative path normalization (forward slashes `/` vs backslashes `\`).
+   - Rejection of path traversal attempts (`../`, `..\`, absolute root escapes, drive prefixes).
+   - CAS sharding and entry path generation on native OS filesystems.
+
+2. Process Execution & Environment (Milestone 12.2):
+   - Shell and command execution dispatch (`cmd.exe`/`powershell.exe` on Windows, `sh` on Unix).
+   - Structured environment variable inheritance and propagation.
+   - Clean exit code and timeout termination handling.
+
+3. Essential Cache Engine Lifecycle (Milestones 2-6, 18.2):
+   - Cold execution (Miss) -> Output validation -> CAS commit -> JSON metadata creation.
+   - Warm execution (Hit) -> 0 ms instant restoration of output files -> Exact digest verification.
+   - Source modification -> Automatic invalidation -> Clean re-execution (Miss).
+
+4. File Semantics & Symlink Safety (Milestone 12.3):
+   - Symlink resolution to underlying content (where supported).
+   - Safe isolated temporary restore staging (`.tmp_restore_*`) avoiding race conditions.
+   - Binary byte preservation and executable flag preservation.
+
+5. Advisory Locking & Inter-Process Synchronization (Milestone 6):
+   - Structured cross-platform file locking (`fs2` file locks) for computation deduplication.
+   - Safe drop cleanup of lock files without leaving orphaned locks.
+
+--------------------------------------------------------------------------------
+2. ESSENTIAL SUITE TEST RESULTS
+--------------------------------------------------------------------------------
+
+Test 1: Path Normalization & Sharding
+- Test Name: `test_cross_platform_path_normalization_and_sharding`
+- Verified: Both Windows `\` and Unix `/` separators normalize to identical canonical representation `"src/nested/module/file.rs"`. CAS sharding layout and 256-shard prefix indexing operate identically.
+- Result: PASSED
+
+Test 2: Process Execution & Environment Propagation
+- Test Name: `test_cross_platform_process_execution_and_environment`
+- Verified: Environment variables (`DCC_TEST_VAR`) are properly propagated to child process commands across platform shells (`cmd.exe`/`sh`) and output captured with exit code 0.
+- Result: PASSED
+
+Test 3: Essential Cache Engine Lifecycle
+- Test Name: `test_cross_platform_essential_cache_lifecycle`
+- Verified:
+  1. Cold Run: MISS with successful process execution and output generation.
+  2. Warm Run: HIT with 0 ms execution time and bitwise identical output restoration.
+  3. Invalidation: Input file change causes cold MISS with distinct derived key.
+- Result: PASSED
+
+Test 4: File Semantics & Restoration
+- Test Name: `test_cross_platform_file_semantics_and_restoration`
+- Verified: Rejection of path traversal escapes (`../outside_file.txt` & `..\outside_file.txt`). Roundtrip restoration of binary output artifacts into nested directories with exact byte integrity.
+- Result: PASSED
+
+Test 5: Advisory Locking Lifecycle
+- Test Name: `test_cross_platform_advisory_locking_lifecycle`
+- Verified: Process locking acquire and release operates seamlessly across platforms; lock files are cleanly removed on drop.
+- Result: PASSED
+
+--------------------------------------------------------------------------------
+3. CROSS-PLATFORM CI MATRIX ALIGNMENT
+--------------------------------------------------------------------------------
+The essential test suite runs across all 3 CI matrix runners configured in `.github/workflows/ci.yml`:
+  - `ubuntu-latest` (Linux x86_64)
+  - `windows-latest` (Windows x86_64)
+  - `macos-latest` (macOS Apple Silicon / ARM64)
+
+Total Test Targets Verified:
+  - `cross_platform_suite_milestone_18_5.rs`: 5 / 5 passed (100%)
+  - Full workspace suite: 100% passed
+
+================================================================================
+END OF REPORT
+================================================================================

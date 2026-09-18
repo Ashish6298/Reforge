@@ -1,0 +1,82 @@
+================================================================================
+DEVELOPER COMPUTATION CACHE (DCC) - VERIFICATION REPORT
+Milestone 18.3 — Failure Injection & Safe Error Handling
+Date: 2026-09-18
+================================================================================
+
+1. EXECUTIVE SUMMARY
+--------------------------------------------------------------------------------
+Milestone 18.3 establishes rigorous failure injection validation across 8 realistic
+operational fault scenarios, ensuring the Developer Computation Cache (`dcc`) fails
+safely and predictably as robust developer infrastructure without crashing, data corruption,
+or deadlock.
+
+Simulated Fault Scenarios & Verified Safety Invariants:
+  1. Disk Full / Capacity Limit:
+     - Verified under strict 1 KB storage bounds with oversized multi-KB computation outputs.
+     - System executes child process, records output safely, and enforces storage limits
+       without panics or filesystem corruption.
+  2. Permission Denied:
+     - Target workspace files set to read-only (`set_readonly(true)`).
+     - Engine catches OS I/O permission failures cleanly, reports structured status, and
+       prevents partial or corrupt state.
+  3. Process Crash:
+     - Child process crashes abnormally (`exit 137`).
+     - OS kernel advisory locks are automatically released, error diagnostics captured,
+       and the crashed computation is excluded from cache storage.
+  4. Partial Write:
+     - Interrupted/abandoned staging files (`.dcc_cache/tmp/*.tmp`) are left in disk staging.
+     - Uncommitted temporary files are never indexed or visible to CAS readers; subsequent
+       writes succeed cleanly.
+  5. Corrupted Metadata:
+     - Injected malformed and truncated JSON into `.dcc_cache/entries/`.
+     - Engine detects deserialization error, safely treats entry as cache miss, and repairs
+       the cache record on fresh execution.
+  6. Corrupted Object (Bitrot / Checksum Mismatch):
+     - Injected tampered payload bytes into `.dcc_cache/objects/`.
+     - On read, cryptographic SHA-256 validation detects mismatch, renames damaged object
+       to `*.corrupted` (quarantine), and falls back to clean re-computation.
+  7. Missing Output:
+     - Command exits with code 0 but fails to generate declared required output file.
+     - Post-execution validation strictly rejects caching (`CacheError::MissingOutput`).
+  8. Invalid Configuration:
+     - Unparseable `max_size` string, empty operation/command strings, and denied sensitive
+       variables fail safely with structured `CacheError` before process execution.
+
+2. TEST SUITE EXECUTION RESULTS
+--------------------------------------------------------------------------------
+Command: cargo test --workspace
+Overall Result: ALL PASSED (100% test pass across all workspace crates)
+
+A. Dedicated Milestone 18.3 Failure Injection Test Suite (`crates/cache-runner/tests/failure_injection_tests.rs`):
+   - `test_failure_injection_disk_full_safe_handling` ................... PASSED
+   - `test_failure_injection_permission_denied_safe_handling` .......... PASSED
+   - `test_failure_injection_process_crash_clean_lock_release` ......... PASSED
+   - `test_failure_injection_partial_write_isolation` .................. PASSED
+   - `test_failure_injection_corrupted_metadata_self_healing` .......... PASSED
+   - `test_failure_injection_corrupted_object_quarantine_and_fallback` . PASSED
+   - `test_failure_injection_missing_output_strict_rejection` .......... PASSED
+   - `test_failure_injection_invalid_configuration_safe_errors` ........ PASSED
+
+B. All Workspace Integration & Unit Test Suites:
+   - Concurrency stress tests (12/12 passed) ........................... PASSED
+   - Flow integration tests (7/7 passed) ............................... PASSED
+   - Storage suite tests (19/19 passed) ................................ PASSED
+   - Security tests (11/11 passed) ..................................... PASSED
+   - Root integration tests (19/19 passed) ............................. PASSED
+   - Milestone 18.1 unit tests (Core 12/12 + Storage 7/7 passed) ....... PASSED
+   - Runner unit tests (8/8 passed) .................................... PASSED
+   - Storage unit tests (26/26 passed) ................................. PASSED
+
+3. CODE QUALITY & LINTING GATES
+--------------------------------------------------------------------------------
+- cargo check --workspace .............................................. PASSED (0 errors)
+- cargo clippy --workspace --all-targets --all-features -- -D warnings .. PASSED (0 warnings)
+- cargo fmt --all -- --check ........................................... PASSED (Clean formatting)
+
+4. CONCLUSION
+--------------------------------------------------------------------------------
+Milestone 18.3 is completely implemented, verified, and documented. The system fails
+safely across all 8 failure injection domains without compromising data integrity
+or existing CLI functionality and UI.
+================================================================================

@@ -15,9 +15,15 @@ edition = "2021"
 authors = ["DCC Contributors"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/developer-computation-cache/dcc"
-rust-version = "1.75"
+homepage = "https://github.com/developer-computation-cache/dcc"
+documentation = "https://docs.rs/dcc"
+readme = "README.md"
+rust-version = "1.77"
 
 [workspace.dependencies]
+dcc-core = { version = "1.0.0", path = "crates/cache-core" }
+dcc-storage = { version = "1.0.0", path = "crates/cache-storage" }
+dcc-runner = { version = "1.0.0", path = "crates/cache-runner" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 sha2 = "0.10"

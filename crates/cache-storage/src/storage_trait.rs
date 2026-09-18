@@ -112,7 +112,7 @@ pub trait Storage: Send + Sync {
     fn verify(&self, digest: &Digest) -> Result<()>;
 
     /// Batch retrieve multiple blobs in one operation (Milestone 15.2: `batch_get`).
-    /// Returns a vector of tuples containing (Digest, Option<Vec<u8>>).
+    /// Returns a vector of tuples containing `(Digest, Option<Vec<u8>>)`.
     fn batch_get(&self, digests: &[Digest]) -> Result<Vec<(Digest, Option<Vec<u8>>)>> {
         let mut results = Vec::with_capacity(digests.len());
         for digest in digests {
