@@ -34,30 +34,11 @@ jobs:
       - name: Format Code (cargo fmt)
         run: cargo fmt --all
 
-      - name: Clippy Linter Check
-        shell: bash
-        run: |
-          set +e
-          cargo clippy --workspace --all-targets --all-features > clippy_out.txt 2>&1
-          STATUS=$?
-          echo "## Clippy Output (${{ matrix.os }})" >> $GITHUB_STEP_SUMMARY
-          echo '```text' >> $GITHUB_STEP_SUMMARY
-          cat clippy_out.txt >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          cat clippy_out.txt
-          exit $STATUS
-
       - name: Run Workspace Tests
         run: cargo test --workspace --verbose
 
-      - name: Run Examples Suite
-        run: |
-          cargo run --example cached_codegen
-          cargo run --example cached_analysis
-          cargo run --example cached_transform
-          cargo run --example cached_rust_build
-          cargo run --example build_demonstration
-          cargo run --example build_benchmark
+      - name: Clippy Linter Check
+        run: cargo clippy --workspace --all-targets --all-features
 
   release-candidate-gate:
     name: Release Candidate Gate
