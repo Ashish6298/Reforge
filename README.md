@@ -79,7 +79,7 @@ The **Milestone 20 Engineering Audit** validates that DCC v1.0.0 satisfies all c
 | **20.3 Performance** | Cold execution (~20ms), Cache lookup (~0.12ms), Cache hit (~0.45ms), Cache restore (~0.18ms), Cache store (~0.22ms), Large files (~540 MB/s), Large cache O(1) lookup (~0.11ms), Concurrent workloads (8 threads, 0 deadlocks) | **EXCEEDS TARGET** |
 | **20.4 Developer Experience** | POSIX CLI semantics, actionable typed errors, `--explain` diagnostic miss reasons, stable JSON schema output, comprehensive docs, simple installation, predictable configuration | **VERIFIED PASS** |
 | **20.5 Public Rust API** | Complete API surface audit across `dcc-core`, `dcc-storage`, `dcc-runner`, and `dcc-integrations`. Idiomatic naming, encapsulated internals, extensible Builder patterns | **VERIFIED PASS** |
-| **20.6 Security** | Path traversal sandbox, symlink containment, secret scanning, `#![forbid(unsafe_code)]` | **VERIFIED SECURE** |
+| **20.6 Security & Sandboxing** | Path traversal protection (`../`), symlink boundary validation, CAS content-addressed anti-poisoning, zero `unsafe` blocks, sensitive credential auto-scanner | **VERIFIED SECURE** |
 | **20.7 Release Decision** | Formal v1.0.0 audit report documented at `docs/v1.0.0-release-audit.md` | **GO / APPROVED** |
 
 ---
