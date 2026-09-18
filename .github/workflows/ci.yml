@@ -35,7 +35,17 @@ jobs:
         run: cargo fmt --all
 
       - name: Run Workspace Tests
-        run: cargo test --workspace --verbose
+        shell: bash
+        run: |
+          set +e
+          cargo test --workspace -- --nocapture > test_output.txt 2>&1
+          STATUS=$?
+          echo "## Test Output (${{ matrix.os }})" >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          tail -n 120 test_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat test_output.txt
+          exit $STATUS
 
       - name: Clippy Linter Check
         run: cargo clippy --workspace --all-targets --all-features
