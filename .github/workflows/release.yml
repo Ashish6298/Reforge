@@ -1,0 +1,186 @@
+name: Release Automation
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  # =========================================================================
+  # 1. TEST & LINT GATE
+  # =========================================================================
+  test-and-lint:
+    name: Test & Lint (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        toolchain: [stable]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: 1. Lint (cargo fmt & cargo clippy)
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: 2. Test (cargo test workspace)
+        run: cargo test --workspace --verbose
+
+      - name: 3. Documentation Build
+        run: cargo doc --workspace --no-deps
+
+  # =========================================================================
+  # 2. PACKAGE GATE
+  # =========================================================================
+  package-crates:
+    name: Package Crates.io Tarballs
+    needs: test-and-lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 4. Package Workspace Crates
+        run: |
+          cargo package --workspace --no-verify
+
+      - name: Upload Packaged Crates Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaged-crates
+          path: target/package/*.crate
+
+  # =========================================================================
+  # 3. BUILD RELEASE BINARIES (Cross-Platform Distribution)
+  # =========================================================================
+  build-binaries:
+    name: Build Binary (${{ matrix.target }})
+    needs: test-and-lint
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: dcc-linux-x64.tar.gz
+            bin_path: target/x86_64-unknown-linux-gnu/release/dcc
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: dcc-windows-x64.zip
+            bin_path: target/x86_64-pc-windows-msvc/release/dcc.exe
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: dcc-macos-arm64.tar.gz
+            bin_path: target/aarch64-apple-darwin/release/dcc
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: 5. Build Release Binary
+        run: cargo build --release --target ${{ matrix.target }} --bin dcc
+
+      - name: Package Binary (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          tar -czvf ${{ matrix.artifact_name }} -C $(dirname ${{ matrix.bin_path }}) $(basename ${{ matrix.bin_path }})
+
+      - name: Package Binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path ${{ matrix.bin_path }} -DestinationPath ${{ matrix.artifact_name }}
+
+      - name: Upload Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_name }}
+
+  # =========================================================================
+  # 4. PUBLISH GITHUB RELEASE
+  # =========================================================================
+  publish-release:
+    name: Publish GitHub Release
+    needs: [package-crates, build-binaries]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Packaged Crates
+        uses: actions/download-artifact@v4
+        with:
+          name: packaged-crates
+          path: release-artifacts/crates
+
+      - name: Download Linux Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: dcc-linux-x64.tar.gz
+          path: release-artifacts/binaries
+
+      - name: Download Windows Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: dcc-windows-x64.zip
+          path: release-artifacts/binaries
+
+      - name: Download macOS Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: dcc-macos-arm64.tar.gz
+          path: release-artifacts/binaries
+
+      - name: Compute SHA-256 Checksums
+        working-directory: release-artifacts
+        run: |
+          find . -type f -exec sha256sum {} + > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: 6. Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-artifacts/crates/*.crate
+            release-artifacts/binaries/*
+            release-artifacts/SHA256SUMS.txt
+          generate_release_notes: true
+          draft: false
+          prerelease: false
