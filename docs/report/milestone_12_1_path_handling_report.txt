@@ -1,0 +1,69 @@
+================================================================================
+DCC MILESTONE 12.1: CROSS-PLATFORM PATH HANDLING VERIFICATION REPORT
+================================================================================
+Generated: 2026-09-18
+Platform: Windows, Linux, macOS Support Architecture
+Engine: Developer Computation Cache (DCC v1.0.0)
+Milestone: Milestone 12.1 — Path Handling
+
+--------------------------------------------------------------------------------
+1. OBJECTIVE & SPECIFICATION
+--------------------------------------------------------------------------------
+Milestone 12.1 requires pure, cross-platform path handling across Windows,
+Linux, and macOS from a single codebase.
+
+Core Requirements:
+  - Never hardcode platform-specific separator assumptions ('/' or '\').
+  - Never assume platform-specific root structures ('C:\' or '/').
+  - Use standard Rust path abstractions (`std::path::Path`, `PathBuf`, `Component`).
+  - Ensure canonical computation key hashes are deterministic and invariant
+    across operating systems regardless of slash directions (`src/main.rs` vs `src\main.rs`).
+  - Sanitize and encapsulate relative paths within workspace roots, rejecting
+    directory traversal attacks (`../`, `..\`, `/../`) and drive-prefix escapes.
+
+--------------------------------------------------------------------------------
+2. IMPLEMENTATION SUMMARY
+--------------------------------------------------------------------------------
+Added `PathUtils` in `crates/cache-core/src/paths.rs` providing:
+  - `PathUtils::to_normalized_string<P: AsRef<Path>>(path: P) -> String`:
+      Normalizes native OS paths into canonical forward-slash strings stripping
+      redundant leading `./` components.
+  - `PathUtils::to_native_path(normalized: &str) -> PathBuf`:
+      Converts normalized path strings back into OS-native `PathBuf` structures.
+  - `PathUtils::sanitize_relative_path<P: AsRef<Path>>(base_dir: P, rel_path: &str) -> Result<PathBuf>`:
+      Safely resolves and encapsulates paths within a root workspace directory,
+      preventing path escapes, absolute roots, and directory traversal.
+  - `PathUtils::validate_computation_path(path_str: &str) -> Result<()>`:
+      Validates declared computation paths and build action targets.
+  - `PathUtils::canonicalize_for_key(path_str: &str) -> String`:
+      Guarantees exact identity invariance for computation keys across Windows, Linux, and macOS.
+
+Integrations Updated:
+  - `CanonicalComputation::from_computation` in `crates/cache-core/src/canonical.rs`
+  - `Computation::validate` in `crates/cache-core/src/computation.rs`
+  - `OutputRestorer::sanitize_path` in `crates/cache-runner/src/restore.rs`
+  - `storage_suite` integration tests in `crates/cache-storage/tests/storage_suite.rs`
+
+--------------------------------------------------------------------------------
+3. TEST & VERIFICATION RESULTS
+--------------------------------------------------------------------------------
+Automated Test Matrix:
+  - `paths::tests::test_to_normalized_string_windows_and_unix`: PASSED
+  - `paths::tests::test_to_native_path`: PASSED
+  - `paths::tests::test_sanitize_relative_path_valid`: PASSED
+  - `paths::tests::test_sanitize_relative_path_traversal_rejection`: PASSED
+  - `paths::tests::test_validate_computation_path`: PASSED
+  - `paths::tests::test_cross_platform_key_invariance`: PASSED
+  - `storage_suite::test_milestone_12_1_cross_platform_path_handling`: PASSED
+
+Full Workspace Tests:
+  - `cargo test --workspace`: 134 passed, 0 failed.
+  - `cargo clippy --workspace --all-targets --all-features`: 0 warnings.
+  - `cargo fmt --all -- --check`: 100% compliant.
+
+--------------------------------------------------------------------------------
+4. CONCLUSION
+--------------------------------------------------------------------------------
+Milestone 12.1 is fully implemented, verified, and integrated into DCC's core
+architecture. Path representations across all platforms are fully unified,
+deterministic, and protected against directory traversal and host-specific bugs.

@@ -62,7 +62,7 @@ impl CanonicalComputation {
             .inputs
             .iter()
             .map(|i| CanonicalInput {
-                path: i.path.replace('\\', "/"),
+                path: crate::paths::PathUtils::canonicalize_for_key(&i.path),
                 digest: i.digest.as_str().to_string(),
                 size: i.size,
                 is_executable: i.is_executable,
@@ -74,7 +74,7 @@ impl CanonicalComputation {
             .outputs
             .iter()
             .map(|o| CanonicalOutput {
-                path: o.path.replace('\\', "/"),
+                path: crate::paths::PathUtils::canonicalize_for_key(&o.path),
                 required: o.required,
             })
             .collect();

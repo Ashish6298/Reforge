@@ -695,3 +695,34 @@ fn test_storage_suite_safe_deletion_coordination() {
         "Object must be cleanly deleted once reader lock is released"
     );
 }
+
+#[test]
+fn test_milestone_12_1_cross_platform_path_handling() {
+    use dcc_core::PathUtils;
+    let temp_dir = tempfile::tempdir().unwrap();
+    let storage = CasStorage::new(StorageConfig::new(temp_dir.path())).unwrap();
+
+    // 1. Invariant normalization across Windows and Unix path separators
+    let win_style = r"src\backend\cas\storage.rs";
+    let unix_style = "src/backend/cas/storage.rs";
+    assert_eq!(
+        PathUtils::to_normalized_string(win_style),
+        PathUtils::to_normalized_string(unix_style)
+    );
+    assert_eq!(
+        PathUtils::canonicalize_for_key(win_style),
+        PathUtils::canonicalize_for_key(unix_style)
+    );
+
+    // 2. Safe relative path resolution in arbitrary workspace roots
+    let safe_resolved =
+        PathUtils::sanitize_relative_path(temp_dir.path(), "sub/dir/output.o").unwrap();
+    assert!(safe_resolved.starts_with(temp_dir.path()));
+
+    // 3. Storage sharding path layout invariant
+    let data = b"cross platform storage content";
+    let (digest, _) = storage.store_object_bytes(data).unwrap();
+    let obj_path = storage.object_path(&digest);
+    assert!(obj_path.exists());
+    assert!(obj_path.is_file());
+}

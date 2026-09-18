@@ -201,22 +201,10 @@ impl Computation {
             ));
         }
         for out in &self.outputs {
-            let p = out.path.replace('\\', "/");
-            if p.starts_with('/') || p.starts_with("../") || p.contains("/../") || p == ".." {
-                return Err(CacheError::PathTraversal(format!(
-                    "Output path contains invalid traversal or absolute path: {}",
-                    out.path
-                )));
-            }
+            crate::paths::PathUtils::validate_computation_path(&out.path)?;
         }
         for inp in &self.inputs {
-            let p = inp.path.replace('\\', "/");
-            if p.starts_with('/') || p.starts_with("../") || p.contains("/../") || p == ".." {
-                return Err(CacheError::PathTraversal(format!(
-                    "Input path contains invalid traversal or absolute path: {}",
-                    inp.path
-                )));
-            }
+            crate::paths::PathUtils::validate_computation_path(&inp.path)?;
         }
         Ok(())
     }

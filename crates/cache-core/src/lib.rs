@@ -5,6 +5,7 @@ pub mod digest;
 pub mod entry;
 pub mod error;
 pub mod event;
+pub mod paths;
 pub mod size;
 
 pub use build_action::{BuildAction, BuildActionBuilder};
@@ -19,4 +20,5 @@ pub use entry::{
 };
 pub use error::{CacheError, Result};
 pub use event::{EventKind, EventSubscriber, StructuredEvent};
+pub use paths::PathUtils;
 pub use size::{ByteSize, SizeParseError};

@@ -1000,6 +1000,27 @@ cargo run --example build_benchmark
 
 ---
 
+## Cross-Platform Path Handling (`PathUtils`)
+
+DCC provides robust, platform-agnostic path normalization and sanitization across Windows, Linux, and macOS without hardcoded assumptions about separators (`/` vs `\`) or drive prefixes (`C:\`):
+
+```rust
+use dcc_core::PathUtils;
+use std::path::Path;
+
+// Canonical forward-slash normalization for invariant key hashing
+let normalized = PathUtils::to_normalized_string(r"src\components\button.rs");
+assert_eq!(normalized, "src/components/button.rs");
+
+// Convert normalized paths back to OS-native PathBuf
+let native = PathUtils::to_native_path("src/components/button.rs");
+
+// Safe workspace encapsulation and directory traversal rejection
+let safe_path = PathUtils::sanitize_relative_path(Path::new("./workspace"), "dist/bundle.js")?;
+```
+
+---
+
 ## Quality Gates & Verification
 
 ```bash
@@ -1010,5 +1031,6 @@ cargo fmt --all -- --check
 ```
 
 All 6 core exit criteria (deterministic computation modeling, canonical key generation, cache entry creation, retrieval, identity verification, and corrupted metadata detection) and all 11 physical storage scenarios (empty cache, single object, deduplication, corruption quarantine, interrupted write isolation, deletion, concurrent read/write races, deeply nested paths, multi-MB large files, and binary byte safety) are fully verified and tested.
+
 
 
