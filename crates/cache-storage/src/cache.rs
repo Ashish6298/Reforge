@@ -199,10 +199,8 @@ impl Cache {
                 }
             }
 
-            // Atomically replace target path
-            if target_path.exists() {
-                let _ = fs::remove_file(&target_path);
-            }
+            // Atomically replace target path (Milestone 14.3: safe pre-cleaning prevents symlink-following overwrite attacks)
+            dcc_core::PathUtils::safe_prepare_target_path(&target_path)?;
             fs::rename(&tmp_path, &target_path)?;
 
             #[cfg(unix)]

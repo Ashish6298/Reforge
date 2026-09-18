@@ -1216,7 +1216,36 @@ DCC guarantees that cached output metadata can **never** restore files outside t
 3. **Workspace Boundary Containment**:
    - All restored artifacts are verified against the canonical workspace boundary prior to atomic disk placement, ensuring external directories and host environments remain completely untouched.
 
+### Symlink Attack Defense (Milestone 14.3)
+
+DCC prevents arbitrary file overwrite and directory escape vulnerabilities resulting from malicious symlinks:
+
+```text
+       [ Output Restoration Target Path ]
+                      │
+       PathUtils::sanitize_relative_path()
+                      │
+       ├── verify_symlink_safety():
+       │   Inspects intermediate directory components.
+       │   Resolves canonical symlink targets.
+       │   Target escapes workspace root? ──► REJECT (PathTraversal error)
+       │
+       └── safe_prepare_target_path():
+           Is target already an existing symlink?
+           ├── YES: Unlinks symlink node directly (never follows into external file)
+           └── NO:  Cleans regular file before atomic rename
+                      │
+                      ▼
+       [ Atomic Rename: Extracted Payload Safely Replaces Link Node ]
+```
+
+1. **Symlink Overwrite Attack Prevention**:
+   - When extracting files to a destination path where an attacker has planted a symlink pointing to an external victim file (e.g. `/etc/passwd` or `C:\secrets.key`), `safe_prepare_target_path` inspects `symlink_metadata` and removes the symlink itself rather than opening or writing through it.
+2. **Directory Symlink Escape Containment**:
+   - `verify_symlink_safety` checks every component along the path; if an intermediate segment is a symlink pointing outside the canonical workspace boundary, the restoration is aborted immediately with `DccError::PathTraversal`.
+
 ---
+
 
 ## Quality Gates & Verification
 

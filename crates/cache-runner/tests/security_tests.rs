@@ -379,3 +379,155 @@ fn test_milestone_14_2_path_traversal_runner_and_cache_restore_rejection() {
         "Sensitive file outside workspace must remain strictly intact and unpoisoned"
     );
 }
+
+#[test]
+fn test_milestone_14_3_symlink_overwrite_attack_prevention() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let cache_dir = temp_dir.path().join(".dcc_cache");
+    let workspace_dir = temp_dir.path().join("workspace");
+    let victim_dir = temp_dir.path().join("victim_dir");
+    std::fs::create_dir_all(&workspace_dir).unwrap();
+    std::fs::create_dir_all(&victim_dir).unwrap();
+
+    let victim_file = victim_dir.join("critical_target.key");
+    std::fs::write(&victim_file, b"ORIGINAL_CRITICAL_SECRET").unwrap();
+
+    let cache = dcc_storage::Cache::open(&cache_dir).unwrap();
+
+    // 1. Store a cache payload
+    let (blob_digest, blob_size) = cache
+        .storage()
+        .store_object_bytes(b"MALICIOUS_OVERWRITE_PAYLOAD")
+        .unwrap();
+
+    let comp = Computation::builder_with("build", "tool")
+        .input("src.txt", blob_digest.clone(), blob_size)
+        .output("output.txt", true)
+        .build()
+        .unwrap();
+    let key = comp.compute_key().unwrap();
+
+    let entry = dcc_core::CacheEntry::new(
+        key,
+        comp,
+        vec![dcc_core::OutputManifestItem {
+            path: "output.txt".to_string(),
+            digest: blob_digest,
+            size: blob_size,
+            is_executable: None,
+        }],
+        dcc_core::ExecutionMetadata::default(),
+    );
+
+    // 2. Plant a symlink inside the workspace pointing to victim_file
+    let symlink_path = workspace_dir.join("output.txt");
+
+    let mut symlink_created = false;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        if symlink(&victim_file, &symlink_path).is_ok() {
+            symlink_created = true;
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::symlink_file;
+        if symlink_file(&victim_file, &symlink_path).is_ok() {
+            symlink_created = true;
+        }
+    }
+
+    if symlink_created {
+        // 3. Restore entry into workspace
+        let res = cache.restore(&entry, &workspace_dir);
+        assert!(res.is_ok(), "Restore should succeed cleanly");
+
+        // 4. Verify victim file was NOT overwritten through the symlink
+        let victim_content = std::fs::read(&victim_file).unwrap();
+        assert_eq!(
+            victim_content, b"ORIGINAL_CRITICAL_SECRET",
+            "Victim file must NOT be overwritten through a malicious symlink"
+        );
+
+        // 5. Verify the restored file in workspace is a normal regular file containing payload
+        let restored_content = std::fs::read(&symlink_path).unwrap();
+        assert_eq!(
+            restored_content, b"MALICIOUS_OVERWRITE_PAYLOAD",
+            "Workspace file must contain the restored payload"
+        );
+        let meta = std::fs::symlink_metadata(&symlink_path).unwrap();
+        assert!(
+            !meta.file_type().is_symlink(),
+            "Workspace target must have replaced the malicious symlink, not followed it"
+        );
+    }
+}
+
+#[test]
+fn test_milestone_14_3_symlink_directory_escape_prevention() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let cache_dir = temp_dir.path().join(".dcc_cache");
+    let workspace_dir = temp_dir.path().join("workspace");
+    let external_dir = temp_dir.path().join("external_system");
+    std::fs::create_dir_all(&workspace_dir).unwrap();
+    std::fs::create_dir_all(&external_dir).unwrap();
+
+    let cache = dcc_storage::Cache::open(&cache_dir).unwrap();
+
+    // Store a payload
+    let (blob_digest, blob_size) = cache.storage().store_object_bytes(b"PAYLOAD_DATA").unwrap();
+
+    // Create an entry declaring output inside "symlink_folder/target.txt"
+    let comp = Computation::builder_with("build", "tool")
+        .input("src.txt", blob_digest.clone(), blob_size)
+        .output("symlink_folder/target.txt", true)
+        .build()
+        .unwrap();
+    let key = comp.compute_key().unwrap();
+
+    let entry = dcc_core::CacheEntry::new(
+        key,
+        comp,
+        vec![dcc_core::OutputManifestItem {
+            path: "symlink_folder/target.txt".to_string(),
+            digest: blob_digest,
+            size: blob_size,
+            is_executable: None,
+        }],
+        dcc_core::ExecutionMetadata::default(),
+    );
+
+    // Plant a symlink directory in workspace pointing outside workspace
+    let symlink_dir_path = workspace_dir.join("symlink_folder");
+    let mut symlink_dir_created = false;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        if symlink(&external_dir, &symlink_dir_path).is_ok() {
+            symlink_dir_created = true;
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::symlink_dir;
+        if symlink_dir(&external_dir, &symlink_dir_path).is_ok() {
+            symlink_dir_created = true;
+        }
+    }
+
+    if symlink_dir_created {
+        // Attempt restoration
+        let res = cache.restore(&entry, &workspace_dir);
+        assert!(
+            res.is_err(),
+            "Restoring through a symlinked directory pointing outside workspace must be rejected"
+        );
+
+        // Verify external dir was untouched
+        assert!(
+            !external_dir.join("target.txt").exists(),
+            "External directory must never receive restored files through symlink folder"
+        );
+    }
+}

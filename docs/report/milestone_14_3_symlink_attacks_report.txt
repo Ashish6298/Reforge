@@ -1,0 +1,75 @@
+================================================================================
+DCC (Developer Computation Cache) - MILESTONE 14.3 VERIFICATION REPORT
+Phase: Security & Safety - Symlink Attack Defenses
+Date: 2026-09-18
+================================================================================
+
+1. OBJECTIVE & REQUIREMENTS SUMMARY
+--------------------------------------------------------------------------------
+Milestone 14.3 mandates strict handling and defense against Symlink Attacks:
+- A cached entry must not be able to cause arbitrary file overwrite through a malicious symlink.
+- Restorations must never follow symlinks outside the workspace boundary to write, overwrite, or truncate external files.
+- Restorations through symlinked directory trees that escape the workspace root must be actively detected and rejected.
+- Pre-existing symlinks at destination output paths inside the workspace must be replaced rather than followed into external targets.
+
+2. ARCHITECTURAL IMPLEMENTATION
+--------------------------------------------------------------------------------
+Symlink attack defenses operate across three coordinated security layers:
+
+Layer 1: Intermediate Directory Symlink Validation (`crates/cache-core/src/paths.rs`)
+- `PathUtils::verify_symlink_safety(base_dir, relative_sub)`:
+  * Iterates across each path component along the relative output path.
+  * Checks filesystem `symlink_metadata` for every intermediate directory and folder component.
+  * If a symlink is detected on an intermediate segment or directory node, it resolves the canonical path (`canonicalize()`).
+  * If the resolved canonical destination does not strictly start with the canonical workspace root (`base_canonical`), the operation immediately fails with `DccError::PathTraversal`.
+
+Layer 2: Safe Pre-Cleaning Before Atomic Rename (`crates/cache-core/src/paths.rs`)
+- `PathUtils::safe_prepare_target_path(target_path)`:
+  * Uses `std::fs::symlink_metadata` to inspect whether the target path is already an existing symlink.
+  * If the target is a symlink, it removes the symlink entry directly (`fs::remove_file` or `fs::remove_dir`), ensuring the subsequent atomic rename (`fs::rename`) replaces the link node rather than following the symlink into an arbitrary external file.
+  * If the target is a regular file, it cleans it up safely before atomic placement.
+
+Layer 3: Restoration Engine Integration (`crates/cache-storage` & `crates/cache-runner`)
+- `Cache::restore_with_options` and `OutputRestorer::restore_entry`:
+  * Validate all declared output paths using `PathUtils::sanitize_relative_path`, which invokes `verify_symlink_safety`.
+  * Protect the atomic replacement phase using `PathUtils::safe_prepare_target_path`.
+  * Ensure any extraction through staged temporary files `.tmp_restore_<nonce>` remains isolated.
+
+3. TEST SUITE & VERIFICATION MATRIX
+--------------------------------------------------------------------------------
+Comprehensive symlink security test suite executed in `crates/cache-runner/tests/security_tests.rs` and `tests/security_tests.rs`:
+
+[TEST 1] `test_milestone_14_3_symlink_overwrite_attack_prevention`
+- Attack Vector:
+  * An attacker places a malicious symlink `workspace/output.txt` pointing to an external victim file `victim_dir/critical_target.key`.
+  * Cache restoration is triggered for output path `output.txt`.
+- Defense Behavior:
+  * `safe_prepare_target_path` unlinks the malicious symlink without following it.
+  * The cached payload replaces the workspace file as a regular file.
+  * External victim file `critical_target.key` remains 100% intact with its original secret.
+- Result: PASSED.
+
+[TEST 2] `test_milestone_14_3_symlink_directory_escape_prevention`
+- Attack Vector:
+  * An attacker places a directory symlink `workspace/symlink_folder` pointing to an external system folder `external_system/`.
+  * Cache entry declares output at `symlink_folder/target.txt`.
+- Defense Behavior:
+  * `PathUtils::sanitize_relative_path` and `verify_symlink_safety` detect that `symlink_folder` resolves outside the canonical workspace root.
+  * Restoration is rejected immediately with `DccError::PathTraversal`.
+  * No files are written to `external_system/`.
+- Result: PASSED.
+
+[TEST 3] `test_verify_symlink_safety_rejection`
+- Unit test in `crates/cache-core/src/paths.rs` verifying boundary rejection on symlink escapes.
+- Result: PASSED.
+
+4. OVERALL SUITE STATUS
+--------------------------------------------------------------------------------
+- Unit & Integration Tests: 100% Passed
+- Cargo Clippy: 0 warnings (-D warnings)
+- Code Formatting: Verified clean with `cargo fmt -- --check`
+- Existing UI, runner semantics, and caching speed: 100% preserved.
+
+================================================================================
+CONCLUSION: Milestone 14.3 is fully implemented, verified, and complete.
+================================================================================

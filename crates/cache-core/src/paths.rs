@@ -55,7 +55,7 @@ impl PathUtils {
 
     /// Validates that a relative path does not escape a target root directory,
     /// rejecting directory traversal (`../`), absolute paths (`/foo`, `C:\foo`),
-    /// or Windows drive-prefix tricks.
+    /// Windows drive-prefix tricks, or malicious symlink escapes (Milestone 14.2 & 14.3).
     pub fn sanitize_relative_path<P: AsRef<Path>>(base_dir: P, rel_path: &str) -> Result<PathBuf> {
         let normalized = rel_path.replace('\\', "/");
 
@@ -74,7 +74,7 @@ impl PathUtils {
 
         let base = base_dir.as_ref();
         let native_sub = Self::to_native_path(&normalized);
-        let combined = base.join(native_sub);
+        let combined = base.join(&native_sub);
 
         // Verify logical encapsulation
         let mut depth: isize = 0;
@@ -98,7 +98,81 @@ impl PathUtils {
             }
         }
 
+        // Symlink Safety Check (Milestone 14.3):
+        // Ensure that no intermediate parent segment or target path is an existing
+        // symlink pointing outside the workspace boundary.
+        Self::verify_symlink_safety(base, &native_sub)?;
+
         Ok(combined)
+    }
+
+    /// Verifies that resolving intermediate directory symlinks along `relative_sub` within `base_dir`
+    /// does not point outside the canonical `base_dir` root (Milestone 14.3 Symlink Attacks).
+    pub fn verify_symlink_safety<P: AsRef<Path>, Q: AsRef<Path>>(
+        base_dir: P,
+        relative_sub: Q,
+    ) -> Result<()> {
+        let base = base_dir.as_ref();
+        let base_canonical = base.canonicalize().unwrap_or_else(|_| base.to_path_buf());
+
+        let components: Vec<_> = relative_sub.as_ref().components().collect();
+        let len = components.len();
+
+        let mut current = base.to_path_buf();
+        for (idx, component) in components.into_iter().enumerate() {
+            if let Component::Normal(c) = component {
+                current.push(c);
+
+                let is_leaf = idx == len - 1;
+
+                // Inspect symlink resolution along intermediate directories and leaf directories
+                if let Ok(meta) = std::fs::symlink_metadata(&current) {
+                    if meta.file_type().is_symlink() {
+                        // Intermediate symlinks or directory symlinks must never point outside workspace
+                        if !is_leaf || meta.is_dir() {
+                            if let Ok(target_canon) = current.canonicalize() {
+                                if !target_canon.starts_with(&base_canonical) {
+                                    return Err(CacheError::PathTraversal(format!(
+                                        "Malicious symlink escape detected at '{}' pointing outside workspace to '{}'",
+                                        current.display(),
+                                        target_canon.display()
+                                    )));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Pre-cleans a target path before atomic overwrite to ensure an existing malicious symlink
+    /// is deleted rather than followed into an external file (Milestone 14.3 Symlink Overwrite Prevention).
+    pub fn safe_prepare_target_path<P: AsRef<Path>>(target_path: P) -> Result<()> {
+        let p = target_path.as_ref();
+        if let Ok(meta) = std::fs::symlink_metadata(p) {
+            if meta.file_type().is_symlink() {
+                // Remove the symlink itself, never following its target
+                #[cfg(windows)]
+                {
+                    // On Windows symlinks could be file or dir symlinks
+                    if meta.is_dir() {
+                        let _ = std::fs::remove_dir(p);
+                    } else {
+                        let _ = std::fs::remove_file(p);
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = std::fs::remove_file(p);
+                }
+            } else if p.is_file() {
+                let _ = std::fs::remove_file(p);
+            }
+        }
+        Ok(())
     }
 
     /// Validates a path declared on a computation or build action.
@@ -214,5 +288,31 @@ mod tests {
             PathUtils::canonicalize_for_key(win_path),
             PathUtils::canonicalize_for_key(unix_path)
         );
+    }
+
+    #[test]
+    fn test_verify_symlink_safety_rejection() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let ws = temp_dir.path().join("workspace");
+        let external = temp_dir.path().join("external");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::create_dir_all(&external).unwrap();
+
+        let ext_target = external.join("secret.txt");
+        std::fs::write(&ext_target, b"SECRET").unwrap();
+
+        // If symlinks are supported on this platform, create a symlink in workspace pointing to external
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let link_in_ws = ws.join("symlink_to_external");
+            if symlink(&external, &link_in_ws).is_ok() {
+                let res = PathUtils::sanitize_relative_path(&ws, "symlink_to_external/secret.txt");
+                assert!(
+                    res.is_err(),
+                    "PathUtils must reject traversal through symlink pointing outside workspace"
+                );
+            }
+        }
     }
 }

@@ -66,7 +66,8 @@ impl OutputRestorer {
                 }
             }
 
-            // Atomically replace target
+            // Atomically replace target (Milestone 14.3: pre-cleaning avoids following target symlinks)
+            PathUtils::safe_prepare_target_path(&target_path)?;
             if let Err(e) = fs::rename(&tmp_path, &target_path) {
                 let _ = fs::remove_file(&tmp_path);
                 if !target_path.exists() {
