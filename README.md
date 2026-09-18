@@ -1367,6 +1367,15 @@ DCC implements a 3-tier local-first cache hierarchy (`TieredCache`):
    - Remote cache hits automatically promote and populate both L2 Local Disk and L1 Memory.
    - Cache location queries via `tiered_cache.locate_tier(&digest)` return the active tier (`CacheTier::L1Memory`, `CacheTier::L2LocalDisk`, `CacheTier::L3RemoteCache`).
 
+### Remote Cache Specification & Design Document (Milestone 15.4)
+
+The remote cache architecture and protocol design are detailed in [`docs/remote-cache.md`](docs/remote-cache.md):
+- **Protocol Options**: REST (HTTP/1.1 & HTTP/2) and gRPC (Bazel REAPI compatible) mappings.
+- **Authentication**: Bearer tokens, API keys, role-based access control (RBAC), and mutual TLS (mTLS).
+- **Integrity**: Streaming SHA-256 verification and canonical entry key identity validation.
+- **Multi-Tenancy**: Namespace isolation for Action Cache metadata with cross-namespace global CAS deduplication.
+- **Failure Resilience**: Strict non-blocking guarantees; remote timeouts and failures fall back transparently to local execution without breaking builds.
+
 ---
 
 

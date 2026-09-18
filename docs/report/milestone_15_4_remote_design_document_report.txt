@@ -1,0 +1,64 @@
+================================================================================
+DEVELOPER COMPUTATION CACHE (DCC) - VERIFICATION REPORT
+Milestone 15.4 — Remote Cache Design Document & Specification
+Date: 2026-09-18
+================================================================================
+
+1. EXECUTIVE SUMMARY
+--------------------------------------------------------------------------------
+Milestone 15.4 produces the comprehensive Remote Cache Architecture & Protocol
+Specification document at `docs/remote-cache.md`.
+
+Key areas fully defined in the design document:
+  1. Protocol Possibilities:
+     - REST over HTTP/1.1 & HTTP/2 with CDN / reverse proxy compatibility.
+     - gRPC (Bazel REAPI compatible) for bi-directional batching & streaming.
+     - S3 / Blob Storage object protocol for direct cloud storage integration.
+  2. Authentication & Authorization:
+     - Bearer Tokens, API keys, and mutual TLS (mTLS).
+     - Role-Based Access Control (RBAC): `ReadOnly`, `ReadWrite`, `Admin`.
+     - Short-lived pre-signed URLs for cloud direct blob uploads.
+  3. Integrity & Anti-Poisoning:
+     - Streaming cryptographic SHA-256 validation on downloads.
+     - Canonical key recalculation on Action Cache entry payloads.
+     - Workspace boundary containment and symlink attack prevention.
+  4. Upload & Download Flows:
+     - Sequence diagrams for missing blob discovery, upload, and atomic download.
+  5. Cache Namespaces & Multi-Tenancy:
+     - Namespace isolation for Action Cache metadata.
+     - Global deduplication across namespaces for immutable CAS blobs.
+  6. Versioning & Compatibility:
+     - Metadata schema versioning (`schema_version: u32`).
+     - Protocol version headers and capability negotiation.
+  7. Secret Protection:
+     - Integration with `SensitiveDataPolicy` (`Deny` / `Warn` / `Mask`).
+     - Transport-layer TLS 1.3 and at-rest envelope encryption.
+  8. Failure Behavior & Graceful Degradation:
+     - Strict guarantee: Remote cache failures never break builds; transparent
+       fallback to local execution on network timeouts, 5xx server errors, or 403 errors.
+
+2. TEST SUITE EXECUTION RESULTS
+--------------------------------------------------------------------------------
+Command: cargo test --workspace
+Overall Result: ALL PASSED (100% test pass across all workspace crates)
+
+A. Storage, Security & Runner Suites:
+   - Storage suite tests (19/19 passed) ................................ PASSED
+   - Storage trait & backend capabilities (26/26 passed) .............. PASSED
+   - Security & trust mode tests (11/11 passed) ........................ PASSED
+   - Concurrency stress tests (12/12 passed) ........................... PASSED
+   - Integration & lifecycle tests (17/17 passed) ...................... PASSED
+   - Runner & process execution tests (8/8 passed) ..................... PASSED
+
+3. CODE QUALITY & LINTING GATES
+--------------------------------------------------------------------------------
+- cargo check --workspace .............................................. PASSED (0 errors)
+- cargo clippy --workspace --all-targets --all-features -- -D warnings .. PASSED (0 warnings)
+- cargo fmt --all -- --check ........................................... PASSED (Clean formatting)
+
+4. CONCLUSION
+--------------------------------------------------------------------------------
+Milestone 15.4 is fully accomplished. The design document `docs/remote-cache.md`
+is authored with thorough specifications, providing the blueprints for future remote
+server implementations without altering existing local functionality or UI.
+================================================================================
