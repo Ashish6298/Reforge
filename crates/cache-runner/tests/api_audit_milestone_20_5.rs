@@ -7,7 +7,7 @@
 //! 5. Information Hiding (no internal lock handles or raw file descriptors leaked)
 
 use dcc_core::{CacheEntry, Computation, Digest, ExecutionMetadata, OutputManifestItem};
-use dcc_integrations::DccActionBuilder;
+use dcc_integrations::BuildAction;
 use dcc_runner::{CommandSpec, EngineOptions, ExecutionStatus, RunnerEngine};
 use dcc_test_utils::TestEnv;
 
@@ -78,10 +78,16 @@ fn test_audit_20_5_public_storage_and_runner_api_soundness() {
 
 #[test]
 fn test_audit_20_5_integrations_builder_api_soundness() {
-    let action = DccActionBuilder::new("rustc")
-        .arg("main.rs")
-        .input("src/main.rs")
-        .output("target/main.exe")
+    // Verify the BuildAction builder API is usable and idiomatic
+    let action = BuildAction::builder()
+        .compiler("rustc")
+        .argument("main.rs")
+        .source_input("src/main.rs", Digest::hash_bytes(b"fn main() {}"), 12)
+        .output("target/main.exe", true)
         .build();
     assert!(action.is_ok());
+
+    // Verify the action can produce a Computation
+    let comp = action.unwrap().to_computation();
+    assert!(comp.is_ok());
 }
