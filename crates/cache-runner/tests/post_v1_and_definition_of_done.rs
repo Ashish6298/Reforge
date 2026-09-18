@@ -10,8 +10,9 @@
 use dcc_core::{CachePolicy, Computation, Digest, MissReason, ToolIdentity};
 use dcc_integrations::BuildAction;
 use dcc_runner::{CommandSpec, EngineOptions, ExecutionStatus, MissExplainer, RunnerEngine};
-use dcc_storage::{CasStorage, LocalFilesystemStorage, Storage, StorageConfig, TieredCache};
+use dcc_storage::{LocalFilesystemStorage, Storage, StorageConfig, TieredCache};
 use dcc_test_utils::TestEnv;
+use std::io::Read;
 
 // ============================================================================
 // 1. V1.1 ADVANCED DIAGNOSTICS: WHY / EXPLAIN / DIFF / TRACE
@@ -71,8 +72,10 @@ fn test_post_v1_1_advanced_diagnostics_diff_and_explain() {
 #[test]
 fn test_post_v1_2_storage_optimization_and_tiered_caching() {
     let env = TestEnv::new().unwrap();
-    let local_disk: LocalFilesystemStorage =
-        CasStorage::new(StorageConfig::new(env.cache_dir.path().join("tiered"))).unwrap();
+    let local_disk = LocalFilesystemStorage::new(StorageConfig::new(
+        env.cache_dir.path().join("tiered"),
+    ))
+    .unwrap();
     let tiered = TieredCache::new(local_disk);
 
     let payload = b"COMPRESSED_OPTIMIZED_STORAGE_PAYLOAD";
@@ -81,7 +84,7 @@ fn test_post_v1_2_storage_optimization_and_tiered_caching() {
     assert!(tiered.exists(&digest));
     let mut reader = tiered.get(&digest).unwrap();
     let mut retrieved = Vec::new();
-    std::io::Read::read_to_end(&mut reader, &mut retrieved).unwrap();
+    reader.read_to_end(&mut retrieved).unwrap();
     assert_eq!(retrieved, payload);
 }
 
