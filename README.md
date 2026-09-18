@@ -1059,6 +1059,24 @@ DCC handles cross-platform file system semantics consistently across Windows, Li
 
 ---
 
+## Cross-Platform CI Matrix
+
+Every build and release candidate of DCC is automatically verified across all major operating systems via GitHub Actions (`.github/workflows/ci.yml`):
+
+| Operating System | CI Runner | Toolchain | Status |
+|---|---|---|---|
+| **Linux** | `ubuntu-latest` | `stable` | Active |
+| **Windows** | `windows-latest` | `stable` | Active |
+| **macOS** | `macos-latest` | `stable` | Active |
+
+Quality pipeline steps executed on every OS:
+1. `cargo fmt --all -- --check`
+2. `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+3. `cargo test --workspace --verbose`
+4. Example suite execution (`cached_codegen`, `cached_analysis`, `cached_transform`, `cached_rust_build`, `build_demonstration`, `build_benchmark`)
+
+---
+
 ## Quality Gates & Verification
 
 ```bash
@@ -1069,6 +1087,7 @@ cargo fmt --all -- --check
 ```
 
 All 6 core exit criteria (deterministic computation modeling, canonical key generation, cache entry creation, retrieval, identity verification, and corrupted metadata detection) and all 11 physical storage scenarios (empty cache, single object, deduplication, corruption quarantine, interrupted write isolation, deletion, concurrent read/write races, deeply nested paths, multi-MB large files, and binary byte safety) are fully verified and tested.
+
 
 
 
