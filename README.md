@@ -35,15 +35,53 @@ Unlike language-specific caches or complex monorepo build systems:
 ## 3. How Does It Work?
 
 ```text
-1. Prepare Command ───> 2. Hash Inputs (SHA-256) ───> 3. Compute Canonical CacheKey
-                                                             │
-            ┌────────────────────────────────────────────────┴────────────────────────────────────────────────┐
-            ▼                                                                                                 ▼
-      [Cache HIT]                                                                                       [Cache MISS]
-  Verify CAS hashes (SHA-256)                                                                       Execute child process directly
-  Atomically restore outputs (0 ms)                                                                 Validate required output files exist
-  Replay stdout/stderr & exit code 0                                                                Ingest outputs into CAS (.dcc_cache/objects/)
-  Skip process execution                                                                            Commit immutable metadata (.dcc_cache/entries/)
+                 ┌──────────────────────┐
+                 │ Developer / CI / Tool │
+                 └──────────┬───────────┘
+                            │
+                            ▼
+                 ┌──────────────────────┐
+                 │ Computation API      │
+                 └──────────┬───────────┘
+                            │
+                            ▼
+                 ┌──────────────────────┐
+                 │ Normalizer           │
+                 │ + Key Generator      │
+                 └──────────┬───────────┘
+                            │
+                            ▼
+                 ┌──────────────────────┐
+                 │ Cache Lookup         │
+                 └──────────┬───────────┘
+                            │
+                  ┌─────────┴─────────┐
+                  │                   │
+                 HIT                 MISS
+                  │                   │
+                  ▼                   ▼
+          ┌──────────────┐    ┌──────────────┐
+          │ Verify       │    │ Execute      │
+          │ Integrity    │    │ Computation  │
+          └──────┬───────┘    └──────┬───────┘
+                 │                    │
+                 │                    ▼
+                 │             ┌──────────────┐
+                 │             │ Validate     │
+                 │             │ Outputs      │
+                 │             └──────┬───────┘
+                 │                    │
+                 │                    ▼
+                 │             ┌──────────────┐
+                 │             │ Store Result │
+                 │             └──────┬───────┘
+                 │                    │
+                 └─────────┬──────────┘
+                           ▼
+                 ┌──────────────────────┐
+                 │ Restore / Return     │
+                 │ Computation Result   │
+                 └──────────────────────┘
 ```
 
 ---
@@ -61,26 +99,25 @@ dcc/
 │   └── cache-test-utils/   # Shared test environment helpers and mock harness
 ├── docs/
 │   ├── v1.0.0-release-audit.md # Milestone 20 formal v1.0.0 engineering release audit report
-│   ├── report/                 # Granular milestone reports (Milestone 0 through Milestone 20)
+│   ├── report/                 # Granular milestone reports (Milestone 0 through Milestone 20 + Post-V1)
 │   └── ...                     # Architectural, security, and integration documentation
 └── tests/                  # Cross-platform and multi-crate integration suites
 ```
 
 ---
 
-## 5. Milestone 20 — Engineering Release Audit Summary
+## 5. Engineering Audit & Definition of Done Verification
 
-The **Milestone 20 Engineering Audit** validates that DCC v1.0.0 satisfies all correctness, reliability, security, performance, and API criteria:
-
-| Audit Section | Verification Vectors | Measured Results & Status |
+| Verification Vector | Audit Outcome & Performance SLA | Status |
 | :--- | :--- | :--- |
-| **20.1 Correctness** | `same comp -> same key`, `diff comp -> diff key`, `changed input -> miss`, `changed env -> miss`, `changed tool -> miss`, `corrupt cache -> detected`, `missing cache -> safe miss`, `failed comp -> not cached` | **VERIFIED PASS** |
-| **20.2 Reliability** | Process crash resilience, disk capacity limits, partial write atomicity, concurrent locking, cache corruption detection, runtime deletion recovery, large cache eviction enforcement | **VERIFIED PASS** |
-| **20.3 Performance** | Cold execution (~20ms), Cache lookup (~0.12ms), Cache hit (~0.45ms), Cache restore (~0.18ms), Cache store (~0.22ms), Large files (~540 MB/s), Large cache O(1) lookup (~0.11ms), Concurrent workloads (8 threads, 0 deadlocks) | **EXCEEDS TARGET** |
-| **20.4 Developer Experience** | POSIX CLI semantics, actionable typed errors, `--explain` diagnostic miss reasons, stable JSON schema output, comprehensive docs, simple installation, predictable configuration | **VERIFIED PASS** |
-| **20.5 Public Rust API** | Complete API surface audit across `dcc-core`, `dcc-storage`, `dcc-runner`, and `dcc-integrations`. Idiomatic naming, encapsulated internals, extensible Builder patterns | **VERIFIED PASS** |
-| **20.6 Security & Sandboxing** | Path traversal protection (`../`), symlink boundary validation, CAS content-addressed anti-poisoning, zero `unsafe` blocks, sensitive credential auto-scanner | **VERIFIED SECURE** |
-| **20.7 Release Decision** | Formal v1.0.0 audit report documented at `docs/v1.0.0-release-audit.md` | **GO / APPROVED** |
+| **Correctness (20.1)** | Deterministic keying, miss on changed inputs/env/tools, safe miss fallback, no failed caching | **VERIFIED PASS** |
+| **Reliability (20.2)** | Crash resilience, disk full isolation, partial write atomicity, concurrent file locking | **VERIFIED PASS** |
+| **Performance (20.3)** | < 1 ms hit restore, ~ 540 MB/s streaming SHA-256 throughput, O(1) index lookup | **EXCEEDS TARGET** |
+| **Developer Experience (20.4)** | POSIX CLI, actionable typed errors, `--explain` diagnostics, stable JSON schema | **VERIFIED PASS** |
+| **Public Rust API (20.5)** | Idiomatic builder APIs, encapsulated internals, extensible without breaking SemVer | **VERIFIED PASS** |
+| **Security & Sandboxing (20.6)** | Path traversal sandbox, symlink containment, zero `unsafe` blocks, secret credential scanner | **VERIFIED SECURE** |
+| **Release Audit (20.7)** | Formal audit report documented at `docs/v1.0.0-release-audit.md` | **GO / APPROVED** |
+| **20-Point Definition of Done** | All 20 lifecycle developer steps verified end-to-end | **100% COMPLETE** |
 
 ---
 
@@ -120,11 +157,13 @@ dcc prune --max-size 10GB
 
 ---
 
-## 7. Next Phase Roadmap (Post-v1.0.0)
+## 7. Post-V1 Capabilities & Roadmap
 
 - **v1.1 — Advanced Diagnostics**: `dcc why`, `dcc explain`, `dcc diff`, `dcc inspect`, `dcc trace`
-- **v1.2 — Storage Optimization**: Transparent compression (zstd), hardlinks, reflinks, parallel hash pipelines
-- **v1.3 — Plugin / Integration API**: External developer tool plugins, linters, doc generators
+- **v1.2 — Storage Optimization**: Transparent compression, hardlinks, reflinks, tiered memory caching
+- **v1.3 — Plugin / Integration API**: Fluent `DccActionBuilder` for linters, code generators, and asset pipelines
+- **v1.4 — Advanced Cache Policies**: `ReadOnly`, `WriteOnly`, `NoCache`, `ForceRecompute`, `TTL`
+- **v2.0 — Remote Cache**: Local-first architecture with optional HTTP / S3 object storage remote tiers
 
 ---
 
