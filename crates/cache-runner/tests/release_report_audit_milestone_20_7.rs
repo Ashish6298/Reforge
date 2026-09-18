@@ -1,4 +1,4 @@
-﻿//! Release Audit Report Structure Test Suite for Milestone 20.7
+//! Release Audit Report Structure Test Suite for Milestone 20.7
 //! Verifies that the v1.0.0-release-audit.md contains all required sections:
 //! - Project, Version, Date
 //! - Architecture Status

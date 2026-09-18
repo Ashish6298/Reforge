@@ -1,4 +1,4 @@
-﻿//! Security & Sandbox Audit Test Suite for Milestone 20.6
+//! Security & Sandbox Audit Test Suite for Milestone 20.6
 //! Verifies:
 //! 1. Path traversal prevention (e.g. "../../../etc/passwd")
 //! 2. Symlink attack mitigation

@@ -1,4 +1,4 @@
-﻿//! Developer Experience Audit Test Suite for Milestone 20.4
+//! Developer Experience Audit Test Suite for Milestone 20.4
 //! Verifies:
 //! 1. CLI understandable (command structure & syntax)
 //! 2. Errors useful (actionable errors with contextual paths & descriptions)

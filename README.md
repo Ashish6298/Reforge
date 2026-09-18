@@ -1,4 +1,4 @@
-﻿# Developer Computation Cache (`dcc`)
+# Developer Computation Cache (`dcc`)
 
 A high-performance, local-first, content-addressed developer computation caching engine written in pure Rust.
 

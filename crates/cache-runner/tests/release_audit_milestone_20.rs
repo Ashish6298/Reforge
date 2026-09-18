@@ -1,4 +1,4 @@
-﻿//! Engineering Audit Test Suite for Milestone 20 (v1.0.0 Release Audit)
+//! Engineering Audit Test Suite for Milestone 20 (v1.0.0 Release Audit)
 //! Covers:
 //! - 20.1 Correctness Audit:
 //!   - same computation -> same key

@@ -1,4 +1,4 @@
-﻿//! Reliability Audit Test Suite for Milestone 20.2
+//! Reliability Audit Test Suite for Milestone 20.2
 //! Verifies:
 //! 1. Process crash (unclean exit, stale tmp file cleanup)
 //! 2. Disk failure / Capacity exhaustion (safe error handling, cache consistency preserved)
