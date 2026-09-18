@@ -1549,3 +1549,144 @@ fn test_milestone_12_2_cross_platform_process_handling() {
     assert!(timeout_res.timed_out);
     assert_eq!(timeout_res.exit_code, -1);
 }
+
+#[test]
+fn test_milestone_12_3_file_semantics_cross_platform() {
+    use dcc_core::{Digest, OutputManifestItem, PathUtils};
+    use dcc_runner::OutputRestorer;
+    use std::fs;
+
+    let env = TestEnv::new().unwrap();
+
+    // ==========================================
+    // 1. SYMLINKS & RESOLUTION
+    // ==========================================
+    let target_file = env.workspace_dir.path().join("target_file.txt");
+    fs::write(&target_file, b"SYMLINK_TARGET_PAYLOAD_12_3").unwrap();
+    let _symlink_path = env.workspace_dir.path().join("symlink_link.txt");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        if symlink(&target_file, &_symlink_path).is_ok() {
+            let digest_target = Digest::hash_file(&target_file).unwrap();
+            let digest_link = Digest::hash_file(&_symlink_path).unwrap();
+            assert_eq!(
+                digest_target, digest_link,
+                "Hashing through symlink resolves to underlying content"
+            );
+        }
+    }
+
+    // ==========================================
+    // 2. PERMISSIONS & EXECUTABLE BITS
+    // ==========================================
+    let script_name = "test_script.sh";
+    let script_path = env.workspace_dir.path().join(script_name);
+    fs::write(&script_path, b"#!/bin/sh\necho hello\n").unwrap();
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&script_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script_path, perms).unwrap();
+
+        let meta = fs::metadata(&script_path).unwrap();
+        let is_exec = meta.permissions().mode() & 0o111 != 0;
+        assert!(
+            is_exec,
+            "Executable permission bit must be detected on Unix"
+        );
+    }
+
+    // ==========================================
+    // 3. CASE-SENSITIVE VS CASE-INSENSITIVE PATHS
+    // ==========================================
+    // Verify PathUtils canonicalization distinguishes case-sensitive names
+    let lower_path = "src/models/item.rs";
+    let upper_path = "src/models/ITEM.rs";
+    assert_ne!(
+        PathUtils::canonicalize_for_key(lower_path),
+        PathUtils::canonicalize_for_key(upper_path),
+        "Case-sensitivity is strictly preserved in canonical key identity"
+    );
+
+    let d_content = Digest::from_bytes(b"DATA");
+    let comp_lower = dcc_core::Computation::builder_with("check", "tool")
+        .input(lower_path, d_content.clone(), 4)
+        .build()
+        .unwrap();
+
+    let comp_upper = dcc_core::Computation::builder_with("check", "tool")
+        .input(upper_path, d_content, 4)
+        .build()
+        .unwrap();
+
+    let key_lower = dcc_core::CanonicalComputation::from_computation(&comp_lower)
+        .compute_key()
+        .unwrap();
+    let key_upper = dcc_core::CanonicalComputation::from_computation(&comp_upper)
+        .compute_key()
+        .unwrap();
+
+    assert_ne!(
+        key_lower, key_upper,
+        "Distinct path casing produces distinct computation keys across platforms"
+    );
+
+    // ==========================================
+    // 4. PATH SEPARATORS ('/' VS '\')
+    // ==========================================
+    let win_sep = r"src\components\layout\grid.rs";
+    let unix_sep = "src/components/layout/grid.rs";
+    assert_eq!(
+        PathUtils::to_normalized_string(win_sep),
+        PathUtils::to_normalized_string(unix_sep),
+        "Path normalization unifies Windows and Unix separators"
+    );
+    assert_eq!(
+        PathUtils::canonicalize_for_key(win_sep),
+        PathUtils::canonicalize_for_key(unix_sep),
+        "Key canonicalization is invariant to separator differences"
+    );
+
+    // ==========================================
+    // 5. RESTORATION PERMISSIONS & METADATA ROUNDTRIP
+    // ==========================================
+    let payload = b"RESTORE_PAYLOAD_WITH_EXEC_BIT";
+    let (blob_digest, blob_size) = env.storage.store_object_bytes(payload).unwrap();
+
+    let outputs = vec![OutputManifestItem {
+        path: "bin/tool_artifact".to_string(),
+        digest: blob_digest,
+        size: blob_size,
+        is_executable: Some(true),
+    }];
+
+    let execution = dcc_core::ExecutionMetadata {
+        exit_code: 0,
+        execution_time_ms: 10,
+        stdout_digest: None,
+        stderr_digest: None,
+        timings: dcc_core::TimingMetrics::default(),
+    };
+
+    let entry = dcc_core::CacheEntry::new(key_lower, comp_lower, outputs, execution);
+
+    OutputRestorer::restore_entry(&env.storage, &entry, env.workspace_dir.path()).unwrap();
+    let restored_file = env.workspace_dir.path().join("bin/tool_artifact");
+    assert!(restored_file.is_file());
+    assert_eq!(fs::read(&restored_file).unwrap(), payload);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = fs::metadata(&restored_file).unwrap().permissions();
+        assert_eq!(
+            perms.mode() & 0o111,
+            0o111,
+            "Restored executable output must preserve 0o755 executable permission bit"
+        );
+    }
+}

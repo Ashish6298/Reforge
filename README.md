@@ -1048,6 +1048,17 @@ println!("Stdout: {}", String::from_utf8_lossy(&output.stdout));
 
 ---
 
+## Cross-Platform File Semantics
+
+DCC handles cross-platform file system semantics consistently across Windows, Linux, and macOS:
+
+- **Symlinks**: Transparently followed and hashed based on underlying target content.
+- **Permissions & Executable Bits**: Unix executable permission bits (`0o755`) are preserved across CAS storage and atomic restorations.
+- **Case Sensitivity**: Exact casing is maintained for key identity while supporting platform-native lookups.
+- **Path Separators**: Canonical forward-slash normalization eliminates platform disparities.
+
+---
+
 ## Quality Gates & Verification
 
 ```bash
@@ -1058,6 +1069,7 @@ cargo fmt --all -- --check
 ```
 
 All 6 core exit criteria (deterministic computation modeling, canonical key generation, cache entry creation, retrieval, identity verification, and corrupted metadata detection) and all 11 physical storage scenarios (empty cache, single object, deduplication, corruption quarantine, interrupted write isolation, deletion, concurrent read/write races, deeply nested paths, multi-MB large files, and binary byte safety) are fully verified and tested.
+
 
 
 
