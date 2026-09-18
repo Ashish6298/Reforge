@@ -24,6 +24,7 @@ use std::time::Duration;
 #[derive(Debug, Clone)]
 pub struct Cache {
     storage: Arc<CasStorage>,
+    trust_mode: dcc_core::TrustMode,
     l1_cache: Arc<
         std::sync::RwLock<std::collections::HashMap<CacheKey, (CacheEntry, std::time::SystemTime)>>,
     >,
@@ -51,6 +52,7 @@ impl Cache {
     pub fn new(storage: CasStorage) -> Self {
         Self {
             storage: Arc::new(storage),
+            trust_mode: dcc_core::TrustMode::TrustedLocal,
             l1_cache: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         }
     }
@@ -59,8 +61,20 @@ impl Cache {
     pub fn from_arc(storage: Arc<CasStorage>) -> Self {
         Self {
             storage,
+            trust_mode: dcc_core::TrustMode::TrustedLocal,
             l1_cache: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         }
+    }
+
+    /// Set trust mode (TrustedLocal, Untrusted, ReadOnly) (Milestone 14.5).
+    pub fn with_trust_mode(mut self, trust_mode: dcc_core::TrustMode) -> Self {
+        self.trust_mode = trust_mode;
+        self
+    }
+
+    /// Get configured trust mode.
+    pub fn trust_mode(&self) -> dcc_core::TrustMode {
+        self.trust_mode
     }
 
     /// Access the underlying CAS storage reference.
@@ -76,6 +90,7 @@ impl Cache {
     }
 
     /// Lookup a cache entry by key with fast L1 in-memory caching and mtime validation (Milestone 13.4).
+    /// In `Untrusted` mode, performs strict cryptographic identity and blob verification before returning.
     ///
     /// Updates access statistics (last_accessed_at, hit_count) if found.
     pub fn lookup(&self, key: &CacheKey) -> Result<Option<CacheEntry>> {
@@ -88,6 +103,12 @@ impl Cache {
             if let Ok(l1) = self.l1_cache.read() {
                 if let Some((entry, cached_mtime)) = l1.get(key) {
                     if *cached_mtime == mtime {
+                        if self.trust_mode.requires_strict_validation() {
+                            entry.verify_identity()?;
+                            for output in &entry.outputs {
+                                self.storage.verify_object(&output.digest)?;
+                            }
+                        }
                         return Ok(Some(entry.clone()));
                     }
                 }
@@ -96,6 +117,13 @@ impl Cache {
 
         let entry_opt = self.storage.get_entry(key)?;
         if let Some(ref entry) = entry_opt {
+            if self.trust_mode.requires_strict_validation() {
+                entry.verify_identity()?;
+                for output in &entry.outputs {
+                    self.storage.verify_object(&output.digest)?;
+                }
+            }
+
             let mtime = fs::metadata(&entry_path)
                 .ok()
                 .and_then(|m| m.modified().ok());
@@ -114,8 +142,20 @@ impl Cache {
 
     /// Store a cache entry into the storage.
     ///
+    /// In `ReadOnly` mode, store operations are rejected with `CacheError::ConfigurationError`.
     /// Ensures atomic write of entry metadata and updates in-memory cache.
     pub fn store(&self, entry: &CacheEntry) -> Result<()> {
+        if !self.trust_mode.allows_writes() {
+            return Err(CacheError::ConfigurationError(
+                "Cannot store cache entry in ReadOnly cache mode".into(),
+            ));
+        }
+        if self.trust_mode.requires_strict_validation() {
+            entry.verify_identity()?;
+            for output in &entry.outputs {
+                self.storage.verify_object(&output.digest)?;
+            }
+        }
         self.storage.store_entry(entry)?;
         let entry_path = self.storage.entry_path(&entry.key);
         let mtime = fs::metadata(&entry_path)

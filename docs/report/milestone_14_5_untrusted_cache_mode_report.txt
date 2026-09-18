@@ -1,0 +1,68 @@
+================================================================================
+DEVELOPER COMPUTATION CACHE (DCC) - VERIFICATION REPORT
+Milestone 14.5 — Untrusted Cache Mode & Architecture
+Date: 2026-09-18
+================================================================================
+
+1. EXECUTIVE SUMMARY
+--------------------------------------------------------------------------------
+Milestone 14.5 establishes the architectural foundation for layered cache trust levels:
+  - `trusted local cache` (`TrustMode::TrustedLocal`)
+  - `untrusted cache` (`TrustMode::Untrusted`)
+  - `read-only cache` (`TrustMode::ReadOnly`)
+
+Under `TrustMode::Untrusted`, the caching engine enforces strict validation guarantees:
+  1. Strict Computation Identity Verification:
+     Re-derives the canonical SHA-256 key from the embedded `Computation` record on both
+     lookup and store operations, immediately rejecting spoofed or tampered key identities.
+  2. Multi-Pass CAS Blob Verification:
+     Cryptographically checks all referenced output artifacts in the CAS before extraction
+     and after staging, quarantining tampered/corrupted blobs before they reach the workspace.
+  3. Symlink & Path Traversal Confinement:
+     Guarantees that untrusted entries cannot escape the workspace directory or overwrite
+     arbitrary host files through symlinks.
+  4. Read-Only Protection:
+     Guarantees that `TrustMode::ReadOnly` caches disallow any mutations or stores into
+     local storage backends.
+
+2. TEST SUITE EXECUTION RESULTS
+--------------------------------------------------------------------------------
+Command: cargo test --workspace
+Overall Result: ALL PASSED (100% test pass across all workspace crates)
+
+A. Security & Trust Mode Tests (`tests/security_tests.rs` & `crates/cache-runner/tests/security_tests.rs`):
+   - `test_milestone_14_5_untrusted_cache_mode` ........................ PASSED
+     * Validates that `TrustMode::ReadOnly` rejects store operations.
+     * Validates that `TrustMode::Untrusted` successfully processes valid cache entries.
+     * Validates that `TrustMode::Untrusted` catches tampered/corrupted CAS blobs on lookup.
+     * Validates that `TrustMode::Untrusted` rejects mismatched/spoofed key identities on store.
+   - `test_milestone_14_4_sensitive_information_prevention` ............ PASSED
+   - `test_milestone_14_3_symlink_overwrite_attack_prevention` .......... PASSED
+   - `test_milestone_14_3_symlink_directory_escape_prevention` ......... PASSED
+   - `test_milestone_14_2_path_traversal_relative_parent_escape_rejection` PASSED
+   - `test_milestone_14_2_path_traversal_absolute_paths_rejection` ..... PASSED
+   - `test_milestone_14_2_path_traversal_runner_and_cache_restore_rejection` PASSED
+   - `test_milestone_14_1_tampered_output_staging_rollback` ............ PASSED
+   - `test_milestone_14_1_malicious_metadata_key_spoofing_prevented` ... PASSED
+   - `test_milestone_14_1_malicious_cas_object_quarantined_and_rejected`  PASSED
+   - `test_corrupted_cas_object_causes_safe_fallback` .................. PASSED
+
+B. Concurrency, Storage & Integration Suites:
+   - Concurrency stress tests (10, 50, 100 concurrent workers) ........ PASSED (12/12)
+   - Storage suite tests ............................................... PASSED (19/19)
+   - Integration & lifecycle tests ..................................... PASSED (17/17)
+   - Runner & command unit tests ....................................... PASSED (8/8)
+   - Storage unit & eviction tests ..................................... PASSED (23/23)
+
+3. CODE QUALITY & LINTING GATES
+--------------------------------------------------------------------------------
+- cargo check --workspace .............................................. PASSED (0 errors)
+- cargo clippy --workspace --all-targets --all-features -- -D warnings .. PASSED (0 warnings)
+- cargo fmt --all -- --check ........................................... PASSED (Clean formatting)
+
+4. CONCLUSION
+--------------------------------------------------------------------------------
+Milestone 14.5 is fully implemented, verified, and integrated into the Developer
+Computation Cache engine. The system is prepared for secure operation across trusted,
+untrusted, and read-only cache environments without modifying existing UI or functionality.
+================================================================================

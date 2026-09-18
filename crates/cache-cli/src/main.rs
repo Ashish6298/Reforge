@@ -186,6 +186,7 @@ fn handle_run(storage: &CasStorage, args: RunArgs, json: bool) -> Result<()> {
             working_dir: std::env::current_dir()?,
             lock_timeout: Duration::from_secs(30),
             verbose: args.verbose,
+            ..Default::default()
         },
     );
 

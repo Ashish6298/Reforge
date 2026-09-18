@@ -600,3 +600,82 @@ fn test_milestone_14_4_sensitive_information_prevention() {
         "Non-sensitive values must remain unredacted"
     );
 }
+
+#[test]
+fn test_milestone_14_5_untrusted_cache_mode() {
+    use dcc_core::{CacheEntry, CacheKey, ExecutionMetadata, OutputManifestItem, TrustMode};
+    use dcc_storage::Cache;
+    use tempfile::TempDir;
+
+    let temp_cache_dir = TempDir::new().unwrap();
+    let cache = Cache::open(temp_cache_dir.path()).unwrap();
+
+    // 1. Create a valid entry and blob
+    let blob_data = b"untrusted-payload-content";
+    let (blob_digest, blob_size) = cache.storage().store_object_bytes(blob_data).unwrap();
+
+    let comp = Computation::builder_with("compile", "rustc")
+        .arg("main.rs")
+        .build()
+        .unwrap();
+    let key = comp.compute_key().unwrap();
+
+    let output_item = OutputManifestItem {
+        path: "out/binary".to_string(),
+        digest: blob_digest.clone(),
+        size: blob_size,
+        is_executable: None,
+    };
+
+    let entry = CacheEntry::new(
+        key.clone(),
+        comp,
+        vec![output_item],
+        ExecutionMetadata {
+            exit_code: 0,
+            execution_time_ms: 10,
+            stdout_digest: None,
+            stderr_digest: None,
+            timings: Default::default(),
+        },
+    );
+
+    // 2. Test ReadOnly TrustMode prevents store()
+    let readonly_cache = cache.clone().with_trust_mode(TrustMode::ReadOnly);
+    assert!(
+        readonly_cache.store(&entry).is_err(),
+        "ReadOnly cache mode must reject store operations"
+    );
+
+    // Store in standard cache
+    cache.store(&entry).unwrap();
+
+    // 3. Test Untrusted TrustMode with valid entry and valid CAS blob -> succeeds
+    let untrusted_cache = cache.clone().with_trust_mode(TrustMode::Untrusted);
+    let looked_up = untrusted_cache.lookup(&key).unwrap();
+    assert!(
+        looked_up.is_some(),
+        "Untrusted cache must succeed when entry and blobs are valid"
+    );
+
+    // 4. Test Untrusted TrustMode rejects corrupted CAS blob during lookup / verification
+    let cas_blob_path = cache.storage().object_path(&blob_digest);
+    // Tamper with the CAS blob
+    std::fs::write(&cas_blob_path, b"TAMPERED_BLOB_CONTENT").unwrap();
+
+    // Untrusted lookup must fail with IntegrityError because blob checksum fails strict verification
+    let untrusted_lookup_res = untrusted_cache.lookup(&key);
+    assert!(
+        untrusted_lookup_res.is_err(),
+        "Untrusted cache mode must strictly detect corrupted CAS blob on lookup"
+    );
+
+    // 5. Test Untrusted TrustMode rejects entry with spoofed / mismatched key
+    let bad_key = CacheKey::new(Digest::from_bytes(b"spoofed_key"));
+    let mut spoofed_entry = entry.clone();
+    spoofed_entry.key = bad_key.clone();
+    assert!(
+        untrusted_cache.store(&spoofed_entry).is_err(),
+        "Untrusted cache mode must strictly reject mismatched key identity on store"
+    );
+}

@@ -1280,6 +1280,32 @@ with error         warning diagnostic `[REDACTED]` in entry
 3. **Automated Secret Detection (`SensitiveDataDetector`)**:
    - Detects standard secret variable names and value signatures (such as RSA/OpenSSH private key headers, GitHub/GitLab/NPM access tokens, Bearer authorization headers, and database connection URIs).
 
+### Untrusted Cache Mode & Architecture (Milestone 14.5)
+
+DCC provides layered trust modes (`TrustMode`) enabling safe integration of local and remote/untrusted cache backends:
+
+```text
+                     ┌───────────────────────────────┐
+                     │          TrustMode            │
+                     └───────────────┬───────────────┘
+                                     │
+           ┌─────────────────────────┼─────────────────────────┐
+           ▼                         ▼                         ▼
+   [ TrustedLocal ]           [ Untrusted ]              [ ReadOnly ]
+- Default local engine     - Strict identity verify   - Prevents store & mutation
+- Optimized metadata flow  - Multi-pass blob verify   - Safe shared consumption
+- Standard integrity check - Full manifest audits     - Validates on retrieval
+```
+
+1. **`TrustMode::TrustedLocal`**:
+   - High-performance local developer cache with standard integrity gates and mtime-verified L1 caching.
+2. **`TrustMode::Untrusted`**:
+   - Stricter multi-pass validation for unauthenticated or third-party cache sources.
+   - Enforces cryptographic re-computation of cache keys against embedded computations before acceptance.
+   - Cryptographically verifies every CAS blob referenced by the manifest before and after staging.
+3. **`TrustMode::ReadOnly`**:
+   - Restricts operations to lookup and safe extraction; completely forbids mutations and writes into cache storage.
+
 ---
 
 
