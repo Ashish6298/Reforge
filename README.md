@@ -9,6 +9,123 @@ A high-performance, local-first, content-addressed developer computation caching
 
 ---
 
+## 1. What Problem Does This Solve?
+
+Software engineering workflows waste enormous amounts of CPU time and developer attention re-running identical, deterministic computations:
+- **Code Generators**: Running OpenAPI/Protobuf generators that take seconds to produce the same files when schemas haven't changed.
+- **Linters & Static Analyzers**: Re-scanning entire repositories when only one file was touched.
+- **Asset Pipelines**: Re-minifying stylesheets and bundling JavaScript repeatedly during development.
+- **Compiler Invocations**: Rebuilding C/C++/Rust modules in clean CI runs or across local branches.
+
+`dcc` provides a universal, process-level computation cache that intercepts these commands, computes cryptographic input digests, and restores previously produced outputs in **0 ms** without re-executing the underlying tool.
+
+---
+
+## 2. Why Is It Different?
+
+Unlike language-specific caches or complex monorepo build systems:
+- **Tool-Agnostic**: Works with any CLI command, generator, or compiler—no proprietary build DSLs required.
+- **Content-Addressed (Not mtime-based)**: Computes SHA-256 digests over actual input file bytes. Switching branches or `git checkout` never causes false cache misses.
+- **Local-First & Zero Setup**: Runs completely offline using local disk storage with zero server dependencies.
+- **Strictly Correct & Safe**: Multi-layered integrity verification, automatic corruption quarantine (`*.corrupted`), and sandbox containment against path traversal (`../`) or symlink attacks.
+- **Explainable Misses**: Provides human-readable diagnosis via `--explain` answering *"Why didn't my cache hit?"*
+
+---
+
+## 3. How Does It Work?
+
+```text
+1. Prepare Command ──► 2. Hash Inputs (SHA-256) ──► 3. Compute Canonical CacheKey
+                                                             │
+            ┌────────────────────────────────────────────────┤
+            ▼                                                ▼
+      [Cache HIT]                                      [Cache MISS]
+  Verify CAS hashes (SHA-256)                      Execute child process directly
+  Atomically restore outputs (0 ms)                Validate required output files exist
+  Replay stdout/stderr & exit code 0               Ingest outputs into CAS (.dcc_cache/objects/)
+  Skip process execution                           Commit immutable metadata (.dcc_cache/entries/)
+```
+
+---
+
+## 4. How Do I Install It?
+
+### From Source (Cargo)
+
+```bash
+# Clone the repository
+git clone https://github.com/Ashish6298/Reforge.git dcc
+cd dcc
+
+# Build optimized release binary
+cargo build --release --bin dcc
+
+# Or install to your Cargo bin path ($HOME/.cargo/bin)
+cargo install --path crates/cache-cli
+```
+
+---
+
+## 5. How Do I Run It?
+
+Wrap any command using `dcc run` and declare its input and output files:
+
+```bash
+# Initialize local cache once
+dcc init --max-size "5 GB"
+
+# Execute computation with caching
+dcc run \
+  --input src/schema.json \
+  --output generated/models.rs \
+  -- generator src/schema.json
+```
+
+---
+
+## 6. What Does a Cache Hit Look Like?
+
+### Cold Run (Cache MISS):
+```text
+$ dcc run --input src/schema.json --output generated/models.rs -- generator src/schema.json
+[DCC] MISS: No existing cache entry found for key 8a4c1f...
+[DCC] Executing: generator src/schema.json
+Generating models from src/schema.json... Done.
+[DCC] Stored 1 output artifact(s) (14.2 KB) into CAS in 312 ms.
+```
+
+### Warm Run (Cache HIT — 0 ms execution):
+```text
+$ dcc run --input src/schema.json --output generated/models.rs -- generator src/schema.json
+[DCC] HIT (key: 8a4c1f...)
+Generating models from src/schema.json... Done.
+[DCC] Restored 1 artifact(s) in 0 ms (Execution skipped).
+```
+
+---
+
+## Documentation Index
+
+Explore the complete documentation in [`docs/`](docs/):
+
+- **[Architecture Guide](docs/architecture.md)** — System architecture, core crates, and data flow.
+- **[Getting Started](docs/getting-started.md)** — 5-minute quickstart tutorial and basic workflow.
+- **[Computation Model](docs/computation-model.md)** — Process specifications, input/output declarations, and execution lifecycle.
+- **[Cache Keys & Identity](docs/cache-keys.md)** — Deterministic SHA-256 key derivation and canonical serialization.
+- **[Cache Correctness & Invariants](docs/cache-correctness.md)** — Correctness test matrix and input invalidation guarantees.
+- **[Storage & CAS Model](docs/storage.md)** — 256-shard directory layout, atomic writes, eviction, and garbage collection.
+- **[Concurrency & Synchronization](docs/concurrency.md)** — Lock-free reads, atomic writes, computation deduplication, and crash recovery.
+- **[Security & Safety](docs/security.md)** — Cache poisoning defense, path traversal prevention, symlink protection, and secret scanning.
+- **[Performance & Benchmarks](docs/performance.md)** — Latency benchmarks, large file streaming ($O(1)$ memory), and profile optimizations.
+- **[CLI Reference](docs/cli.md)** — Command index, flags, JSON output schemas, and exit codes.
+- **[Rust Library API](docs/library-api.md)** — Public crate APIs (`dcc_core`, `dcc_storage`, `dcc_runner`, `dcc_integrations`).
+- **[Developer Integrations](docs/integrations.md)** — Integration contracts, codegen, linters, and compiler build action examples.
+- **[CI/CD Integration](docs/ci.md)** — GitHub Actions, GitLab CI, and container runner patterns.
+- **[Troubleshooting Guide](docs/troubleshooting.md)** — Diagnostics with `--explain`, corrupted cache recovery, and `dcc doctor`.
+- **[Remote Cache Design](docs/remote-cache.md)** — Protocol design, authentication, and local-first tiering.
+
+---
+
 ## Cache Entry Model (`CacheEntry`)
 
 Metadata records never embed raw binary output data directly. Instead, entries reference CAS blobs via cryptographic digests:
