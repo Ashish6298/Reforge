@@ -1,4 +1,4 @@
-﻿//! Performance Audit Test & Benchmark Suite for Milestone 20.3
+/! Performance Audit Test & Benchmark Suite for Milestone 20.3
 //! Measures real metrics across:
 //! 1. Cold execution
 //! 2. Cache lookup (metadata retrieval)

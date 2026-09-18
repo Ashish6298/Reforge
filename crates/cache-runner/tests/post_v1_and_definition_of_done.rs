@@ -1,4 +1,4 @@
-﻿//! Post-v1 Roadmap Architectural Extensions & Definition of Done Test Suite
+/! Post-v1 Roadmap Architectural Extensions & Definition of Done Test Suite
 //! Validates:
 //! 1. V1.1 Advanced Diagnostics (why, explain, diff, inspect, trace)
 //! 2. V1.2 Storage Optimization (compression, metadata index, parallel hashing, memory cache tier)
