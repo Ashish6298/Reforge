@@ -46,6 +46,9 @@ pub enum CacheError {
     #[error("Invalid digest format: {0}")]
     InvalidDigest(String),
 
+    #[error("Sensitive data policy violation: {0}")]
+    SensitiveDataError(String),
+
     #[error("Cache miss: {0}")]
     Miss(String),
 }

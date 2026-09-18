@@ -9,6 +9,123 @@ A high-performance, local-first, content-addressed developer computation caching
 
 ---
 
+## 1. What Problem Does This Solve?
+
+Software engineering workflows waste enormous amounts of CPU time and developer attention re-running identical, deterministic computations:
+- **Code Generators**: Running OpenAPI/Protobuf generators that take seconds to produce the same files when schemas haven't changed.
+- **Linters & Static Analyzers**: Re-scanning entire repositories when only one file was touched.
+- **Asset Pipelines**: Re-minifying stylesheets and bundling JavaScript repeatedly during development.
+- **Compiler Invocations**: Rebuilding C/C++/Rust modules in clean CI runs or across local branches.
+
+`dcc` provides a universal, process-level computation cache that intercepts these commands, computes cryptographic input digests, and restores previously produced outputs in **0 ms** without re-executing the underlying tool.
+
+---
+
+## 2. Why Is It Different?
+
+Unlike language-specific caches or complex monorepo build systems:
+- **Tool-Agnostic**: Works with any CLI command, generator, or compiler—no proprietary build DSLs required.
+- **Content-Addressed (Not mtime-based)**: Computes SHA-256 digests over actual input file bytes. Switching branches or `git checkout` never causes false cache misses.
+- **Local-First & Zero Setup**: Runs completely offline using local disk storage with zero server dependencies.
+- **Strictly Correct & Safe**: Multi-layered integrity verification, automatic corruption quarantine (`*.corrupted`), and sandbox containment against path traversal (`../`) or symlink attacks.
+- **Explainable Misses**: Provides human-readable diagnosis via `--explain` answering *"Why didn't my cache hit?"*
+
+---
+
+## 3. How Does It Work?
+
+```text
+1. Prepare Command ──► 2. Hash Inputs (SHA-256) ──► 3. Compute Canonical CacheKey
+                                                             │
+            ┌────────────────────────────────────────────────┤
+            ▼                                                ▼
+      [Cache HIT]                                      [Cache MISS]
+  Verify CAS hashes (SHA-256)                      Execute child process directly
+  Atomically restore outputs (0 ms)                Validate required output files exist
+  Replay stdout/stderr & exit code 0               Ingest outputs into CAS (.dcc_cache/objects/)
+  Skip process execution                           Commit immutable metadata (.dcc_cache/entries/)
+```
+
+---
+
+## 4. How Do I Install It?
+
+### From Source (Cargo)
+
+```bash
+# Clone the repository
+git clone https://github.com/Ashish6298/Reforge.git dcc
+cd dcc
+
+# Build optimized release binary
+cargo build --release --bin dcc
+
+# Or install to your Cargo bin path ($HOME/.cargo/bin)
+cargo install --path crates/cache-cli
+```
+
+---
+
+## 5. How Do I Run It?
+
+Wrap any command using `dcc run` and declare its input and output files:
+
+```bash
+# Initialize local cache once
+dcc init --max-size "5 GB"
+
+# Execute computation with caching
+dcc run \
+  --input src/schema.json \
+  --output generated/models.rs \
+  -- generator src/schema.json
+```
+
+---
+
+## 6. What Does a Cache Hit Look Like?
+
+### Cold Run (Cache MISS):
+```text
+$ dcc run --input src/schema.json --output generated/models.rs -- generator src/schema.json
+[DCC] MISS: No existing cache entry found for key 8a4c1f...
+[DCC] Executing: generator src/schema.json
+Generating models from src/schema.json... Done.
+[DCC] Stored 1 output artifact(s) (14.2 KB) into CAS in 312 ms.
+```
+
+### Warm Run (Cache HIT — 0 ms execution):
+```text
+$ dcc run --input src/schema.json --output generated/models.rs -- generator src/schema.json
+[DCC] HIT (key: 8a4c1f...)
+Generating models from src/schema.json... Done.
+[DCC] Restored 1 artifact(s) in 0 ms (Execution skipped).
+```
+
+---
+
+## Documentation Index
+
+Explore the complete documentation in [`docs/`](docs/):
+
+- **[Architecture Guide](docs/architecture.md)** — System architecture, core crates, and data flow.
+- **[Getting Started](docs/getting-started.md)** — 5-minute quickstart tutorial and basic workflow.
+- **[Computation Model](docs/computation-model.md)** — Process specifications, input/output declarations, and execution lifecycle.
+- **[Cache Keys & Identity](docs/cache-keys.md)** — Deterministic SHA-256 key derivation and canonical serialization.
+- **[Cache Correctness & Invariants](docs/cache-correctness.md)** — Correctness test matrix and input invalidation guarantees.
+- **[Storage & CAS Model](docs/storage.md)** — 256-shard directory layout, atomic writes, eviction, and garbage collection.
+- **[Concurrency & Synchronization](docs/concurrency.md)** — Lock-free reads, atomic writes, computation deduplication, and crash recovery.
+- **[Security & Safety](docs/security.md)** — Cache poisoning defense, path traversal prevention, symlink protection, and secret scanning.
+- **[Performance & Benchmarks](docs/performance.md)** — Latency benchmarks, large file streaming ($O(1)$ memory), and profile optimizations.
+- **[CLI Reference](docs/cli.md)** — Command index, flags, JSON output schemas, and exit codes.
+- **[Rust Library API](docs/library-api.md)** — Public crate APIs (`dcc_core`, `dcc_storage`, `dcc_runner`, `dcc_integrations`).
+- **[Developer Integrations](docs/integrations.md)** — Integration contracts, codegen, linters, and compiler build action examples.
+- **[CI/CD Integration](docs/ci.md)** — GitHub Actions, GitLab CI, and container runner patterns.
+- **[Troubleshooting Guide](docs/troubleshooting.md)** — Diagnostics with `--explain`, corrupted cache recovery, and `dcc doctor`.
+- **[Remote Cache Design](docs/remote-cache.md)** — Protocol design, authentication, and local-first tiering.
+
+---
+
 ## Cache Entry Model (`CacheEntry`)
 
 Metadata records never embed raw binary output data directly. Instead, entries reference CAS blobs via cryptographic digests:
@@ -1000,6 +1117,438 @@ cargo run --example build_benchmark
 
 ---
 
+## Cross-Platform Path Handling (`PathUtils`)
+
+DCC provides robust, platform-agnostic path normalization and sanitization across Windows, Linux, and macOS without hardcoded assumptions about separators (`/` vs `\`) or drive prefixes (`C:\`):
+
+```rust
+use dcc_core::PathUtils;
+use std::path::Path;
+
+// Canonical forward-slash normalization for invariant key hashing
+let normalized = PathUtils::to_normalized_string(r"src\components\button.rs");
+assert_eq!(normalized, "src/components/button.rs");
+
+// Convert normalized paths back to OS-native PathBuf
+let native = PathUtils::to_native_path("src/components/button.rs");
+
+// Safe workspace encapsulation and directory traversal rejection
+let safe_path = PathUtils::sanitize_relative_path(Path::new("./workspace"), "dist/bundle.js")?;
+```
+
+---
+
+## Cross-Platform Process Execution (`ProcessExecutor`)
+
+DCC provides robust, platform-agnostic process spawning, environment isolation, executable discovery, and lifecycle supervision across Windows, Linux, and macOS:
+
+```rust
+use dcc_runner::ProcessExecutor;
+use std::collections::BTreeMap;
+use std::time::Duration;
+
+// Executable discovery across PATH with platform extension resolution (.exe, .cmd, .bat)
+let rustc_bin = ProcessExecutor::discover_executable("rustc");
+
+// Execute command with stdout/stderr capture and timeout protection
+let output = ProcessExecutor::execute_with_timeout(
+    "rustc",
+    &["--version".to_string()],
+    &BTreeMap::new(),
+    None,
+    Some(Duration::from_secs(10)),
+)?;
+
+println!("Exit code: {}", output.exit_code);
+println!("Stdout: {}", String::from_utf8_lossy(&output.stdout));
+```
+
+---
+
+## Cross-Platform File Semantics
+
+DCC handles cross-platform file system semantics consistently across Windows, Linux, and macOS:
+
+- **Symlinks**: Transparently followed and hashed based on underlying target content.
+- **Permissions & Executable Bits**: Unix executable permission bits (`0o755`) are preserved across CAS storage and atomic restorations.
+- **Case Sensitivity**: Exact casing is maintained for key identity while supporting platform-native lookups.
+- **Path Separators**: Canonical forward-slash normalization eliminates platform disparities.
+
+---
+
+## Cross-Platform CI Matrix
+
+Every build and release candidate of DCC is automatically verified across all major operating systems via GitHub Actions (`.github/workflows/ci.yml`):
+
+| Operating System | CI Runner | Toolchain | Status |
+|---|---|---|---|
+| **Linux** | `ubuntu-latest` | `stable` | Active |
+| **Windows** | `windows-latest` | `stable` | Active |
+| **macOS** | `macos-latest` | `stable` | Active |
+
+Quality pipeline steps executed on every OS:
+1. `cargo fmt --all -- --check`
+2. `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+3. `cargo test --workspace --verbose`
+4. Example suite execution (`cached_codegen`, `cached_analysis`, `cached_transform`, `cached_rust_build`, `build_demonstration`, `build_benchmark`)
+
+---
+
+## Performance Benchmarks (`performance_benchmarks`)
+
+DCC provides comprehensive performance benchmarks covering all core primitives and operational paths:
+
+```bash
+cargo run --example performance_benchmarks
+```
+
+Measured operations include:
+1. **Hash Small File (4 KB)**: Microsecond-scale streaming SHA-256 calculation.
+2. **Hash Large File (10 MB)**: High-throughput constant-memory SHA-256 processing.
+3. **Hash Directory (Recursive)**: Canonical walkdir traversal and deterministic combined hashing.
+4. **Generate Key**: Computation specification normalization and canonical JSON serialization.
+5. **Lookup Cache**: Entry retrieval and access metadata updates.
+6. **Store Cache**: Atomic metadata commit and CAS output blob indexing.
+7. **Restore Cache**: Atomic materialization and SHA-256 verification.
+8. **Serialize & Deserialize Metadata**: Zero-loss JSON conversion efficiency.
+9. **Concurrent Lookup**: Multi-threaded read throughput under active thread contention.
+
+---
+
+## Large Files Streaming Performance (`large_files_benchmark`)
+
+DCC guarantees constant $O(1)$ memory usage when processing large artifacts (tested across **1 MB**, **10 MB**, **100 MB**, and **1 GB** tiers) by strictly streaming files through fixed-size $64\text{ KB}$ chunk buffers:
+
+```bash
+cargo run --release --example large_files_benchmark
+```
+
+### Measured Large File Throughput:
+- **Streaming SHA-256 Hashing**: Up to $\approx 824.6\text{ MB/s}$
+- **CAS Stream Ingestion**: Up to $\approx 229.0\text{ MB/s}$
+- **CAS Stream Restoration**: Up to $\approx 191.5\text{ MB/s}$
+- **Memory Footprint**: Flat, bounded $64\text{ KB}$ buffer memory across all tiers.
+
+---
+
+## Large Cache Scalability (`large_cache_benchmark`)
+
+DCC scales efficiently across high-density cache volumes, benchmarked and verified across **1,000**, **10,000**, and **100,000** synthetic entry tiers:
+
+```bash
+cargo run --release --example large_cache_benchmark
+```
+
+### Key Scalability Results:
+- **256-Shard Directory Layout**: Entry metadata files (`.dcc_cache/entries/xx/`) and CAS objects (`.dcc_cache/objects/xx/`) are partitioned across 256 subdirectories, ensuring uniform distribution (~390 files/dir at 100k entries) and avoiding filesystem lock bottlenecks.
+- **Microsecond Negative Lookup**: Miss lookup latency remains bounded and near-instantaneous ($10.8\,\mu\text{s}$ at 1k entries $\rightarrow$ $21.0\,\mu\text{s}$ at 100k entries).
+- **Linear Index Inspection**: Full storage stats scan scales linearly with entry volume ($68\text{ ms}$ at 1k entries $\rightarrow$ $7.98\text{ s}$ at 100k entries).
+- **Safe Maintenance & GC**: Complete reachability graph analysis and safe unreferenced object pruning scales deterministically without memory leaks or race conditions.
+
+---
+
+## Profile-Driven Optimizations (`profile_and_optimize_benchmark`)
+
+DCC follows the strict performance engineering principle: **"Do not optimize blindly. First measure."** Every optimization is backed by empirical before/after benchmarks:
+
+```bash
+cargo run --release --example profile_and_optimize_benchmark
+```
+
+### Targeted Optimization Results:
+
+| Optimization Pipeline | Baseline (Before) | Optimized (After) | Speedup Gain |
+| :--- | :--- | :--- | :--- |
+| **In-Memory L1 Metadata Cache** | $4{,}947.26\,\mu\text{s}$ ($202\text{ lookups/s}$) | **$1.49\,\mu\text{s}$** ($672{,}016\text{ lookups/s}$) | **$3{,}324.64\times$** |
+| **Parallel Batch File Hashing** | $21.00\text{ ms}$ ($1{,}177.78\text{ MB/s}$) | **$6.00\text{ ms}$** ($4{,}181.44\text{ MB/s}$) | **$3.55\times$** |
+| **Safe Hardlink Materialization** | $91.00\text{ ms}$ ($218.57\text{ MB/s}$) | **$38.00\text{ ms}$** ($525.83\text{ MB/s}$) | **$2.41\times$** |
+
+---
+
+## Security & Safety Architecture (Milestone 14)
+
+DCC treats cached artifacts as **potentially dangerous data**. A caching system must never blindly trust stored objects, metadata, or output manifests.
+
+### Cache Poisoning Defense (Milestone 14.1)
+
+DCC enforces multi-layered cryptographic verification across all access and restoration paths:
+
+```text
+       [ Cached Entry JSON ]
+                │
+         verify_identity()  ──► FAILS? ──► REJECT (Forged metadata / Key spoofing prevented)
+                │
+                ▼
+       [ CAS Object on Disk ]
+                │
+          verify_object()   ──► FAILS? ──► QUARANTINE to .corrupted & REJECT (Malicious blob isolated)
+                │
+                ▼
+       [ Atomic Staging .tmp ]
+                │
+          verify_stream()   ──► FAILS? ──► ROLLBACK & CLEAN (Destination workspace untouched)
+                │
+                ▼
+       [ Restored Artifact ]
+```
+
+1. **Malicious CAS Object Defense**:
+   - Every CAS blob is verified against its expected SHA-256 digest before reading or extracting.
+   - Corrupted or maliciously modified blobs are automatically renamed with a `.corrupted` extension (quarantine) and trigger safe fallback re-execution (`MissReason::CorruptedCache`).
+2. **Metadata Key Spoofing Defense**:
+   - `entry.verify_identity()` recalculates the canonical SHA-256 key from the embedded `Computation` model and asserts exact match against `entry.key`.
+   - Forged metadata claiming a benign key with a malicious command (e.g. `rm -rf /`) is rejected immediately prior to restoration.
+3. **Tampered Output Manifest & Atomic Rollback**:
+   - Restorations stage files into temporary `.tmp_restore_<nonce>` files.
+   - Stream digests are cryptographically re-validated before atomic `fs::rename`. If validation fails, temporary files are wiped and workspace files remain completely untouched.
+
+---
+
+### Path Traversal Defense (Milestone 14.2)
+
+DCC guarantees that cached output metadata can **never** restore files outside the intended workspace, preventing arbitrary file overwrite and directory escape vulnerabilities.
+
+```text
+       [ Manifest Output Path ]
+                 │
+       PathUtils::sanitize_relative_path()
+                 ├── Starts with / or C:\ ?   ──► REJECT (Absolute paths forbidden)
+                 ├── Starts with \\ or // ?   ──► REJECT (UNC network shares forbidden)
+                 ├── Injected \0 byte ?       ──► REJECT (Null byte injection forbidden)
+                 └── Depth check (.. escapes) ──► REJECT (Parent directory traversal forbidden)
+                 │
+                 ▼
+       [ Normalized Safe Workspace-Relative Path ]
+                 │
+       OutputRestorer::restore_entry()
+                 ▼
+       [ Atomic Extraction to Workspace Subdirectory ]
+```
+
+1. **Parent Directory Escape Prevention**:
+   - Rejects traversal sequences such as `../../important-file` and `..\..\escaped.txt`.
+   - Normalizes path separators cross-platform (`/` and `\`) and tracks logical descent depth; any sequence resolving above the workspace root returns `DccError::InvalidPath`.
+2. **Absolute & UNC Path Rejection**:
+   - Strictly forbids root-bound paths (e.g. `/etc/passwd`, `C:\Windows\System32\...`), drive-relative notations (`C:foo`), and network UNC shares (`\\server\share\file`).
+3. **Workspace Boundary Containment**:
+   - All restored artifacts are verified against the canonical workspace boundary prior to atomic disk placement, ensuring external directories and host environments remain completely untouched.
+
+### Symlink Attack Defense (Milestone 14.3)
+
+DCC prevents arbitrary file overwrite and directory escape vulnerabilities resulting from malicious symlinks:
+
+```text
+       [ Output Restoration Target Path ]
+                      │
+       PathUtils::sanitize_relative_path()
+                      │
+       ├── verify_symlink_safety():
+       │   Inspects intermediate directory components.
+       │   Resolves canonical symlink targets.
+       │   Target escapes workspace root? ──► REJECT (PathTraversal error)
+       │
+       └── safe_prepare_target_path():
+           Is target already an existing symlink?
+           ├── YES: Unlinks symlink node directly (never follows into external file)
+           └── NO:  Cleans regular file before atomic rename
+                      │
+                      ▼
+       [ Atomic Rename: Extracted Payload Safely Replaces Link Node ]
+```
+
+1. **Symlink Overwrite Attack Prevention**:
+   - When extracting files to a destination path where an attacker has planted a symlink pointing to an external victim file (e.g. `/etc/passwd` or `C:\secrets.key`), `safe_prepare_target_path` inspects `symlink_metadata` and removes the symlink itself rather than opening or writing through it.
+2. **Directory Symlink Escape Containment**:
+   - `verify_symlink_safety` checks every component along the path; if an intermediate segment is a symlink pointing outside the canonical workspace boundary, the restoration is aborted immediately with `DccError::PathTraversal`.
+
+### Sensitive Information Protection (Milestone 14.4)
+
+DCC protects against accidental caching or leaking of credentials, secrets, tokens, and private keys:
+
+```text
+       [ Computation Environment & Arguments ]
+                          │
+            SensitiveDataDetector::scan()
+                          │
+     ┌────────────────────┴────────────────────┐
+     ▼                                         ▼
+[ Key Name Inspection ]            [ Payload Value Inspection ]
+(PASSWORD, TOKEN, SECRET,         (PEM Private Keys, Bearer tokens,
+ API_KEY, AUTH, SSH_KEY,           ghp_/glpat-/npm_ tokens,
+ DATABASE_URL, etc.)               db connection strings, etc.)
+     │                                         │
+     └────────────────────┬────────────────────┘
+                          │
+             SensitiveDataPolicy Handling
+       ┌──────────────────┼──────────────────┐
+       ▼                  ▼                  ▼
+[ Deny Policy ]    [ Warn Policy ]    [ Mask Policy ]
+Rejects execution  Emits stderr       Redacts secret to
+with error         warning diagnostic `[REDACTED]` in entry
+```
+
+1. **Caller Responsibility**:
+   - Callers (build systems, CI pipelines, CLI users) are responsible for filtering out private secrets and non-deterministic authentication tokens from input arguments and environment maps.
+2. **Opt-in Sensitive Data Policies (`SensitiveDataPolicy`)**:
+   - `SensitiveDataPolicy::Allow`: Caller-responsible mode; records values as supplied.
+   - `SensitiveDataPolicy::Warn`: Scans keys and values, logging warnings to stderr if sensitive data is detected.
+   - `SensitiveDataPolicy::Deny`: Strictly rejects computations containing sensitive secrets with `CacheError::SensitiveDataError`.
+   - `SensitiveDataPolicy::Mask`: Automatically redacts secret values to `[REDACTED]` prior to key computation and metadata persistence.
+3. **Automated Secret Detection (`SensitiveDataDetector`)**:
+   - Detects standard secret variable names and value signatures (such as RSA/OpenSSH private key headers, GitHub/GitLab/NPM access tokens, Bearer authorization headers, and database connection URIs).
+
+### Untrusted Cache Mode & Architecture (Milestone 14.5)
+
+DCC provides layered trust modes (`TrustMode`) enabling safe integration of local and remote/untrusted cache backends:
+
+```text
+                     ┌───────────────────────────────┐
+                     │          TrustMode            │
+                     └───────────────┬───────────────┘
+                                     │
+           ┌─────────────────────────┼─────────────────────────┐
+           ▼                         ▼                         ▼
+   [ TrustedLocal ]           [ Untrusted ]              [ ReadOnly ]
+- Default local engine     - Strict identity verify   - Prevents store & mutation
+- Optimized metadata flow  - Multi-pass blob verify   - Safe shared consumption
+- Standard integrity check - Full manifest audits     - Validates on retrieval
+```
+
+1. **`TrustMode::TrustedLocal`**:
+   - High-performance local developer cache with standard integrity gates and mtime-verified L1 caching.
+2. **`TrustMode::Untrusted`**:
+   - Stricter multi-pass validation for unauthenticated or third-party cache sources.
+   - Enforces cryptographic re-computation of cache keys against embedded computations before acceptance.
+   - Cryptographically verifies every CAS blob referenced by the manifest before and after staging.
+3. **`TrustMode::ReadOnly`**:
+   - Restricts operations to lookup and safe extraction; completely forbids mutations and writes into cache storage.
+
+### Storage Backend Trait & Remote Abstraction (Milestone 15.1)
+
+DCC abstracts physical storage through the unified `Storage` trait, separating computation logic and metadata management from byte storage:
+
+```text
+               ┌─────────────────────────────────┐
+               │    Storage Trait Abstraction    │
+               └────────────────┬────────────────┘
+                                │
+        ┌───────────────────────┴───────────────────────┐
+        ▼                                               ▼
+[ LocalFilesystemStorage ]                      [ RemoteStorage ]
+- Fast local filesystem CAS                   - In-memory / Cloud / Network CAS
+- Directory sharded paths                     - Action/Result & Blob decoupling
+- Direct mmap / hardlink support              - Streaming transfer support
+```
+
+- **Pluggable Architecture**:
+  Both `LocalFilesystemStorage` and `RemoteStorage` implement the unified `Storage` interface (`put`, `put_file`, `get`, `get_bytes`, `exists`, `delete`, `metadata`, `verify`), enabling seamless backend switching via dynamic (`Box<dyn Storage>`) or static dispatch without changing computation models.
+
+### Backend Capabilities & Batch Acceleration (Milestone 15.2)
+
+DCC formalizes backend capability descriptors and batch operation primitives:
+
+```text
+                     StorageCapabilities
+ ┌───────────┬───────────┬───────────┬───────────┬───────────┬───────────┬───────────┐
+ │   read    │   write   │  delete   │  exists   │  stream   │ batch_get │ batch_put │
+ └───────────┴───────────┴───────────┴───────────┴───────────┴───────────┴───────────┘
+```
+
+1. **Explicit Capability Descriptors (`StorageCapabilities`)**:
+   - Backends expose fine-grained flags via `storage.capabilities()`: `read`, `write`, `delete`, `exists`, `stream`, `batch_get`, `batch_put`.
+   - Pre-configured presets include `StorageCapabilities::all()`, `StorageCapabilities::read_only()`, and `StorageCapabilities::basic()`.
+2. **Batch I/O Acceleration**:
+   - `batch_put(&[&[u8]]) -> Result<Vec<(Digest, u64)>>`: Computes cryptographic digests and stores multiple objects in a single batch pass.
+   - `batch_get(&[Digest]) -> Result<Vec<(Digest, Option<Vec<u8>>)>>`: Queries and retrieves multiple blobs concurrently, returning `None` for un-cached objects without aborting the entire request.
+
+### Local-First Tiered Architecture (Milestone 15.3)
+
+DCC implements a 3-tier local-first cache hierarchy (`TieredCache`):
+
+```text
+                  ┌───────────────────────────────┐
+                  │    TieredCache Coordinator    │
+                  └───────────────┬───────────────┘
+                                  │
+         ┌────────────────────────┼────────────────────────┐
+         ▼                        ▼                        ▼
+  [ L1: Memory ]           [ L2: Local Disk ]       [ L3: Remote Cache ]
+  - In-process RAM cache   - Persistent CAS on disk  - Optional cloud/network
+  - Zero filesystem I/O    - Primary engine (v1)     - Cross-machine sharing
+```
+
+1. **Local-First Guarantee**:
+   - In v1, operation requires only local disk (`L2`) and in-memory cache (`L1`). The engine runs completely offline without requiring any remote server.
+2. **Hierarchical Traversal & Local Promotion**:
+   - Lookup order: `L1 Memory` ──► `L2 Local Disk` ──► `L3 Remote Cache`.
+   - Remote cache hits automatically promote and populate both L2 Local Disk and L1 Memory.
+   - Cache location queries via `tiered_cache.locate_tier(&digest)` return the active tier (`CacheTier::L1Memory`, `CacheTier::L2LocalDisk`, `CacheTier::L3RemoteCache`).
+
+### Remote Cache Specification & Design Document (Milestone 15.4)
+
+The remote cache architecture and protocol design are detailed in [`docs/remote-cache.md`](docs/remote-cache.md):
+- **Protocol Options**: REST (HTTP/1.1 & HTTP/2) and gRPC (Bazel REAPI compatible) mappings.
+- **Authentication**: Bearer tokens, API keys, role-based access control (RBAC), and mutual TLS (mTLS).
+- **Integrity**: Streaming SHA-256 verification and canonical entry key identity validation.
+- **Multi-Tenancy**: Namespace isolation for Action Cache metadata with cross-namespace global CAS deduplication.
+- **Failure Resilience**: Strict non-blocking guarantees; remote timeouts and failures fall back transparently to local execution without breaking builds.
+
+### CI/CD Behavioral Matrix & Automated Environments (Milestone 16.1)
+
+DCC provides robust operational guarantees across all 4 operational states in CI/CD pipelines:
+
+```text
+                               CI Pipeline Run
+                                      │
+              ┌───────────────────────┼───────────────────────┐
+              ▼                       ▼                       ▼
+      [ Warm Cache ]           [ Cold Cache ]         [ Corrupted Cache ]
+      (Cache Available)      (Cache Unavailable)      (Integrity Mismatch)
+              │                       │                       │
+         Cache HIT                Cache MISS             Quarantine Entry
+       Fast Restore            Execute & Store           Fallback Recompute
+```
+
+1. **State 1 — Cache Available (Warm Hit)**: Restores outputs with 0ms execution time, drastically reducing pipeline wall-clock time.
+2. **State 2 — Cache Unavailable (Cold Miss / Clean Runner)**: Executes computation, records outputs, and populates cache seamlessly.
+3. **State 3 — Cache Corrupted (Tampered / Invalid Data)**: Automatically detects checksum or identity mismatches, evicts damaged records, and executes cleanly without failing the job.
+4. **State 4 — Cache Partially Available (Missing Individual Blobs)**: Identifies missing artifacts in partial cache fetches and falls back to computation safely.
+
+### Graceful Degradation & Non-Breaking Resilience (Milestone 16.2)
+
+DCC enforces a strict non-breaking resilience guarantee:
+
+```text
+       Cache Access Error (Corrupted Data / Missing Blobs / IO Failure)
+                                      │
+                                      ▼
+                      Evict / Quarantine Broken Entry
+                                      │
+                                      ▼
+                      Fallback to Normal Computation
+                                      │
+                                      ▼
+                 Build / Test Suite Completes Successfully
+```
+
+- **Build Continuity**: Cache errors degrade gracefully into standard computation execution. Developer builds and CI pipelines never fail due to cache unavailability or data corruption.
+- **Self-Healing Recovery**: Corrupted entries are evicted immediately during lookup failure, allowing subsequent successful runs to recreate valid cache entries.
+
+### CI Workflow Example & Provider-Neutral Integration (Milestone 16.3)
+
+A complete CI/CD integration guide and GitHub Actions workflow is provided in [`docs/ci-workflow-example.md`](docs/ci-workflow-example.md):
+
+```text
+  [ 1. Checkout ] ──► [ 2. Restore Cache ] ──► [ 3. Run DCC ] ──► [ 4. Tests/Build ] ──► [ 5. Store Cache ]
+```
+
+- **GitHub Actions Reference**: Demonstrates automated cache restore and save (`actions/cache/restore@v4` and `actions/cache/save@v4`) targeting the `.dcc_cache/` directory.
+- **Provider-Neutral Support**: Works across GitHub Actions, GitLab CI, Jenkins, and containerized Docker build environments.
+
+---
+
+
+
 ## Quality Gates & Verification
 
 ```bash
@@ -1010,5 +1559,11 @@ cargo fmt --all -- --check
 ```
 
 All 6 core exit criteria (deterministic computation modeling, canonical key generation, cache entry creation, retrieval, identity verification, and corrupted metadata detection) and all 11 physical storage scenarios (empty cache, single object, deduplication, corruption quarantine, interrupted write isolation, deletion, concurrent read/write races, deeply nested paths, multi-MB large files, and binary byte safety) are fully verified and tested.
+
+
+
+
+
+
 
 

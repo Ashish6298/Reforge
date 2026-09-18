@@ -1,0 +1,87 @@
+================================================================================
+DCC (Developer Computation Cache) - MILESTONE 14.2 VERIFICATION REPORT
+Phase: Security & Safety - Path Traversal Prevention
+Date: 2026-09-18
+================================================================================
+
+1. OBJECTIVE & REQUIREMENTS SUMMARY
+--------------------------------------------------------------------------------
+Milestone 14.2 mandates strict containment and path traversal protection:
+- Never allow cached output metadata to restore files outside the intended workspace.
+- Reject paths containing parent directory escapes (e.g., `../../important-file`, `..\..\escaped.txt`).
+- Reject platform-specific root / drive absolute paths (e.g., `/etc/passwd`, `/var/target`, `C:\Windows\System32\...`, `D:/system/secret`).
+- Reject network / UNC shares and device prefixes (e.g., `\\server\share\file`, `//remote/share`).
+- Reject empty, whitespace-only, root-bound, or nul-byte injected output paths.
+- Ensure that if forged, tampered, or untrusted metadata is fed to the cache restore engine or runner, execution is halted immediately before any disk manipulation or target directory escape occurs.
+
+2. ARCHITECTURAL IMPLEMENTATION
+--------------------------------------------------------------------------------
+Path traversal defenses operate across three coordinated defense layers:
+
+Layer 1: Canonical Path Sanitization (`crates/cache-core/src/paths.rs`)
+- `PathUtils::sanitize_relative_path(path)` rigorously validates paths:
+  * Rejects absolute paths (`path.is_absolute()` and Windows drive prefixes like `C:`).
+  * Rejects UNC / network share prefixes (`\\` and `//`).
+  * Normalizes both Windows backslashes (`\`) and Unix forward slashes (`/`).
+  * Rejects null byte injections (`\0`).
+  * Performs strict token-based component iteration:
+    - Root and Prefix components are strictly disallowed.
+    - CurDir components (`.`) are safely collapsed.
+    - ParentDir components (`..`) track logical depth; any step escaping the logical workspace root (depth < 0) immediately returns `DccError::InvalidPath`.
+  * Computes a safe relative normalized path strictly within the workspace boundary.
+
+Layer 2: Storage Restoration Validation (`crates/cache-storage/src/cache.rs`)
+- `Cache::sanitize_path(base_dir, relative_path)`:
+  * Invokes `PathUtils::sanitize_relative_path` to guarantee logical safety.
+  * Joins the sanitized path against the intended base directory.
+  * Verifies using `safe_path.canonicalize()` (or logical parent chain if not yet on disk) that the resolved target starts strictly with `canonical_base`.
+
+Layer 3: Runner Atomic Restoration Containment (`crates/cache-runner/src/restore.rs`)
+- `OutputRestorer::restore_entry` and `OutputRestorer::sanitize_path`:
+  * Validates every entry in `outputs` before extraction.
+  * Rejects parent directory traversal, absolute paths, and UNC roots.
+  * Stages extraction through `.tmp_restore_<nonce>` within the workspace before atomic renaming.
+  * Leaves the host filesystem and external directories completely untouched if validation fails.
+
+3. TEST SUITE & VERIFICATION MATRIX
+--------------------------------------------------------------------------------
+Dedicated security tests executed in `crates/cache-runner/tests/security_tests.rs` and workspace integration tests:
+
+[TEST 1] `test_milestone_14_2_path_traversal_relative_parent_escape_rejection`
+- Vectors Tested:
+  * `../../important-file`
+  * `..\\..\\windows_traversal.txt`
+  * `nested/../../outside.txt`
+  * `a/b/../../../secret.txt`
+  * `dir/....//../../etc/target`
+- Result: PASSED. All parent traversal attempts rejected with `DccError::InvalidPath`.
+
+[TEST 2] `test_milestone_14_2_path_traversal_absolute_paths_rejection`
+- Vectors Tested:
+  * Unix absolute paths: `/etc/passwd`, `/tmp/malicious.sh`
+  * Windows drive absolute paths: `C:\Windows\System32\cmd.exe`, `D:/target/system.dll`
+  * Network / UNC paths: `\\attacker-server\share\file.txt`, `//remote/share/file`
+  * Windows drive relative paths: `C:temp.txt`
+- Result: PASSED. All absolute and UNC paths rejected with `DccError::InvalidPath`.
+
+[TEST 3] `test_milestone_14_2_path_traversal_runner_and_cache_restore_rejection`
+- Scenario:
+  * A synthetic `CacheEntry` with malicious manifest containing `../../pwned.txt` and `C:\Windows\pwned.txt`.
+  * Invoked `OutputRestorer::restore_entry(&entry, &workspace)`.
+  * Invoked `Cache::restore(&entry, &workspace)`.
+- Verification:
+  * Restoration returned `Err(DccError::InvalidPath)`.
+  * No file created outside workspace root.
+  * External sensitive directories verified clean and untouched.
+- Result: PASSED.
+
+4. OVERALL SUITE STATUS
+--------------------------------------------------------------------------------
+- Unit & Integration Tests: 100% Passed
+- Clippy Warnings: 0 warnings (-D warnings)
+- Code Formatting: Verified clean with `cargo fmt -- --check`
+- Existing UI and runner execution semantics: Unchanged & 100% preserved.
+
+================================================================================
+CONCLUSION: Milestone 14.2 is fully verified, robust, and completed.
+================================================================================

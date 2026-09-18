@@ -222,6 +222,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror",
+ "walkdir",
 ]
 
 [[package]]

@@ -15,6 +15,37 @@ pub enum CachePolicy {
     ForceRecompute,
 }
 
+/// Trust and validation level for a cache instance or storage backend (Milestone 14.5).
+///
+/// Untrusted caches receive stricter validation during lookups and restoration:
+/// - Re-verifies computation canonical key identity against declared key.
+/// - Cryptographically verifies all referenced output CAS blobs before and after staging.
+/// - Enforces safe workspace path constraints and verifies intermediate path symlinks.
+/// - When in `ReadOnly` mode, prevents write operations from modifying local or remote stores.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TrustMode {
+    /// Trusted local cache: default high-performance operation with standard integrity checks.
+    #[default]
+    TrustedLocal,
+    /// Untrusted cache: enforces strict, multi-pass validation on metadata and all artifact blobs.
+    Untrusted,
+    /// Read-only cache: disallows mutations and entry storage, safely consuming validated artifacts.
+    ReadOnly,
+}
+
+impl TrustMode {
+    /// Returns true if this trust mode requires strict validation checks.
+    pub fn requires_strict_validation(&self) -> bool {
+        matches!(self, Self::Untrusted)
+    }
+
+    /// Returns true if this trust mode permits writing / storing cache entries.
+    pub fn allows_writes(&self) -> bool {
+        !matches!(self, Self::ReadOnly)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OutputManifestItem {
     pub path: String,

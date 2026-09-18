@@ -1480,3 +1480,413 @@ fn test_milestone_5_7_correctness_test_matrix_comprehensive() {
         b"BASELINE_PAYLOAD_V1"
     );
 }
+
+#[test]
+fn test_milestone_12_2_cross_platform_process_handling() {
+    use dcc_runner::ProcessExecutor;
+    use std::collections::BTreeMap;
+    use std::time::Duration;
+
+    // 1. Executable discovery
+    #[cfg(windows)]
+    {
+        let cmd_exe = ProcessExecutor::discover_executable("cmd");
+        assert!(cmd_exe.is_some());
+        let powershell = ProcessExecutor::discover_executable("powershell");
+        assert!(powershell.is_some());
+    }
+
+    #[cfg(not(windows))]
+    {
+        let sh = ProcessExecutor::discover_executable("sh");
+        assert!(sh.is_some());
+    }
+
+    // 2. Cross-platform stdout/stderr and exit code capture
+    #[cfg(windows)]
+    let (cmd, args) = (
+        "cmd.exe",
+        vec!["/C".to_string(), "echo cross_platform_stdout".to_string()],
+    );
+
+    #[cfg(not(windows))]
+    let (cmd, args) = (
+        "sh",
+        vec!["-c".to_string(), "echo cross_platform_stdout".to_string()],
+    );
+
+    let mut env = BTreeMap::new();
+    env.insert("DCC_TEST_VAR".to_string(), "TEST_ENV_OK".to_string());
+
+    let out = ProcessExecutor::execute(cmd, &args, &env, None).unwrap();
+    assert_eq!(out.exit_code, 0);
+    assert!(!out.timed_out);
+    let stdout_str = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout_str.contains("cross_platform_stdout"));
+
+    // 3. Process timeout termination handling
+    #[cfg(windows)]
+    let (sleep_cmd, sleep_args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "Start-Sleep -Milliseconds 1200".to_string(),
+        ],
+    );
+
+    #[cfg(not(windows))]
+    let (sleep_cmd, sleep_args) = ("sleep", vec!["1.2".to_string()]);
+
+    let timeout_res = ProcessExecutor::execute_with_timeout(
+        sleep_cmd,
+        &sleep_args,
+        &BTreeMap::new(),
+        None,
+        Some(Duration::from_millis(100)),
+    )
+    .unwrap();
+
+    assert!(timeout_res.timed_out);
+    assert_eq!(timeout_res.exit_code, -1);
+}
+
+#[test]
+fn test_milestone_12_3_file_semantics_cross_platform() {
+    use dcc_core::{Digest, OutputManifestItem, PathUtils};
+    use dcc_runner::OutputRestorer;
+    use std::fs;
+
+    let env = TestEnv::new().unwrap();
+
+    // ==========================================
+    // 1. SYMLINKS & RESOLUTION
+    // ==========================================
+    let target_file = env.workspace_dir.path().join("target_file.txt");
+    fs::write(&target_file, b"SYMLINK_TARGET_PAYLOAD_12_3").unwrap();
+    let _symlink_path = env.workspace_dir.path().join("symlink_link.txt");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        if symlink(&target_file, &_symlink_path).is_ok() {
+            let digest_target = Digest::hash_file(&target_file).unwrap();
+            let digest_link = Digest::hash_file(&_symlink_path).unwrap();
+            assert_eq!(
+                digest_target, digest_link,
+                "Hashing through symlink resolves to underlying content"
+            );
+        }
+    }
+
+    // ==========================================
+    // 2. PERMISSIONS & EXECUTABLE BITS
+    // ==========================================
+    let script_name = "test_script.sh";
+    let script_path = env.workspace_dir.path().join(script_name);
+    fs::write(&script_path, b"#!/bin/sh\necho hello\n").unwrap();
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&script_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script_path, perms).unwrap();
+
+        let meta = fs::metadata(&script_path).unwrap();
+        let is_exec = meta.permissions().mode() & 0o111 != 0;
+        assert!(
+            is_exec,
+            "Executable permission bit must be detected on Unix"
+        );
+    }
+
+    // ==========================================
+    // 3. CASE-SENSITIVE VS CASE-INSENSITIVE PATHS
+    // ==========================================
+    // Verify PathUtils canonicalization distinguishes case-sensitive names
+    let lower_path = "src/models/item.rs";
+    let upper_path = "src/models/ITEM.rs";
+    assert_ne!(
+        PathUtils::canonicalize_for_key(lower_path),
+        PathUtils::canonicalize_for_key(upper_path),
+        "Case-sensitivity is strictly preserved in canonical key identity"
+    );
+
+    let d_content = Digest::from_bytes(b"DATA");
+    let comp_lower = dcc_core::Computation::builder_with("check", "tool")
+        .input(lower_path, d_content.clone(), 4)
+        .build()
+        .unwrap();
+
+    let comp_upper = dcc_core::Computation::builder_with("check", "tool")
+        .input(upper_path, d_content, 4)
+        .build()
+        .unwrap();
+
+    let key_lower = dcc_core::CanonicalComputation::from_computation(&comp_lower)
+        .compute_key()
+        .unwrap();
+    let key_upper = dcc_core::CanonicalComputation::from_computation(&comp_upper)
+        .compute_key()
+        .unwrap();
+
+    assert_ne!(
+        key_lower, key_upper,
+        "Distinct path casing produces distinct computation keys across platforms"
+    );
+
+    // ==========================================
+    // 4. PATH SEPARATORS ('/' VS '\')
+    // ==========================================
+    let win_sep = r"src\components\layout\grid.rs";
+    let unix_sep = "src/components/layout/grid.rs";
+    assert_eq!(
+        PathUtils::to_normalized_string(win_sep),
+        PathUtils::to_normalized_string(unix_sep),
+        "Path normalization unifies Windows and Unix separators"
+    );
+    assert_eq!(
+        PathUtils::canonicalize_for_key(win_sep),
+        PathUtils::canonicalize_for_key(unix_sep),
+        "Key canonicalization is invariant to separator differences"
+    );
+
+    // ==========================================
+    // 5. RESTORATION PERMISSIONS & METADATA ROUNDTRIP
+    // ==========================================
+    let payload = b"RESTORE_PAYLOAD_WITH_EXEC_BIT";
+    let (blob_digest, blob_size) = env.storage.store_object_bytes(payload).unwrap();
+
+    let outputs = vec![OutputManifestItem {
+        path: "bin/tool_artifact".to_string(),
+        digest: blob_digest,
+        size: blob_size,
+        is_executable: Some(true),
+    }];
+
+    let execution = dcc_core::ExecutionMetadata {
+        exit_code: 0,
+        execution_time_ms: 10,
+        stdout_digest: None,
+        stderr_digest: None,
+        timings: dcc_core::TimingMetrics::default(),
+    };
+
+    let entry = dcc_core::CacheEntry::new(key_lower, comp_lower, outputs, execution);
+
+    OutputRestorer::restore_entry(&env.storage, &entry, env.workspace_dir.path()).unwrap();
+    let restored_file = env.workspace_dir.path().join("bin/tool_artifact");
+    assert!(restored_file.is_file());
+    assert_eq!(fs::read(&restored_file).unwrap(), payload);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = fs::metadata(&restored_file).unwrap().permissions();
+        assert_eq!(
+            perms.mode() & 0o111,
+            0o111,
+            "Restored executable output must preserve 0o755 executable permission bit"
+        );
+    }
+}
+
+#[test]
+fn test_milestone_16_1_ci_behavior_matrix() {
+    // Test that CI environments gracefully handle all 4 cache operational states:
+    // 1. cache available (warm hit)
+    // 2. cache unavailable (empty cache / fresh runner / cold miss -> executes cleanly)
+    // 3. cache corrupted (metadata or blob tampering -> detects corruption, deletes entry, falls back to execution)
+    // 4. cache partially available (partial blobs present -> detects missing blobs, executes cleanly)
+
+    let env = TestEnv::new().unwrap();
+    env.create_input_file("ci_source.txt", b"CI compilation source content")
+        .unwrap();
+
+    #[cfg(windows)]
+    let (cmd, args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "Copy-Item ci_source.txt -Destination ci_out.txt".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd, args) = (
+        "cp",
+        vec!["ci_source.txt".to_string(), "ci_out.txt".to_string()],
+    );
+
+    let computation = Computation::builder_with("ci-job", cmd)
+        .args(args)
+        .input("ci_source.txt", Digest::from_bytes(b""), 0)
+        .output("ci_out.txt", true)
+        .build()
+        .unwrap();
+
+    let engine = RunnerEngine::new(
+        &env.storage,
+        EngineOptions {
+            working_dir: env.workspace_dir.path().to_path_buf(),
+            ..Default::default()
+        },
+    );
+
+    // ==========================================
+    // STATE 2: CACHE UNAVAILABLE / COLD RUN
+    // ==========================================
+    let res_cold = engine.execute(computation.clone()).unwrap();
+    assert_eq!(res_cold.status, ExecutionStatus::Miss);
+    assert_eq!(res_cold.exit_code, 0);
+    assert!(env.workspace_dir.path().join("ci_out.txt").is_file());
+    assert_eq!(
+        env.read_output_file("ci_out.txt").unwrap(),
+        b"CI compilation source content"
+    );
+
+    // ==========================================
+    // STATE 1: CACHE AVAILABLE / WARM HIT
+    // ==========================================
+    fs::remove_file(env.workspace_dir.path().join("ci_out.txt")).unwrap();
+    let res_warm = engine.execute(computation.clone()).unwrap();
+    assert_eq!(res_warm.status, ExecutionStatus::Hit);
+    assert_eq!(res_warm.exit_code, 0);
+    assert!(env.workspace_dir.path().join("ci_out.txt").is_file());
+    assert_eq!(
+        env.read_output_file("ci_out.txt").unwrap(),
+        b"CI compilation source content"
+    );
+
+    // ==========================================
+    // STATE 3: CACHE CORRUPTED
+    // ==========================================
+    // Corrupt the CAS object
+    let out_digest = &res_warm.outputs[0].digest;
+    let cas_path = env.storage.object_path(out_digest);
+    fs::write(&cas_path, b"CORRUPTED_CAS_DATA").unwrap();
+    fs::remove_file(env.workspace_dir.path().join("ci_out.txt")).unwrap();
+
+    // CI execution must not crash or fail build: it detects corruption and falls back to clean recompute
+    let res_corrupted = engine.execute(computation.clone()).unwrap();
+    assert_eq!(res_corrupted.status, ExecutionStatus::Miss);
+    assert_eq!(res_corrupted.exit_code, 0);
+    assert!(
+        matches!(
+            res_corrupted.miss_reason,
+            Some(dcc_core::MissReason::CorruptedCache { .. })
+        ),
+        "Must record CorruptedCache miss reason"
+    );
+    assert_eq!(
+        env.read_output_file("ci_out.txt").unwrap(),
+        b"CI compilation source content"
+    );
+
+    // ==========================================
+    // STATE 4: CACHE PARTIALLY AVAILABLE
+    // ==========================================
+    // Delete the CAS blob completely to simulate missing chunk in partial cache restore
+    let valid_out_digest = &res_corrupted.outputs[0].digest;
+    let valid_cas_path = env.storage.object_path(valid_out_digest);
+    if valid_cas_path.exists() {
+        fs::remove_file(&valid_cas_path).unwrap();
+    }
+    fs::remove_file(env.workspace_dir.path().join("ci_out.txt")).unwrap();
+
+    // CI execution must safely handle partially missing cache and recompute
+    let res_partial = engine.execute(computation).unwrap();
+    assert_eq!(res_partial.status, ExecutionStatus::Miss);
+    assert_eq!(res_partial.exit_code, 0);
+    assert_eq!(
+        env.read_output_file("ci_out.txt").unwrap(),
+        b"CI compilation source content"
+    );
+}
+
+#[test]
+fn test_milestone_16_2_graceful_degradation_when_cache_fails() {
+    // Milestone 16.2: If cache access fails (corrupted metadata, I/O errors, invalid JSON),
+    // the system must gracefully fall back to clean computation.
+    // Developer builds must never become unusable because the cache is unavailable or broken.
+
+    let env = TestEnv::new().unwrap();
+    env.create_input_file("app_code.txt", b"production application logic")
+        .unwrap();
+
+    #[cfg(windows)]
+    let (cmd, args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "Copy-Item app_code.txt -Destination app_build.bin".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd, args) = (
+        "cp",
+        vec!["app_code.txt".to_string(), "app_build.bin".to_string()],
+    );
+
+    let computation = Computation::builder_with("app-build", cmd)
+        .args(args)
+        .input("app_code.txt", Digest::from_bytes(b""), 0)
+        .output("app_build.bin", true)
+        .build()
+        .unwrap();
+
+    let engine = RunnerEngine::new(
+        &env.storage,
+        EngineOptions {
+            working_dir: env.workspace_dir.path().to_path_buf(),
+            ..Default::default()
+        },
+    );
+
+    // Initial build succeeds and writes entry
+    let res1 = engine.execute(computation.clone()).unwrap();
+    assert_eq!(res1.status, ExecutionStatus::Miss);
+    assert_eq!(res1.exit_code, 0);
+
+    // 1. Scenario A: Corrupted JSON metadata file on disk
+    let entry_file = env.storage.entry_path(&res1.key);
+    fs::write(&entry_file, b"{ CORRUPTED_NON_JSON_METADATA").unwrap();
+    fs::remove_file(env.workspace_dir.path().join("app_build.bin")).unwrap();
+
+    // Execution must NOT crash or fail: it must gracefully fall back to computation
+    let res_fallback_json = engine.execute(computation.clone()).unwrap();
+    assert_eq!(res_fallback_json.status, ExecutionStatus::Miss);
+    assert_eq!(res_fallback_json.exit_code, 0);
+    assert_eq!(
+        env.read_output_file("app_build.bin").unwrap(),
+        b"production application logic"
+    );
+
+    // 2. Scenario B: Corrupted output blob in CAS
+    let out_digest = &res_fallback_json.outputs[0].digest;
+    let cas_path = env.storage.object_path(out_digest);
+    fs::write(&cas_path, b"TAMPERED_CAS_PAYLOAD").unwrap();
+    fs::remove_file(env.workspace_dir.path().join("app_build.bin")).unwrap();
+
+    // Execution again gracefully falls back to computation
+    let res_fallback_cas = engine.execute(computation.clone()).unwrap();
+    assert_eq!(res_fallback_cas.status, ExecutionStatus::Miss);
+    assert_eq!(res_fallback_cas.exit_code, 0);
+    assert_eq!(
+        env.read_output_file("app_build.bin").unwrap(),
+        b"production application logic"
+    );
+
+    // 3. Scenario C: Removed metadata while CAS remains (cache partially missing)
+    if entry_file.exists() {
+        fs::remove_file(&entry_file).unwrap();
+    }
+    fs::remove_file(env.workspace_dir.path().join("app_build.bin")).unwrap();
+
+    let res_fallback_missing = engine.execute(computation).unwrap();
+    assert_eq!(res_fallback_missing.status, ExecutionStatus::Miss);
+    assert_eq!(res_fallback_missing.exit_code, 0);
+    assert_eq!(
+        env.read_output_file("app_build.bin").unwrap(),
+        b"production application logic"
+    );
+}

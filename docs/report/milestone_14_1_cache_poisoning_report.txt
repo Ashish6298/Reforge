@@ -1,0 +1,74 @@
+================================================================================
+DEVELOPER COMPUTATION CACHE (DCC)
+MILESTONE 14.1 — CACHE POISONING DEFENSE REPORT
+================================================================================
+
+Date: 2026-09-18
+Status: PASSED / VERIFIED
+Target: Milestone 14.1 — Cache Poisoning
+
+--------------------------------------------------------------------------------
+1. OBJECTIVE & THREAT MODEL
+--------------------------------------------------------------------------------
+Milestone 14.1 requires that DCC treat cached artifacts as potentially dangerous data.
+A caching system must never blindly trust stored objects, metadata, or output manifests.
+
+Three Critical Attack Vectors Analyzed & Mitigated:
+  1. Malicious / Poisoned CAS Object:
+     - Threat: An attacker or disk bitrot alters bytes in `.dcc_cache/objects/xx/<digest>`
+       to inject malicious trojan binaries into downstream developer workspaces.
+     - Defense: Cryptographic pre-restoration verification (`CasStorage::verify_object`)
+       and post-materialization digest check. On mismatch, the compromised CAS blob
+       is quarantined with `.corrupted` extension, restoration aborts immediately,
+       and safe fallback execution is triggered.
+  2. Malicious Metadata / Key Spoofing:
+     - Threat: An attacker crafts a forged `.json` entry in `.dcc_cache/entries/xx/`
+       claiming a legitimate key (e.g. standard compiler invocation) but embedding
+       a malicious computation command (`rm -rf /` or malicious binary).
+     - Defense: `entry.verify_identity()` executes canonical SHA-256 key calculation
+       over the embedded `Computation` model and compares against `entry.key`.
+       `Cache::restore` and `RunnerEngine` enforce `verify_identity()` prior to
+       extracting any files.
+  3. Tampered Output Manifest & Atomic Staging Rollback:
+     - Threat: Metadata declares forged output digest or size, attempting partial or
+       corrupted extraction into target workspace.
+     - Defense: Restoration stages outputs into temporary `.tmp_restore_<nonce>` files.
+       Digests are verified from reader stream before atomic rename. If validation fails,
+       temporary files are wiped and the target workspace path is never overwritten.
+
+--------------------------------------------------------------------------------
+2. SECURITY VERIFICATION SUITE RESULTS
+--------------------------------------------------------------------------------
+Suite: cargo test --test security_tests
+All 4 security test scenarios passed with 100% compliance:
+
+  1. test_corrupted_cas_object_causes_safe_fallback:
+     - Validates that RunnerEngine detects corrupted CAS objects, reports MissReason::CorruptedCache,
+       quarantines the bad blob, and re-executes clean command to produce legitimate output. [PASSED]
+
+  2. test_milestone_14_1_malicious_cas_object_quarantined_and_rejected:
+     - Injects malicious trojan payload into CAS object file on disk.
+     - Verifies Cache::restore rejects extraction, quarantines malicious file to .corrupted,
+       and leaves target workspace completely unpolluted. [PASSED]
+
+  3. test_milestone_14_1_malicious_metadata_key_spoofing_prevented:
+     - Crafts forged metadata spoofing legitimate key with malicious command.
+     - Verifies verify_identity() fails and Cache::restore halts pre-restoration. [PASSED]
+
+  4. test_milestone_14_1_tampered_output_staging_rollback:
+     - Crafts output manifest declaring forged digest.
+     - Verifies restoration staging rollback: temporary files purged and target untouched. [PASSED]
+
+--------------------------------------------------------------------------------
+3. QUALITY GATES & WORKSPACE COMPLIANCE
+--------------------------------------------------------------------------------
+- Test Suite:
+    cargo test --workspace (130 passed; 0 failed; 4 ignored)
+- Linter & Style:
+    cargo clippy --workspace --all-targets --all-features -- -D warnings (0 warnings)
+    cargo fmt --all -- --check (Clean)
+
+================================================================================
+CONCLUSION: Milestone 14.1 Cache Poisoning defense implementation and security
+verification completed with 100% compliance.
+================================================================================

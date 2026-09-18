@@ -24,6 +24,10 @@ use std::time::Duration;
 #[derive(Debug, Clone)]
 pub struct Cache {
     storage: Arc<CasStorage>,
+    trust_mode: dcc_core::TrustMode,
+    l1_cache: Arc<
+        std::sync::RwLock<std::collections::HashMap<CacheKey, (CacheEntry, std::time::SystemTime)>>,
+    >,
 }
 
 impl Cache {
@@ -48,12 +52,29 @@ impl Cache {
     pub fn new(storage: CasStorage) -> Self {
         Self {
             storage: Arc::new(storage),
+            trust_mode: dcc_core::TrustMode::TrustedLocal,
+            l1_cache: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         }
     }
 
     /// Create a new Cache library instance with an existing Arc-wrapped CAS storage.
     pub fn from_arc(storage: Arc<CasStorage>) -> Self {
-        Self { storage }
+        Self {
+            storage,
+            trust_mode: dcc_core::TrustMode::TrustedLocal,
+            l1_cache: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        }
+    }
+
+    /// Set trust mode (TrustedLocal, Untrusted, ReadOnly) (Milestone 14.5).
+    pub fn with_trust_mode(mut self, trust_mode: dcc_core::TrustMode) -> Self {
+        self.trust_mode = trust_mode;
+        self
+    }
+
+    /// Get configured trust mode.
+    pub fn trust_mode(&self) -> dcc_core::TrustMode {
+        self.trust_mode
     }
 
     /// Access the underlying CAS storage reference.
@@ -61,18 +82,93 @@ impl Cache {
         &self.storage
     }
 
-    /// Lookup a cache entry by key.
+    /// Clear in-memory L1 metadata cache.
+    pub fn clear_memory_cache(&self) {
+        if let Ok(mut l1) = self.l1_cache.write() {
+            l1.clear();
+        }
+    }
+
+    /// Lookup a cache entry by key with fast L1 in-memory caching and mtime validation (Milestone 13.4).
+    /// In `Untrusted` mode, performs strict cryptographic identity and blob verification before returning.
     ///
     /// Updates access statistics (last_accessed_at, hit_count) if found.
     pub fn lookup(&self, key: &CacheKey) -> Result<Option<CacheEntry>> {
-        self.storage.get_entry(key)
+        let entry_path = self.storage.entry_path(key);
+        let on_disk_mtime = fs::metadata(&entry_path)
+            .ok()
+            .and_then(|m| m.modified().ok());
+
+        if let Some(mtime) = on_disk_mtime {
+            if let Ok(l1) = self.l1_cache.read() {
+                if let Some((entry, cached_mtime)) = l1.get(key) {
+                    if *cached_mtime == mtime {
+                        if self.trust_mode.requires_strict_validation() {
+                            entry.verify_identity()?;
+                            for output in &entry.outputs {
+                                self.storage.verify_object(&output.digest)?;
+                            }
+                        }
+                        return Ok(Some(entry.clone()));
+                    }
+                }
+            }
+        }
+
+        let entry_opt = self.storage.get_entry(key)?;
+        if let Some(ref entry) = entry_opt {
+            if self.trust_mode.requires_strict_validation() {
+                entry.verify_identity()?;
+                for output in &entry.outputs {
+                    self.storage.verify_object(&output.digest)?;
+                }
+            }
+
+            let mtime = fs::metadata(&entry_path)
+                .ok()
+                .and_then(|m| m.modified().ok());
+            if let Some(mtime) = mtime {
+                if let Ok(mut l1) = self.l1_cache.write() {
+                    if l1.len() < 10000 {
+                        l1.insert(key.clone(), (entry.clone(), mtime));
+                    }
+                }
+            }
+        } else if let Ok(mut l1) = self.l1_cache.write() {
+            l1.remove(key);
+        }
+        Ok(entry_opt)
     }
 
     /// Store a cache entry into the storage.
     ///
-    /// Ensures atomic write of entry metadata.
+    /// In `ReadOnly` mode, store operations are rejected with `CacheError::ConfigurationError`.
+    /// Ensures atomic write of entry metadata and updates in-memory cache.
     pub fn store(&self, entry: &CacheEntry) -> Result<()> {
-        self.storage.store_entry(entry)
+        if !self.trust_mode.allows_writes() {
+            return Err(CacheError::ConfigurationError(
+                "Cannot store cache entry in ReadOnly cache mode".into(),
+            ));
+        }
+        if self.trust_mode.requires_strict_validation() {
+            entry.verify_identity()?;
+            for output in &entry.outputs {
+                self.storage.verify_object(&output.digest)?;
+            }
+        }
+        self.storage.store_entry(entry)?;
+        let entry_path = self.storage.entry_path(&entry.key);
+        let mtime = fs::metadata(&entry_path)
+            .ok()
+            .and_then(|m| m.modified().ok());
+        if let Some(mtime) = mtime {
+            if let Ok(mut l1) = self.l1_cache.write() {
+                if l1.len() < 10000 {
+                    l1.insert(entry.key.clone(), (entry.clone(), mtime));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Restore all outputs recorded in a cache entry to the destination directory.
@@ -80,6 +176,19 @@ impl Cache {
     /// Validates cryptographic checksums before and after restoration, prevents
     /// directory traversal vulnerabilities, and writes atomically.
     pub fn restore(&self, entry: &CacheEntry, destination_dir: &Path) -> Result<()> {
+        self.restore_with_options(entry, destination_dir, false)
+    }
+
+    /// Restore outputs with configurable optimization (e.g. hardlinks where safe) (Milestone 13.4).
+    pub fn restore_with_options(
+        &self,
+        entry: &CacheEntry,
+        destination_dir: &Path,
+        prefer_hardlinks: bool,
+    ) -> Result<()> {
+        // Pre-restoration integrity guarantee: verify entry identity matches computation
+        entry.verify_identity()?;
+
         for output in &entry.outputs {
             let target_path = self.sanitize_path(destination_dir, &output.path)?;
 
@@ -91,37 +200,47 @@ impl Cache {
             self.storage.verify_object(&output.digest)?;
 
             let cas_path = self.storage.object_path(&output.digest);
-            let mut src = BufReader::new(File::open(cas_path)?);
-
             let parent_dir = target_path.parent().unwrap_or(destination_dir);
             let tmp_path = parent_dir.join(format!(".tmp_restore_{}", output.digest.prefix(8)));
 
-            {
-                let mut dst = BufWriter::new(
-                    OpenOptions::new()
-                        .write(true)
-                        .create(true)
-                        .truncate(true)
-                        .open(&tmp_path)?,
-                );
-                io::copy(&mut src, &mut dst)?;
-                dst.flush()?;
-                dst.get_ref().sync_all()?;
-            }
-
-            // Validate restored output digest
-            let check_file = File::open(&tmp_path)?;
-            let check_digest = Digest::from_reader(BufReader::new(check_file))?;
-            if check_digest != output.digest {
+            let mut hardlink_succeeded = false;
+            if prefer_hardlinks {
                 let _ = fs::remove_file(&tmp_path);
-                return Err(CacheError::IntegrityError {
-                    expected: output.digest.as_str().to_string(),
-                    actual: check_digest.as_str().to_string(),
-                    path: target_path.display().to_string(),
-                });
+                if fs::hard_link(&cas_path, &tmp_path).is_ok() {
+                    hardlink_succeeded = true;
+                }
             }
 
-            // Atomically replace target path
+            if !hardlink_succeeded {
+                let mut src = BufReader::new(File::open(&cas_path)?);
+                {
+                    let mut dst = BufWriter::new(
+                        OpenOptions::new()
+                            .write(true)
+                            .create(true)
+                            .truncate(true)
+                            .open(&tmp_path)?,
+                    );
+                    io::copy(&mut src, &mut dst)?;
+                    dst.flush()?;
+                    dst.get_ref().sync_all()?;
+                }
+
+                // Validate restored output digest
+                let check_file = File::open(&tmp_path)?;
+                let check_digest = Digest::from_reader(BufReader::new(check_file))?;
+                if check_digest != output.digest {
+                    let _ = fs::remove_file(&tmp_path);
+                    return Err(CacheError::IntegrityError {
+                        expected: output.digest.as_str().to_string(),
+                        actual: check_digest.as_str().to_string(),
+                        path: target_path.display().to_string(),
+                    });
+                }
+            }
+
+            // Atomically replace target path (Milestone 14.3: safe pre-cleaning prevents symlink-following overwrite attacks)
+            dcc_core::PathUtils::safe_prepare_target_path(&target_path)?;
             fs::rename(&tmp_path, &target_path)?;
 
             #[cfg(unix)]
@@ -143,6 +262,9 @@ impl Cache {
 
     /// Remove a cache entry by key. Returns `true` if the entry was present and removed.
     pub fn remove(&self, key: &CacheKey) -> Result<bool> {
+        if let Ok(mut l1) = self.l1_cache.write() {
+            l1.remove(key);
+        }
         self.storage.delete_entry(key)
     }
 
@@ -242,25 +364,7 @@ impl Cache {
     }
 
     fn sanitize_path(&self, base_dir: &Path, rel_path: &str) -> Result<PathBuf> {
-        let norm = rel_path.replace('\\', "/");
-        if norm.starts_with('/') || norm.starts_with("../") || norm.contains("/../") || norm == ".."
-        {
-            return Err(CacheError::PathTraversal(format!(
-                "Illegal path component in output path: {}",
-                rel_path
-            )));
-        }
-
-        let full_path = base_dir.join(rel_path);
-        if !full_path.starts_with(base_dir) {
-            return Err(CacheError::PathTraversal(format!(
-                "Path {} escapes base directory {}",
-                rel_path,
-                base_dir.display()
-            )));
-        }
-
-        Ok(full_path)
+        dcc_core::PathUtils::sanitize_relative_path(base_dir, rel_path)
     }
 }
 

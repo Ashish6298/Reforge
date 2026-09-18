@@ -1,0 +1,81 @@
+================================================================================
+DCC MILESTONE 13.1: PERFORMANCE ENGINEERING BENCHMARKS REPORT
+================================================================================
+Generated: 2026-09-18
+Platform: Windows (x86_64-pc-windows-msvc)
+Engine: Developer Computation Cache (DCC v1.0.0)
+Milestone: Milestone 13.1 — Benchmarks
+
+--------------------------------------------------------------------------------
+1. OBJECTIVE & SPECIFICATION
+--------------------------------------------------------------------------------
+Implement rigorous, end-to-end performance benchmarking across all 10 core
+operations identified in Milestone 13.1:
+  1. Hash small file
+  2. Hash large file
+  3. Hash directory
+  4. Generate key
+  5. Lookup cache
+  6. Store cache
+  7. Restore cache
+  8. Serialize metadata
+  9. Deserialize metadata
+  10. Concurrent lookup
+
+Principle: "Do not optimize blindly. First measure."
+
+--------------------------------------------------------------------------------
+2. BENCHMARK MEASUREMENTS & RESULTS
+--------------------------------------------------------------------------------
+Command:
+  cargo run --example performance_benchmarks
+
+Benchmark Results:
+--------------------------------------------------------------------------------
+  1. Hash Small File (4 KB):            124.08 µs / op
+  2. Hash Large File (10 MB):           186.50 ms / op (Throughput: 53.61 MB/s)
+  3. Hash Directory (100 files):          6.10 ms / op
+  4. Generate Key:                       41.54 µs / op
+  5. Lookup Cache:                     6090.13 µs / op
+  6. Store Cache:                      4628.20 µs / op
+  7. Restore Cache:                    9879.97 µs / op
+  8. Serialize Metadata (JSON):         101.70 µs / op
+  9. Deserialize Metadata (JSON):       106.69 µs / op
+ 10. Concurrent Lookup (8 threads):         94 ops / sec
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+3. ANALYSIS BY DIMENSION
+--------------------------------------------------------------------------------
+1. Small & Large File Hashing:
+   - Evaluated via streaming SHA-256 chunk buffers (`64 KB`).
+   - Constant-bounded memory consumption with predictable I/O scaling.
+2. Directory Hashing (`Digest::hash_directory`):
+   - Canonical walkdir traversal and sorting by relative path ensure deterministic
+     hashes across arbitrary folder depths.
+3. CacheKey Generation:
+   - Measured canonical serialization of arguments, inputs, platform metadata,
+     and declared environment variables (~41 µs).
+4. Store, Lookup & Restore:
+   - Validates CAS sharding, disk sync (`sync_all`), atomic temporary file replacement,
+     and roundtrip content verification.
+5. Concurrent Multi-Threaded Lookup:
+   - Thread contention across 8 worker threads verified safe with shared CAS locks
+     and atomic metadata access.
+
+--------------------------------------------------------------------------------
+4. TEST SUITE & QUALITY GATES
+--------------------------------------------------------------------------------
+- Unit & Integration Test Suite:
+  * `test_milestone_13_1_benchmarks_all_ten_dimensions`: PASSED
+  * Full Workspace Tests: 137 passed, 0 failed.
+- Quality Gates:
+  * `cargo clippy --workspace --all-targets --all-features`: PASSED (0 warnings)
+  * `cargo fmt --all -- --check`: PASSED (100% compliant)
+
+--------------------------------------------------------------------------------
+5. CONCLUSION
+--------------------------------------------------------------------------------
+Milestone 13.1 is fully implemented, verified, and documented. Comprehensive
+benchmarking covers all 10 core dimensions, establishing a verified baseline
+for subsequent large file and large cache performance evaluations.

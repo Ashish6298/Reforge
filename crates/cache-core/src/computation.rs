@@ -190,6 +190,14 @@ impl Computation {
     }
 
     pub fn validate(&self) -> Result<()> {
+        self.validate_with_policy(crate::sensitive::SensitiveDataPolicy::Allow)
+    }
+
+    /// Validates the computation model against a specified sensitive data policy (Milestone 14.4).
+    pub fn validate_with_policy(
+        &self,
+        sensitive_policy: crate::sensitive::SensitiveDataPolicy,
+    ) -> Result<()> {
         if self.operation.trim().is_empty() {
             return Err(CacheError::ValidationError(
                 "Operation identifier cannot be empty".into(),
@@ -201,23 +209,50 @@ impl Computation {
             ));
         }
         for out in &self.outputs {
-            let p = out.path.replace('\\', "/");
-            if p.starts_with('/') || p.starts_with("../") || p.contains("/../") || p == ".." {
-                return Err(CacheError::PathTraversal(format!(
-                    "Output path contains invalid traversal or absolute path: {}",
-                    out.path
-                )));
-            }
+            crate::paths::PathUtils::validate_computation_path(&out.path)?;
         }
         for inp in &self.inputs {
-            let p = inp.path.replace('\\', "/");
-            if p.starts_with('/') || p.starts_with("../") || p.contains("/../") || p == ".." {
-                return Err(CacheError::PathTraversal(format!(
-                    "Input path contains invalid traversal or absolute path: {}",
-                    inp.path
-                )));
-            }
+            crate::paths::PathUtils::validate_computation_path(&inp.path)?;
         }
+
+        // Sensitive Data Inspection (Milestone 14.4)
+        match sensitive_policy {
+            crate::sensitive::SensitiveDataPolicy::Deny => {
+                for (k, v) in &self.env {
+                    if let Some(reason) =
+                        crate::sensitive::SensitiveDataDetector::scan_env_var(k, v)
+                    {
+                        return Err(CacheError::SensitiveDataError(reason));
+                    }
+                }
+                for arg in &self.args {
+                    if let Some(reason) =
+                        crate::sensitive::SensitiveDataDetector::scan_argument(arg)
+                    {
+                        return Err(CacheError::SensitiveDataError(reason));
+                    }
+                }
+            }
+            crate::sensitive::SensitiveDataPolicy::Warn => {
+                for (k, v) in &self.env {
+                    if let Some(reason) =
+                        crate::sensitive::SensitiveDataDetector::scan_env_var(k, v)
+                    {
+                        eprintln!("[DCC WARNING - SENSITIVE DATA]: {}", reason);
+                    }
+                }
+                for arg in &self.args {
+                    if let Some(reason) =
+                        crate::sensitive::SensitiveDataDetector::scan_argument(arg)
+                    {
+                        eprintln!("[DCC WARNING - SENSITIVE DATA]: {}", reason);
+                    }
+                }
+            }
+            crate::sensitive::SensitiveDataPolicy::Allow
+            | crate::sensitive::SensitiveDataPolicy::Mask => {}
+        }
+
         Ok(())
     }
 
@@ -241,6 +276,7 @@ pub struct ComputationBuilder {
     policy: CachePolicy,
     metadata: BTreeMap<String, String>,
     working_dir: Option<String>,
+    sensitive_policy: crate::sensitive::SensitiveDataPolicy,
 }
 
 impl Default for ComputationBuilder {
@@ -258,6 +294,7 @@ impl Default for ComputationBuilder {
             policy: CachePolicy::ReadWrite,
             metadata: BTreeMap::new(),
             working_dir: None,
+            sensitive_policy: crate::sensitive::SensitiveDataPolicy::Allow,
         }
     }
 }
@@ -277,6 +314,7 @@ impl ComputationBuilder {
             policy: CachePolicy::ReadWrite,
             metadata: BTreeMap::new(),
             working_dir: None,
+            sensitive_policy: crate::sensitive::SensitiveDataPolicy::Allow,
         }
     }
 
@@ -460,11 +498,25 @@ impl ComputationBuilder {
         self
     }
 
+    pub fn sensitive_policy(mut self, policy: crate::sensitive::SensitiveDataPolicy) -> Self {
+        self.sensitive_policy = policy;
+        self
+    }
+
     pub fn build(mut self) -> Result<Computation> {
         // Sort inputs by normalized path for canonical deterministic ordering
         self.inputs.sort_by(|a, b| a.path.cmp(&b.path));
         // Sort outputs by path
         self.outputs.sort_by(|a, b| a.path.cmp(&b.path));
+
+        // If policy is Mask, redact sensitive values in env
+        if self.sensitive_policy == crate::sensitive::SensitiveDataPolicy::Mask {
+            for (k, v) in self.env.iter_mut() {
+                if crate::sensitive::SensitiveDataDetector::scan_env_var(k, v).is_some() {
+                    *v = crate::sensitive::SensitiveDataDetector::redact_value(v);
+                }
+            }
+        }
 
         let comp = Computation {
             schema_version: self.schema_version,
@@ -480,7 +532,7 @@ impl ComputationBuilder {
             metadata: self.metadata,
             working_dir: self.working_dir,
         };
-        comp.validate()?;
+        comp.validate_with_policy(self.sensitive_policy)?;
         Ok(comp)
     }
 }
@@ -568,5 +620,48 @@ mod tests {
             .expect_err("Path traversal in input must fail validation");
 
         assert!(matches!(err_inp, CacheError::PathTraversal(_)));
+    }
+
+    #[test]
+    fn test_milestone_14_4_sensitive_data_policy_deny_and_mask() {
+        use crate::sensitive::SensitiveDataPolicy;
+
+        // Deny policy rejects sensitive env vars
+        let err_deny = Computation::builder()
+            .operation("build")
+            .command("cargo")
+            .env("AWS_SECRET_ACCESS_KEY", "AKIAIOSFODNN7EXAMPLE")
+            .sensitive_policy(SensitiveDataPolicy::Deny)
+            .build();
+        assert!(
+            err_deny.is_err(),
+            "SensitiveDataPolicy::Deny must reject sensitive env vars"
+        );
+
+        // Deny policy rejects sensitive arguments
+        let err_arg = Computation::builder()
+            .operation("build")
+            .command("cargo")
+            .arg("--token=ghp_1234567890abcdef")
+            .sensitive_policy(SensitiveDataPolicy::Deny)
+            .build();
+        assert!(
+            err_arg.is_err(),
+            "SensitiveDataPolicy::Deny must reject sensitive arguments"
+        );
+
+        // Mask policy redacts sensitive value
+        let comp_masked = Computation::builder()
+            .operation("build")
+            .command("cargo")
+            .env("GITHUB_TOKEN", "ghp_1234567890abcdef")
+            .sensitive_policy(SensitiveDataPolicy::Mask)
+            .build()
+            .unwrap();
+        assert_eq!(
+            comp_masked.env.get("GITHUB_TOKEN").unwrap(),
+            "[REDACTED]",
+            "SensitiveDataPolicy::Mask must redact sensitive value"
+        );
     }
 }

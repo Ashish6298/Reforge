@@ -45,6 +45,7 @@ pub enum FailurePolicy {
 pub struct EngineOptions {
     pub policy: CachePolicy,
     pub failure_policy: FailurePolicy,
+    pub trust_mode: dcc_core::TrustMode,
     pub working_dir: PathBuf,
     pub lock_timeout: Duration,
     pub verbose: bool,
@@ -55,6 +56,7 @@ impl Default for EngineOptions {
         Self {
             policy: CachePolicy::ReadWrite,
             failure_policy: FailurePolicy::DoNotCache,
+            trust_mode: dcc_core::TrustMode::TrustedLocal,
             working_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             lock_timeout: Duration::from_secs(30),
             verbose: false,
@@ -82,9 +84,11 @@ impl<'a> RunnerEngine<'a> {
 
     /// Create a runner engine instance directly wrapping a Cache library instance.
     pub fn from_cache(cache: &'a dcc_storage::Cache, options: Option<EngineOptions>) -> Self {
+        let mut opts = options.unwrap_or_default();
+        opts.trust_mode = cache.trust_mode();
         Self {
             storage: cache.storage(),
-            options: options.unwrap_or_default(),
+            options: opts,
         }
     }
 
@@ -416,7 +420,10 @@ impl<'a> RunnerEngine<'a> {
         };
 
         let store_start = std::time::Instant::now();
-        if should_store && self.options.policy != CachePolicy::ReadOnly {
+        if should_store
+            && self.options.policy != CachePolicy::ReadOnly
+            && self.options.trust_mode.allows_writes()
+        {
             if self.options.verbose {
                 eprintln!("[STORE] writing objects");
             }

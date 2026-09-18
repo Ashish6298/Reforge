@@ -41,3 +41,22 @@ path = "../../examples/build_demonstration.rs"
 name = "build_benchmark"
 path = "../../examples/build_benchmark.rs"
 
+[[example]]
+name = "performance_benchmarks"
+path = "../../examples/performance_benchmarks.rs"
+
+[[example]]
+name = "large_files_benchmark"
+path = "../../examples/large_files_benchmark.rs"
+
+[[example]]
+name = "large_cache_benchmark"
+path = "../../examples/large_cache_benchmark.rs"
+
+[[example]]
+name = "profile_and_optimize_benchmark"
+path = "../../examples/profile_and_optimize_benchmark.rs"
+
+
+
+

@@ -4,30 +4,13 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+use dcc_core::PathUtils;
+
 pub struct OutputRestorer;
 
 impl OutputRestorer {
     pub fn sanitize_path(base_dir: &Path, rel_path: &str) -> Result<PathBuf> {
-        let norm = rel_path.replace('\\', "/");
-        if norm.starts_with('/') || norm.starts_with("../") || norm.contains("/../") || norm == ".."
-        {
-            return Err(CacheError::PathTraversal(format!(
-                "Illegal path component in output path: {}",
-                rel_path
-            )));
-        }
-
-        let full_path = base_dir.join(rel_path);
-        // Ensure path stays within base_dir
-        if !full_path.starts_with(base_dir) {
-            return Err(CacheError::PathTraversal(format!(
-                "Path {} escapes base directory {}",
-                rel_path,
-                base_dir.display()
-            )));
-        }
-
-        Ok(full_path)
+        PathUtils::sanitize_relative_path(base_dir, rel_path)
     }
 
     pub fn restore_entry(
@@ -83,7 +66,8 @@ impl OutputRestorer {
                 }
             }
 
-            // Atomically replace target
+            // Atomically replace target (Milestone 14.3: pre-cleaning avoids following target symlinks)
+            PathUtils::safe_prepare_target_path(&target_path)?;
             if let Err(e) = fs::rename(&tmp_path, &target_path) {
                 let _ = fs::remove_file(&tmp_path);
                 if !target_path.exists() {

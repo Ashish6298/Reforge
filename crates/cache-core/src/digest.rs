@@ -58,6 +58,85 @@ impl Digest {
         Self::hash_reader(reader)
     }
 
+    /// Parallel batch hashing of multiple files using available CPU parallelism (Milestone 13.4).
+    /// Preserves exact SHA-256 output while accelerating multi-file input scanning.
+    pub fn hash_files_parallel<P: AsRef<Path> + Sync>(paths: &[P]) -> std::io::Result<Vec<Self>> {
+        if paths.len() <= 1 {
+            return paths.iter().map(Self::hash_file).collect();
+        }
+
+        let num_threads = std::thread::available_parallelism()
+            .map(|p| p.get())
+            .unwrap_or(8)
+            .min(16);
+        let chunk_size = paths.len().div_ceil(num_threads);
+        let mut results = vec![None; paths.len()];
+
+        std::thread::scope(|s| {
+            let mut handles = Vec::new();
+            for (t_idx, chunk) in paths.chunks(chunk_size).enumerate() {
+                let start_idx = t_idx * chunk_size;
+                handles.push(s.spawn(move || -> std::io::Result<Vec<(usize, Self)>> {
+                    let mut local = Vec::with_capacity(chunk.len());
+                    for (offset, p) in chunk.iter().enumerate() {
+                        let d = Self::hash_file(p)?;
+                        local.push((start_idx + offset, d));
+                    }
+                    Ok(local)
+                }));
+            }
+
+            for handle in handles {
+                match handle.join().unwrap() {
+                    Ok(chunk_res) => {
+                        for (idx, d) in chunk_res {
+                            results[idx] = Some(d);
+                        }
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            Ok(())
+        })?;
+
+        Ok(results.into_iter().map(|opt| opt.unwrap()).collect())
+    }
+
+    /// Recursively hash a directory deterministically across platforms.
+    /// Traverses directory entries, sorts relative paths canonically, and hashes
+    /// relative paths together with file contents.
+    pub fn hash_directory(path: impl AsRef<Path>) -> std::io::Result<Self> {
+        let base_dir = path.as_ref();
+        let mut entries = Vec::new();
+
+        for entry in walkdir::WalkDir::new(base_dir)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if entry.file_type().is_file() {
+                if let Ok(rel) = entry.path().strip_prefix(base_dir) {
+                    let norm_rel = crate::paths::PathUtils::to_normalized_string(rel);
+                    let file_digest = Self::hash_file(entry.path())?;
+                    entries.push((norm_rel, file_digest));
+                }
+            }
+        }
+
+        // Sort canonically by relative path
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let mut hasher = Sha256::new();
+        for (rel_path, file_digest) in entries {
+            hasher.update(rel_path.as_bytes());
+            hasher.update(b":");
+            hasher.update(file_digest.as_str().as_bytes());
+            hasher.update(b"\n");
+        }
+
+        let result = hasher.finalize();
+        Ok(Self(hex::encode(result)))
+    }
+
     pub fn prefix(&self, len: usize) -> &str {
         let end = len.min(self.0.len());
         &self.0[..end]
@@ -147,6 +226,23 @@ mod tests {
         let file_digest = Digest::hash_file(&file_path).unwrap();
         let memory_digest = Digest::hash_bytes(payload);
         assert_eq!(file_digest, memory_digest);
+    }
+
+    #[test]
+    fn test_hash_directory() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let sub = temp_dir.path().join("nested");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(temp_dir.path().join("file_a.txt"), b"aaa").unwrap();
+        std::fs::write(sub.join("file_b.txt"), b"bbb").unwrap();
+
+        let dir_digest = Digest::hash_directory(temp_dir.path()).unwrap();
+        assert_eq!(dir_digest.as_str().len(), 64);
+
+        // Modifying one file changes directory hash
+        std::fs::write(sub.join("file_b.txt"), b"bbb_modified").unwrap();
+        let dir_digest2 = Digest::hash_directory(temp_dir.path()).unwrap();
+        assert_ne!(dir_digest, dir_digest2);
     }
 
     #[test]

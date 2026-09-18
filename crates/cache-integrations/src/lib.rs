@@ -617,4 +617,252 @@ mod tests {
         assert!(metrics.storage_size_bytes > 0);
         assert!(metrics.speedup >= 1.0 || metrics.warm_build_with_cache_time_ms == 0);
     }
+
+    #[test]
+    fn test_milestone_13_1_benchmarks_all_ten_dimensions() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache_dir = temp_dir.path().join(".dcc_cache");
+        let ws_dir = temp_dir.path().join("ws");
+        std::fs::create_dir_all(&ws_dir).unwrap();
+
+        let cache = Cache::open(&cache_dir).unwrap();
+
+        // 1. Hash Small File
+        let small_file = ws_dir.join("small.bin");
+        std::fs::write(&small_file, b"small payload data 4kb").unwrap();
+        let d_small = Digest::hash_file(&small_file).unwrap();
+        assert_eq!(d_small.as_str().len(), 64);
+
+        // 2. Hash Large File
+        let large_file = ws_dir.join("large.bin");
+        std::fs::write(&large_file, vec![0x33u8; 1024 * 1024]).unwrap(); // 1MB test
+        let d_large = Digest::hash_file(&large_file).unwrap();
+        assert_eq!(d_large.as_str().len(), 64);
+
+        // 3. Hash Directory
+        let sub_dir = ws_dir.join("tree");
+        std::fs::create_dir_all(&sub_dir).unwrap();
+        std::fs::write(sub_dir.join("a.txt"), b"123").unwrap();
+        let d_dir = Digest::hash_directory(&sub_dir).unwrap();
+        assert_eq!(d_dir.as_str().len(), 64);
+
+        // 4. Generate Key
+        let comp = Computation::builder_with("bench", "tool")
+            .input("small.bin", d_small, 22)
+            .build()
+            .unwrap();
+        let key = comp.compute_key().unwrap();
+        assert_eq!(key.as_str().len(), 64);
+
+        // 5. Store Cache
+        let (blob_digest, blob_size) = cache.storage().store_object_bytes(b"blob data").unwrap();
+        let entry = CacheEntry::new(
+            key.clone(),
+            comp,
+            vec![OutputManifestItem {
+                path: "out.bin".to_string(),
+                digest: blob_digest,
+                size: blob_size,
+                is_executable: None,
+            }],
+            ExecutionMetadata::default(),
+        );
+        cache.store(&entry).unwrap();
+
+        // 6. Lookup Cache
+        let looked_up = cache.lookup(&key).unwrap();
+        assert!(looked_up.is_some());
+
+        // 7. Restore Cache
+        let dest = ws_dir.join("restore");
+        std::fs::create_dir_all(&dest).unwrap();
+        cache.restore(&entry, &dest).unwrap();
+        assert!(dest.join("out.bin").is_file());
+
+        // 8. Serialize Metadata
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains(key.as_str()));
+
+        // 9. Deserialize Metadata
+        let deserialized: CacheEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.key, key);
+
+        // 10. Concurrent Lookup
+        let cache_arc = Arc::new(cache);
+        let key_arc = Arc::new(key);
+        let mut handles = Vec::new();
+        for _ in 0..4 {
+            let c = Arc::clone(&cache_arc);
+            let k = Arc::clone(&key_arc);
+            handles.push(thread::spawn(move || {
+                for _ in 0..50 {
+                    assert!(c.lookup(&k).unwrap().is_some());
+                }
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn test_milestone_13_2_large_files_streaming() {
+        use std::io::{BufWriter, Write};
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache_dir = temp_dir.path().join(".dcc_cache");
+        let ws_dir = temp_dir.path().join("ws");
+        std::fs::create_dir_all(&ws_dir).unwrap();
+
+        let cache = Cache::open(&cache_dir).unwrap();
+
+        // 1. Generate a multi-MB chunked file
+        let file_path = ws_dir.join("stream_test.bin");
+        let size_bytes: u64 = 4 * 1024 * 1024; // 4 MB for test suite speed
+        {
+            let file = std::fs::File::create(&file_path).unwrap();
+            let mut writer = BufWriter::with_capacity(64 * 1024, file);
+            let chunk = [0xA5u8; 64 * 1024];
+            let mut written = 0;
+            while written < size_bytes {
+                let to_write = (size_bytes - written).min(chunk.len() as u64) as usize;
+                writer.write_all(&chunk[..to_write]).unwrap();
+                written += to_write as u64;
+            }
+            writer.flush().unwrap();
+        }
+
+        // 2. Stream hash calculation
+        let digest = Digest::hash_file(&file_path).unwrap();
+
+        // 3. Stream CAS storage
+        let (stored_digest, stored_size) =
+            cache.storage().store_object_from_file(&file_path).unwrap();
+        assert_eq!(stored_digest, digest);
+        assert_eq!(stored_size, size_bytes);
+
+        // 4. Stream CAS restoration
+        let comp = Computation::builder_with("stream_op", "tool")
+            .input("stream_test.bin", digest.clone(), size_bytes)
+            .build()
+            .unwrap();
+        let key = comp.compute_key().unwrap();
+
+        let entry = CacheEntry::new(
+            key,
+            comp,
+            vec![OutputManifestItem {
+                path: "restored_stream.bin".to_string(),
+                digest: digest.clone(),
+                size: size_bytes,
+                is_executable: None,
+            }],
+            ExecutionMetadata::default(),
+        );
+
+        let restore_dest = ws_dir.join("restore");
+        std::fs::create_dir_all(&restore_dest).unwrap();
+        cache.restore(&entry, &restore_dest).unwrap();
+
+        let restored_file = restore_dest.join("restored_stream.bin");
+        assert!(restored_file.is_file());
+        assert_eq!(std::fs::metadata(&restored_file).unwrap().len(), size_bytes);
+    }
+
+    #[test]
+    fn test_milestone_13_3_large_cache_scalability() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache_dir = temp_dir.path().join(".dcc_cache");
+        let cache = Cache::open(&cache_dir).unwrap();
+
+        let num_entries = 100;
+        let mut keys = Vec::with_capacity(num_entries);
+
+        for i in 0..num_entries {
+            let digest_i = Digest::hash_bytes(format!("input_payload_{}", i).as_bytes());
+            let comp = Computation::builder_with("bench_op", "compiler")
+                .input(format!("src/input_{}.rs", i), digest_i, 50)
+                .build()
+                .unwrap();
+            let key = comp.compute_key().unwrap();
+            let entry = CacheEntry::new(key.clone(), comp, vec![], ExecutionMetadata::default());
+            cache.store(&entry).unwrap();
+            keys.push(key);
+        }
+
+        // Verify point lookup efficiency across sharded storage
+        for k in &keys {
+            assert!(cache.lookup(k).unwrap().is_some());
+        }
+
+        // Verify negative lookup
+        let fake_key = CacheKey::from_bytes(b"non_existent");
+        assert!(cache.lookup(&fake_key).unwrap().is_none());
+
+        // Verify storage stats collection
+        let stats = dcc_storage::stats::StorageStats::collect(cache.storage()).unwrap();
+        assert_eq!(stats.total_entries, num_entries);
+    }
+
+    #[test]
+    fn test_milestone_13_4_profiled_optimizations() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache_dir = temp_dir.path().join(".dcc_cache");
+        let ws_dir = temp_dir.path().join("ws");
+        std::fs::create_dir_all(&ws_dir).unwrap();
+
+        let cache = Cache::open(&cache_dir).unwrap();
+
+        // 1. In-Memory L1 Cache optimization verification
+        let (blob_digest, blob_size) = cache.storage().store_object_bytes(b"payload").unwrap();
+        let comp = Computation::builder_with("opt_op", "tool")
+            .input("src.txt", blob_digest.clone(), blob_size)
+            .output("out.bin", true)
+            .build()
+            .unwrap();
+        let key = comp.compute_key().unwrap();
+        let entry = CacheEntry::new(
+            key.clone(),
+            comp,
+            vec![OutputManifestItem {
+                path: "out.bin".to_string(),
+                digest: blob_digest.clone(),
+                size: blob_size,
+                is_executable: None,
+            }],
+            ExecutionMetadata::default(),
+        );
+        cache.store(&entry).unwrap();
+
+        // Verify L1 cache hit
+        let retrieved_1 = cache.lookup(&key).unwrap();
+        assert!(retrieved_1.is_some());
+        let retrieved_2 = cache.lookup(&key).unwrap();
+        assert_eq!(retrieved_1, retrieved_2);
+
+        // 2. Parallel Batch File Hashing verification
+        let mut file_paths = Vec::new();
+        for i in 0..10 {
+            let p = ws_dir.join(format!("test_par_{}.txt", i));
+            std::fs::write(&p, format!("content_{}", i).as_bytes()).unwrap();
+            file_paths.push(p);
+        }
+
+        let seq_hashes: Vec<Digest> = file_paths
+            .iter()
+            .map(|p| Digest::hash_file(p).unwrap())
+            .collect();
+        let par_hashes = Digest::hash_files_parallel(&file_paths).unwrap();
+        assert_eq!(seq_hashes, par_hashes);
+
+        // 3. Fast Hardlink Restoration verification
+        let dest_dir = ws_dir.join("restore_dest");
+        std::fs::create_dir_all(&dest_dir).unwrap();
+        cache.restore_with_options(&entry, &dest_dir, true).unwrap();
+        assert!(dest_dir.join("out.bin").is_file());
+        assert_eq!(std::fs::read(dest_dir.join("out.bin")).unwrap(), b"payload");
+    }
 }
