@@ -33,7 +33,14 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Format Check (cargo fmt)
-        run: cargo fmt --all -- --check
+        shell: bash
+        run: |
+          if ! cargo fmt --all -- --check; then
+            echo "::error::Code formatting check failed. Showing diff:"
+            cargo fmt --all
+            git diff
+            exit 1
+          fi
 
       - name: Clippy Linter Check
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
