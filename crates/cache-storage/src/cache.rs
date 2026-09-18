@@ -24,6 +24,9 @@ use std::time::Duration;
 #[derive(Debug, Clone)]
 pub struct Cache {
     storage: Arc<CasStorage>,
+    l1_cache: Arc<
+        std::sync::RwLock<std::collections::HashMap<CacheKey, (CacheEntry, std::time::SystemTime)>>,
+    >,
 }
 
 impl Cache {
@@ -48,12 +51,16 @@ impl Cache {
     pub fn new(storage: CasStorage) -> Self {
         Self {
             storage: Arc::new(storage),
+            l1_cache: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         }
     }
 
     /// Create a new Cache library instance with an existing Arc-wrapped CAS storage.
     pub fn from_arc(storage: Arc<CasStorage>) -> Self {
-        Self { storage }
+        Self {
+            storage,
+            l1_cache: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        }
     }
 
     /// Access the underlying CAS storage reference.
@@ -61,18 +68,67 @@ impl Cache {
         &self.storage
     }
 
-    /// Lookup a cache entry by key.
+    /// Clear in-memory L1 metadata cache.
+    pub fn clear_memory_cache(&self) {
+        if let Ok(mut l1) = self.l1_cache.write() {
+            l1.clear();
+        }
+    }
+
+    /// Lookup a cache entry by key with fast L1 in-memory caching and mtime validation (Milestone 13.4).
     ///
     /// Updates access statistics (last_accessed_at, hit_count) if found.
     pub fn lookup(&self, key: &CacheKey) -> Result<Option<CacheEntry>> {
-        self.storage.get_entry(key)
+        let entry_path = self.storage.entry_path(key);
+        let on_disk_mtime = fs::metadata(&entry_path)
+            .ok()
+            .and_then(|m| m.modified().ok());
+
+        if let Some(mtime) = on_disk_mtime {
+            if let Ok(l1) = self.l1_cache.read() {
+                if let Some((entry, cached_mtime)) = l1.get(key) {
+                    if *cached_mtime == mtime {
+                        return Ok(Some(entry.clone()));
+                    }
+                }
+            }
+        }
+
+        let entry_opt = self.storage.get_entry(key)?;
+        if let Some(ref entry) = entry_opt {
+            let mtime = fs::metadata(&entry_path)
+                .ok()
+                .and_then(|m| m.modified().ok());
+            if let Some(mtime) = mtime {
+                if let Ok(mut l1) = self.l1_cache.write() {
+                    if l1.len() < 10000 {
+                        l1.insert(key.clone(), (entry.clone(), mtime));
+                    }
+                }
+            }
+        } else if let Ok(mut l1) = self.l1_cache.write() {
+            l1.remove(key);
+        }
+        Ok(entry_opt)
     }
 
     /// Store a cache entry into the storage.
     ///
-    /// Ensures atomic write of entry metadata.
+    /// Ensures atomic write of entry metadata and updates in-memory cache.
     pub fn store(&self, entry: &CacheEntry) -> Result<()> {
-        self.storage.store_entry(entry)
+        self.storage.store_entry(entry)?;
+        let entry_path = self.storage.entry_path(&entry.key);
+        let mtime = fs::metadata(&entry_path)
+            .ok()
+            .and_then(|m| m.modified().ok());
+        if let Some(mtime) = mtime {
+            if let Ok(mut l1) = self.l1_cache.write() {
+                if l1.len() < 10000 {
+                    l1.insert(entry.key.clone(), (entry.clone(), mtime));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Restore all outputs recorded in a cache entry to the destination directory.
@@ -80,6 +136,16 @@ impl Cache {
     /// Validates cryptographic checksums before and after restoration, prevents
     /// directory traversal vulnerabilities, and writes atomically.
     pub fn restore(&self, entry: &CacheEntry, destination_dir: &Path) -> Result<()> {
+        self.restore_with_options(entry, destination_dir, false)
+    }
+
+    /// Restore outputs with configurable optimization (e.g. hardlinks where safe) (Milestone 13.4).
+    pub fn restore_with_options(
+        &self,
+        entry: &CacheEntry,
+        destination_dir: &Path,
+        prefer_hardlinks: bool,
+    ) -> Result<()> {
         for output in &entry.outputs {
             let target_path = self.sanitize_path(destination_dir, &output.path)?;
 
@@ -91,37 +157,49 @@ impl Cache {
             self.storage.verify_object(&output.digest)?;
 
             let cas_path = self.storage.object_path(&output.digest);
-            let mut src = BufReader::new(File::open(cas_path)?);
-
             let parent_dir = target_path.parent().unwrap_or(destination_dir);
             let tmp_path = parent_dir.join(format!(".tmp_restore_{}", output.digest.prefix(8)));
 
-            {
-                let mut dst = BufWriter::new(
-                    OpenOptions::new()
-                        .write(true)
-                        .create(true)
-                        .truncate(true)
-                        .open(&tmp_path)?,
-                );
-                io::copy(&mut src, &mut dst)?;
-                dst.flush()?;
-                dst.get_ref().sync_all()?;
+            let mut hardlink_succeeded = false;
+            if prefer_hardlinks {
+                let _ = fs::remove_file(&tmp_path);
+                if fs::hard_link(&cas_path, &tmp_path).is_ok() {
+                    hardlink_succeeded = true;
+                }
             }
 
-            // Validate restored output digest
-            let check_file = File::open(&tmp_path)?;
-            let check_digest = Digest::from_reader(BufReader::new(check_file))?;
-            if check_digest != output.digest {
-                let _ = fs::remove_file(&tmp_path);
-                return Err(CacheError::IntegrityError {
-                    expected: output.digest.as_str().to_string(),
-                    actual: check_digest.as_str().to_string(),
-                    path: target_path.display().to_string(),
-                });
+            if !hardlink_succeeded {
+                let mut src = BufReader::new(File::open(&cas_path)?);
+                {
+                    let mut dst = BufWriter::new(
+                        OpenOptions::new()
+                            .write(true)
+                            .create(true)
+                            .truncate(true)
+                            .open(&tmp_path)?,
+                    );
+                    io::copy(&mut src, &mut dst)?;
+                    dst.flush()?;
+                    dst.get_ref().sync_all()?;
+                }
+
+                // Validate restored output digest
+                let check_file = File::open(&tmp_path)?;
+                let check_digest = Digest::from_reader(BufReader::new(check_file))?;
+                if check_digest != output.digest {
+                    let _ = fs::remove_file(&tmp_path);
+                    return Err(CacheError::IntegrityError {
+                        expected: output.digest.as_str().to_string(),
+                        actual: check_digest.as_str().to_string(),
+                        path: target_path.display().to_string(),
+                    });
+                }
             }
 
             // Atomically replace target path
+            if target_path.exists() {
+                let _ = fs::remove_file(&target_path);
+            }
             fs::rename(&tmp_path, &target_path)?;
 
             #[cfg(unix)]
@@ -143,6 +221,9 @@ impl Cache {
 
     /// Remove a cache entry by key. Returns `true` if the entry was present and removed.
     pub fn remove(&self, key: &CacheKey) -> Result<bool> {
+        if let Ok(mut l1) = self.l1_cache.write() {
+            l1.remove(key);
+        }
         self.storage.delete_entry(key)
     }
 

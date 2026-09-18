@@ -806,4 +806,63 @@ mod tests {
         let stats = dcc_storage::stats::StorageStats::collect(cache.storage()).unwrap();
         assert_eq!(stats.total_entries, num_entries);
     }
+
+    #[test]
+    fn test_milestone_13_4_profiled_optimizations() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache_dir = temp_dir.path().join(".dcc_cache");
+        let ws_dir = temp_dir.path().join("ws");
+        std::fs::create_dir_all(&ws_dir).unwrap();
+
+        let cache = Cache::open(&cache_dir).unwrap();
+
+        // 1. In-Memory L1 Cache optimization verification
+        let (blob_digest, blob_size) = cache.storage().store_object_bytes(b"payload").unwrap();
+        let comp = Computation::builder_with("opt_op", "tool")
+            .input("src.txt", blob_digest.clone(), blob_size)
+            .output("out.bin", true)
+            .build()
+            .unwrap();
+        let key = comp.compute_key().unwrap();
+        let entry = CacheEntry::new(
+            key.clone(),
+            comp,
+            vec![OutputManifestItem {
+                path: "out.bin".to_string(),
+                digest: blob_digest.clone(),
+                size: blob_size,
+                is_executable: None,
+            }],
+            ExecutionMetadata::default(),
+        );
+        cache.store(&entry).unwrap();
+
+        // Verify L1 cache hit
+        let retrieved_1 = cache.lookup(&key).unwrap();
+        assert!(retrieved_1.is_some());
+        let retrieved_2 = cache.lookup(&key).unwrap();
+        assert_eq!(retrieved_1, retrieved_2);
+
+        // 2. Parallel Batch File Hashing verification
+        let mut file_paths = Vec::new();
+        for i in 0..10 {
+            let p = ws_dir.join(format!("test_par_{}.txt", i));
+            std::fs::write(&p, format!("content_{}", i).as_bytes()).unwrap();
+            file_paths.push(p);
+        }
+
+        let seq_hashes: Vec<Digest> = file_paths
+            .iter()
+            .map(|p| Digest::hash_file(p).unwrap())
+            .collect();
+        let par_hashes = Digest::hash_files_parallel(&file_paths).unwrap();
+        assert_eq!(seq_hashes, par_hashes);
+
+        // 3. Fast Hardlink Restoration verification
+        let dest_dir = ws_dir.join("restore_dest");
+        std::fs::create_dir_all(&dest_dir).unwrap();
+        cache.restore_with_options(&entry, &dest_dir, true).unwrap();
+        assert!(dest_dir.join("out.bin").is_file());
+        assert_eq!(std::fs::read(dest_dir.join("out.bin")).unwrap(), b"payload");
+    }
 }

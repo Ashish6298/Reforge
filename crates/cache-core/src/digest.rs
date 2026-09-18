@@ -58,6 +58,50 @@ impl Digest {
         Self::hash_reader(reader)
     }
 
+    /// Parallel batch hashing of multiple files using available CPU parallelism (Milestone 13.4).
+    /// Preserves exact SHA-256 output while accelerating multi-file input scanning.
+    pub fn hash_files_parallel<P: AsRef<Path> + Sync>(paths: &[P]) -> std::io::Result<Vec<Self>> {
+        if paths.len() <= 1 {
+            return paths.iter().map(Self::hash_file).collect();
+        }
+
+        let num_threads = std::thread::available_parallelism()
+            .map(|p| p.get())
+            .unwrap_or(8)
+            .min(16);
+        let chunk_size = paths.len().div_ceil(num_threads);
+        let mut results = vec![None; paths.len()];
+
+        std::thread::scope(|s| {
+            let mut handles = Vec::new();
+            for (t_idx, chunk) in paths.chunks(chunk_size).enumerate() {
+                let start_idx = t_idx * chunk_size;
+                handles.push(s.spawn(move || -> std::io::Result<Vec<(usize, Self)>> {
+                    let mut local = Vec::with_capacity(chunk.len());
+                    for (offset, p) in chunk.iter().enumerate() {
+                        let d = Self::hash_file(p)?;
+                        local.push((start_idx + offset, d));
+                    }
+                    Ok(local)
+                }));
+            }
+
+            for handle in handles {
+                match handle.join().unwrap() {
+                    Ok(chunk_res) => {
+                        for (idx, d) in chunk_res {
+                            results[idx] = Some(d);
+                        }
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            Ok(())
+        })?;
+
+        Ok(results.into_iter().map(|opt| opt.unwrap()).collect())
+    }
+
     /// Recursively hash a directory deterministically across platforms.
     /// Traverses directory entries, sorts relative paths canonically, and hashes
     /// relative paths together with file contents.

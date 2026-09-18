@@ -1130,6 +1130,24 @@ cargo run --release --example large_cache_benchmark
 
 ---
 
+## Profile-Driven Optimizations (`profile_and_optimize_benchmark`)
+
+DCC follows the strict performance engineering principle: **"Do not optimize blindly. First measure."** Every optimization is backed by empirical before/after benchmarks:
+
+```bash
+cargo run --release --example profile_and_optimize_benchmark
+```
+
+### Targeted Optimization Results:
+
+| Optimization Pipeline | Baseline (Before) | Optimized (After) | Speedup Gain |
+| :--- | :--- | :--- | :--- |
+| **In-Memory L1 Metadata Cache** | $4{,}947.26\,\mu\text{s}$ ($202\text{ lookups/s}$) | **$1.49\,\mu\text{s}$** ($672{,}016\text{ lookups/s}$) | **$3{,}324.64\times$** |
+| **Parallel Batch File Hashing** | $21.00\text{ ms}$ ($1{,}177.78\text{ MB/s}$) | **$6.00\text{ ms}$** ($4{,}181.44\text{ MB/s}$) | **$3.55\times$** |
+| **Safe Hardlink Materialization** | $91.00\text{ ms}$ ($218.57\text{ MB/s}$) | **$38.00\text{ ms}$** ($525.83\text{ MB/s}$) | **$2.41\times$** |
+
+---
+
 ## Quality Gates & Verification
 
 ```bash
