@@ -35,7 +35,16 @@ jobs:
         run: cargo fmt --all
 
       - name: Clippy Linter Check
-        run: cargo clippy --workspace --all-targets --all-features
+        shell: bash
+        run: |
+          if ! cargo clippy --workspace --all-targets --all-features > clippy_output.txt 2>&1; then
+            echo "## Clippy Output (${{ matrix.os }})" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            tail -n 100 clippy_output.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat clippy_output.txt
+            exit 1
+          fi
 
       - name: Run Workspace Tests
         run: cargo test --workspace --verbose
