@@ -13,7 +13,7 @@ pub enum SensitiveDataPolicy {
     Warn,
     /// Detects sensitive keys/values and rejects computation modeling or execution with an error.
     Deny,
-    /// Automatically masks/redacts identified sensitive values (e.g., "[REDACTED]") in computation records.
+    /// Automatically masks/redacts identified sensitive values (e.g., `"[REDACTED]"`) in computation records.
     Mask,
 }
 
