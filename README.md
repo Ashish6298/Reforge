@@ -1602,6 +1602,18 @@ DCC guarantees thread safety, deduplication correctness, and safe garbage collec
 | **5. Reader + Writer** | Simultaneous reader threads continuously streaming CAS objects and writer threads inserting new entries operate safely without torn reads or storage corruption. |
 | **6. Pruner + Reader** | Active readers holding shared `ObjectLock` handles prevent the garbage collection `Pruner` from deleting in-use CAS objects mid-stream, ensuring atomic stream safety. |
 
+### Essential Cross-Platform Tests (Milestone 18.5)
+
+DCC validates that every supported operating system (`Windows`, `Linux`, `macOS`) executes and passes the exact same essential test suite:
+
+| Cross-Platform Domain | Verified Behavior Across Windows, Linux & macOS |
+| :--- | :--- |
+| **1. Path Normalization** | Forward slashes (`/`), backslashes (`\`), and mixed separators normalize deterministically to canonical representation `"path/to/file"` across all OS environments. |
+| **2. Process Execution** | Command dispatch, shell escaping, standard stream capture (`stdout`/`stderr`), environment variable propagation, and timeout handling execute identically across platforms. |
+| **3. Cache Lifecycle** | Cold Miss computation, CAS artifact storage, warm Hit 0 ms output restoration, and input change invalidation work flawlessly regardless of host OS. |
+| **4. File Semantics** | Rejection of path traversal escapes (`../` and `..\`), safe binary artifact restoration, and metadata preservation across filesystem boundaries. |
+| **5. Advisory Locking** | Cross-platform file locking (`fs2`) coordinates multi-process deduplication and guarantees clean lock release on process completion or drop. |
+
 ---
 
 ## Quality Gates & Verification
@@ -1613,7 +1625,7 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo fmt --all -- --check
 ```
 
-All 6 core exit criteria (deterministic computation modeling, canonical key generation, cache entry creation, retrieval, identity verification, and corrupted metadata detection), all 11 physical storage scenarios (empty cache, single object, deduplication, corruption quarantine, interrupted write isolation, deletion, concurrent read/write races, deeply nested paths, multi-MB large files, and binary byte safety), all 8 unit test infrastructure domains, all 7 complete integration flows, all 8 failure injection scenarios, and all 6 concurrency stress patterns are fully verified and tested.
+All 6 core exit criteria (deterministic computation modeling, canonical key generation, cache entry creation, retrieval, identity verification, and corrupted metadata detection), all 11 physical storage scenarios (empty cache, single object, deduplication, corruption quarantine, interrupted write isolation, deletion, concurrent read/write races, deeply nested paths, multi-MB large files, and binary byte safety), all 8 unit test infrastructure domains, all 7 complete integration flows, all 8 failure injection scenarios, all 6 concurrency stress patterns, and all cross-platform essential test suites are fully verified and tested.
 
 
 
