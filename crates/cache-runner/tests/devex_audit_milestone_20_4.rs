@@ -9,27 +9,36 @@
 //! 7. Configuration predictable (ByteSize, StorageConfig, defaults)
 
 use dcc_core::{ByteSize, CacheError, MissReason};
-use dcc_runner::{CommandSpec, EngineOptions, ExecutionResult, ExecutionStatus, RunnerEngine};
-use dcc_storage::{CasStorage, StorageConfig};
+use dcc_runner::{ExecutionResult, ExecutionStatus};
+use dcc_storage::StorageConfig;
 use dcc_test_utils::TestEnv;
 use std::path::PathBuf;
 
 #[test]
 fn test_audit_20_4_miss_reasons_understandable() {
     let reasons = vec![
-        MissReason::NotFound,
+        MissReason::NoEntryFound,
         MissReason::InputChanged {
             path: "src/main.rs".to_string(),
+            old_digest: Some("old_sha".to_string()),
+            new_digest: "new_sha".to_string(),
         },
         MissReason::EnvironmentChanged {
-            var_name: "CFLAGS".to_string(),
+            key: "CFLAGS".to_string(),
+            old: Some("-O2".to_string()),
+            new: Some("-O3".to_string()),
         },
         MissReason::ToolChanged {
-            tool_name: "rustc".to_string(),
+            reason: "rustc version mismatch".to_string(),
         },
-        MissReason::CommandChanged,
-        MissReason::CorruptedCacheEntry,
-        MissReason::PolicyBypass,
+        MissReason::CommandChanged {
+            old: "gcc".to_string(),
+            new: "clang".to_string(),
+        },
+        MissReason::CorruptedCache {
+            reason: "checksum mismatch".to_string(),
+        },
+        MissReason::ForcedBypass,
     ];
 
     for r in &reasons {
@@ -37,10 +46,10 @@ fn test_audit_20_4_miss_reasons_understandable() {
         assert!(!msg.is_empty(), "Miss reason string must not be empty");
         // Verify understandable diagnostic phrasing
         match r {
-            MissReason::NotFound => assert!(msg.contains("not found") || msg.contains("No cached")),
-            MissReason::InputChanged { path } => assert!(msg.contains(path)),
-            MissReason::EnvironmentChanged { var_name } => assert!(msg.contains(var_name)),
-            MissReason::ToolChanged { tool_name } => assert!(msg.contains(tool_name)),
+            MissReason::NoEntryFound => assert!(msg.contains("No cached") || msg.contains("entry")),
+            MissReason::InputChanged { path, .. } => assert!(msg.contains(path)),
+            MissReason::EnvironmentChanged { key, .. } => assert!(msg.contains(key)),
+            MissReason::ToolChanged { reason } => assert!(msg.contains(reason)),
             _ => {}
         }
     }
@@ -52,10 +61,10 @@ fn test_audit_20_4_errors_useful_and_actionable() {
     let err_msg = err_path.to_string();
     assert!(err_msg.contains("outside/sandbox") || err_msg.contains("Path traversal"));
 
-    let err_not_found = CacheError::NotFound("Key not present in CAS".into());
+    let err_not_found = CacheError::Miss("Key not present in CAS".into());
     assert!(err_not_found.to_string().contains("not present"));
 
-    let err_io = CacheError::Io(std::io::Error::new(
+    let err_io = CacheError::StorageError(std::io::Error::new(
         std::io::ErrorKind::PermissionDenied,
         "Access denied to .dcc_cache",
     ));
@@ -65,7 +74,12 @@ fn test_audit_20_4_errors_useful_and_actionable() {
 #[test]
 fn test_audit_20_4_json_output_stable() {
     let env = TestEnv::new().unwrap();
-    let comp = dcc_core::Computation::new("echo", vec!["hello".to_string()]);
+    let comp = dcc_core::Computation::builder()
+        .operation("echo")
+        .command("echo")
+        .args(vec!["hello"])
+        .build()
+        .unwrap();
     let key = comp.compute_key().unwrap();
 
     let result = ExecutionResult {
@@ -76,7 +90,7 @@ fn test_audit_20_4_json_output_stable() {
         stdout: b"hello\n".to_vec(),
         stderr: vec![],
         outputs: vec![],
-        miss_reason: Some(MissReason::NotFound),
+        miss_reason: Some(MissReason::NoEntryFound),
         timings: Default::default(),
     };
 
@@ -99,17 +113,15 @@ fn test_audit_20_4_json_output_stable() {
 #[test]
 fn test_audit_20_4_configuration_predictable() {
     let default_cfg = StorageConfig::default();
-    assert_eq!(default_cfg.root, PathBuf::from(".dcc_cache"));
-    assert!(default_cfg.max_size.is_none());
+    assert!(default_cfg.root_dir.ends_with(".dcc_cache"));
+    assert!(default_cfg.max_size().is_some());
 
     let custom_cfg = StorageConfig::new("/tmp/custom_cache")
-        .with_max_size(ByteSize::gb(5))
-        .with_auto_cleanup(true);
+        .with_max_size(ByteSize::gb(5));
 
-    assert_eq!(custom_cfg.root, PathBuf::from("/tmp/custom_cache"));
+    assert_eq!(custom_cfg.root_dir, PathBuf::from("/tmp/custom_cache"));
     assert_eq!(
-        custom_cfg.max_size.unwrap().as_bytes(),
+        custom_cfg.max_size().unwrap().as_bytes(),
         5 * 1024 * 1024 * 1024
     );
-    assert!(custom_cfg.auto_cleanup);
 }

@@ -11,16 +11,9 @@
 //! 9. Permissions & access containment
 //! 10. Sensitive data detection (API tokens, AWS keys, private keys)
 
-use dcc_core::{
-    CacheEntry, CacheError, CacheKey, Computation, Digest, ExecutionMetadata, OutputManifestItem,
-    PathUtils, SensitiveDataDetector, SensitiveDataPolicy, SENSITIVE_KEY_PATTERNS,
-};
-use dcc_runner::{CommandSpec, EngineOptions, ExecutionStatus, RunnerEngine};
-use dcc_storage::{CasStorage, Storage, StorageConfig};
+use dcc_core::{Digest, PathUtils, SensitiveDataDetector};
 use dcc_test_utils::TestEnv;
-use std::fs::{self, File};
-use std::io::Write;
-use tempfile::tempdir;
+use std::fs;
 
 // ============================================================================
 // 1. PATH TRAVERSAL SANDBOXING
@@ -53,7 +46,7 @@ fn test_audit_20_6_path_traversal_rejection() {
 fn test_audit_20_6_cache_poisoning_tamper_detection() {
     let env = TestEnv::new().unwrap();
     let original_bytes = b"AUTHENTIC_VALID_DATA";
-    let digest = env.storage.store_object_bytes(original_bytes).unwrap();
+    let (digest, _) = env.storage.store_object_bytes(original_bytes).unwrap();
 
     let obj_path = env.storage.object_path(&digest);
     assert!(obj_path.exists());
@@ -62,9 +55,9 @@ fn test_audit_20_6_cache_poisoning_tamper_detection() {
     fs::write(&obj_path, b"POISONED_ATTACK_DATA").unwrap();
 
     // Verify CAS integrity validation rejects the poisoned file
-    let verify = env.storage.verify_object(&digest).unwrap();
+    let verify = env.storage.verify_object(&digest);
     assert!(
-        !verify.is_valid,
+        verify.is_err(),
         "Integrity validation must detect and fail poisoned CAS objects"
     );
 }
@@ -100,7 +93,7 @@ fn test_audit_20_6_sensitive_data_detection() {
 #[test]
 fn test_audit_20_6_temporary_staging_isolation() {
     let env = TestEnv::new().unwrap();
-    let staging_root = env.storage.root().join("staging");
+    let staging_root = env.storage.tmp_dir();
     fs::create_dir_all(&staging_root).unwrap();
 
     let temp_staged = staging_root.join(".tmp_staged_payload");

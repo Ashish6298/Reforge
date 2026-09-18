@@ -13,15 +13,11 @@
 //! - 20.6 Security & Integrity Validation
 
 use dcc_core::{
-    ByteSize, CacheEntry, CacheError, CacheKey, Computation, Digest, ExecutionMetadata,
-    FailurePolicy, OutputManifestItem, SensitiveDataDetector, SensitiveDataPolicy, ToolIdentity,
+    Computation, Digest, FailurePolicy, SensitiveDataDetector, ToolIdentity,
 };
 use dcc_runner::{CommandSpec, EngineOptions, ExecutionStatus, RunnerEngine};
-use dcc_storage::{CasStorage, Storage, StorageConfig};
 use dcc_test_utils::TestEnv;
-use std::fs::{self, File};
-use std::io::Write;
-use tempfile::tempdir;
+use std::fs;
 
 // ============================================================================
 // 20.1 CORRECTNESS AUDIT: COMPUTATION & KEY GENERATION
@@ -29,19 +25,25 @@ use tempfile::tempdir;
 
 #[test]
 fn test_audit_20_1_same_computation_same_key() {
-    let mut comp1 = Computation::new("cargo", vec!["test".to_string()]);
-    comp1
-        .env_vars
-        .insert("RUST_BACKTRACE".to_string(), "1".to_string());
-    comp1.add_input_file("src/lib.rs", Digest::hash_bytes(b"fn main() {}"), 12);
-    comp1.add_output_file("target/out.bin", false);
+    let comp1 = Computation::builder()
+        .operation("test")
+        .command("cargo")
+        .args(vec!["test"])
+        .env("RUST_BACKTRACE", "1")
+        .input("src/lib.rs", Digest::hash_bytes(b"fn main() {}"), 12)
+        .output("target/out.bin", false)
+        .build()
+        .unwrap();
 
-    let mut comp2 = Computation::new("cargo", vec!["test".to_string()]);
-    comp2
-        .env_vars
-        .insert("RUST_BACKTRACE".to_string(), "1".to_string());
-    comp2.add_input_file("src/lib.rs", Digest::hash_bytes(b"fn main() {}"), 12);
-    comp2.add_output_file("target/out.bin", false);
+    let comp2 = Computation::builder()
+        .operation("test")
+        .command("cargo")
+        .args(vec!["test"])
+        .env("RUST_BACKTRACE", "1")
+        .input("src/lib.rs", Digest::hash_bytes(b"fn main() {}"), 12)
+        .output("target/out.bin", false)
+        .build()
+        .unwrap();
 
     let key1 = comp1.compute_key().unwrap();
     let key2 = comp2.compute_key().unwrap();
@@ -54,11 +56,21 @@ fn test_audit_20_1_same_computation_same_key() {
 
 #[test]
 fn test_audit_20_1_different_computation_different_key() {
-    let mut comp1 = Computation::new("cargo", vec!["build".to_string()]);
-    comp1.add_input_file("src/lib.rs", Digest::hash_bytes(b"fn main() {}"), 12);
+    let comp1 = Computation::builder()
+        .operation("build")
+        .command("cargo")
+        .args(vec!["build"])
+        .input("src/lib.rs", Digest::hash_bytes(b"fn main() {}"), 12)
+        .build()
+        .unwrap();
 
-    let mut comp2 = Computation::new("cargo", vec!["build".to_string(), "--release".to_string()]);
-    comp2.add_input_file("src/lib.rs", Digest::hash_bytes(b"fn main() {}"), 12);
+    let comp2 = Computation::builder()
+        .operation("build")
+        .command("cargo")
+        .args(vec!["build", "--release"])
+        .input("src/lib.rs", Digest::hash_bytes(b"fn main() {}"), 12)
+        .build()
+        .unwrap();
 
     let key1 = comp1.compute_key().unwrap();
     let key2 = comp2.compute_key().unwrap();
@@ -135,15 +147,21 @@ fn test_audit_20_1_changed_input_causes_cache_miss() {
 
 #[test]
 fn test_audit_20_1_changed_relevant_environment_causes_cache_miss() {
-    let mut comp1 = Computation::new("gcc", vec!["-c".to_string(), "main.c".to_string()]);
-    comp1
-        .env_vars
-        .insert("CFLAGS".to_string(), "-O2".to_string());
+    let comp1 = Computation::builder()
+        .operation("compile")
+        .command("gcc")
+        .args(vec!["-c", "main.c"])
+        .env("CFLAGS", "-O2")
+        .build()
+        .unwrap();
 
-    let mut comp2 = Computation::new("gcc", vec!["-c".to_string(), "main.c".to_string()]);
-    comp2
-        .env_vars
-        .insert("CFLAGS".to_string(), "-O3".to_string());
+    let comp2 = Computation::builder()
+        .operation("compile")
+        .command("gcc")
+        .args(vec!["-c", "main.c"])
+        .env("CFLAGS", "-O3")
+        .build()
+        .unwrap();
 
     let key1 = comp1.compute_key().unwrap();
     let key2 = comp2.compute_key().unwrap();
@@ -156,19 +174,21 @@ fn test_audit_20_1_changed_relevant_environment_causes_cache_miss() {
 
 #[test]
 fn test_audit_20_1_changed_tool_identity_causes_cache_miss() {
-    let mut comp1 = Computation::new("rustc", vec!["main.rs".to_string()]);
-    comp1.tool = Some(ToolIdentity {
-        name: "rustc".to_string(),
-        version: Some("1.75.0".to_string()),
-        binary_digest: Some(Digest::hash_bytes(b"rustc_binary_1_75")),
-    });
+    let comp1 = Computation::builder()
+        .operation("compile")
+        .command("rustc")
+        .args(vec!["main.rs"])
+        .tool(ToolIdentity::with_version("rustc", "1.75.0"))
+        .build()
+        .unwrap();
 
-    let mut comp2 = Computation::new("rustc", vec!["main.rs".to_string()]);
-    comp2.tool = Some(ToolIdentity {
-        name: "rustc".to_string(),
-        version: Some("1.76.0".to_string()),
-        binary_digest: Some(Digest::hash_bytes(b"rustc_binary_1_76")),
-    });
+    let comp2 = Computation::builder()
+        .operation("compile")
+        .command("rustc")
+        .args(vec!["main.rs"])
+        .tool(ToolIdentity::with_version("rustc", "1.76.0"))
+        .build()
+        .unwrap();
 
     let key1 = comp1.compute_key().unwrap();
     let key2 = comp2.compute_key().unwrap();
@@ -245,7 +265,12 @@ fn test_audit_20_1_corrupted_cache_detected_and_safely_quarantined() {
 #[test]
 fn test_audit_20_1_missing_cache_is_safe_miss() {
     let env = TestEnv::new().unwrap();
-    let comp = Computation::new("echo", vec!["test".to_string()]);
+    let comp = Computation::builder()
+        .operation("echo")
+        .command("echo")
+        .args(vec!["test"])
+        .build()
+        .unwrap();
     let key = comp.compute_key().unwrap();
 
     // Directly query storage for non-existent key
