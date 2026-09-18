@@ -72,10 +72,9 @@ fn test_post_v1_1_advanced_diagnostics_diff_and_explain() {
 #[test]
 fn test_post_v1_2_storage_optimization_and_tiered_caching() {
     let env = TestEnv::new().unwrap();
-    let local_disk = LocalFilesystemStorage::new(StorageConfig::new(
-        env.cache_dir.path().join("tiered"),
-    ))
-    .unwrap();
+    let local_disk =
+        LocalFilesystemStorage::new(StorageConfig::new(env.cache_dir.path().join("tiered")))
+            .unwrap();
     let tiered = TieredCache::new(local_disk);
 
     let payload = b"COMPRESSED_OPTIMIZED_STORAGE_PAYLOAD";
