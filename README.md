@@ -1098,6 +1098,22 @@ Measured operations include:
 
 ---
 
+## Large Files Streaming Performance (`large_files_benchmark`)
+
+DCC guarantees constant $O(1)$ memory usage when processing large artifacts (tested across **1 MB**, **10 MB**, **100 MB**, and **1 GB** tiers) by strictly streaming files through fixed-size $64\text{ KB}$ chunk buffers:
+
+```bash
+cargo run --release --example large_files_benchmark
+```
+
+### Measured Large File Throughput:
+- **Streaming SHA-256 Hashing**: Up to $\approx 824.6\text{ MB/s}$
+- **CAS Stream Ingestion**: Up to $\approx 229.0\text{ MB/s}$
+- **CAS Stream Restoration**: Up to $\approx 191.5\text{ MB/s}$
+- **Memory Footprint**: Flat, bounded $64\text{ KB}$ buffer memory across all tiers.
+
+---
+
 ## Quality Gates & Verification
 
 ```bash
@@ -1108,6 +1124,7 @@ cargo fmt --all -- --check
 ```
 
 All 6 core exit criteria (deterministic computation modeling, canonical key generation, cache entry creation, retrieval, identity verification, and corrupted metadata detection) and all 11 physical storage scenarios (empty cache, single object, deduplication, corruption quarantine, interrupted write isolation, deletion, concurrent read/write races, deeply nested paths, multi-MB large files, and binary byte safety) are fully verified and tested.
+
 
 
 

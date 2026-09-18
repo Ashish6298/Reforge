@@ -45,4 +45,9 @@ path = "../../examples/build_benchmark.rs"
 name = "performance_benchmarks"
 path = "../../examples/performance_benchmarks.rs"
 
+[[example]]
+name = "large_files_benchmark"
+path = "../../examples/large_files_benchmark.rs"
+
+
 

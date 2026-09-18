@@ -707,4 +707,68 @@ mod tests {
             h.join().unwrap();
         }
     }
+
+    #[test]
+    fn test_milestone_13_2_large_files_streaming() {
+        use std::io::{BufWriter, Write};
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache_dir = temp_dir.path().join(".dcc_cache");
+        let ws_dir = temp_dir.path().join("ws");
+        std::fs::create_dir_all(&ws_dir).unwrap();
+
+        let cache = Cache::open(&cache_dir).unwrap();
+
+        // 1. Generate a multi-MB chunked file
+        let file_path = ws_dir.join("stream_test.bin");
+        let size_bytes: u64 = 4 * 1024 * 1024; // 4 MB for test suite speed
+        {
+            let file = std::fs::File::create(&file_path).unwrap();
+            let mut writer = BufWriter::with_capacity(64 * 1024, file);
+            let chunk = [0xA5u8; 64 * 1024];
+            let mut written = 0;
+            while written < size_bytes {
+                let to_write = (size_bytes - written).min(chunk.len() as u64) as usize;
+                writer.write_all(&chunk[..to_write]).unwrap();
+                written += to_write as u64;
+            }
+            writer.flush().unwrap();
+        }
+
+        // 2. Stream hash calculation
+        let digest = Digest::hash_file(&file_path).unwrap();
+
+        // 3. Stream CAS storage
+        let (stored_digest, stored_size) =
+            cache.storage().store_object_from_file(&file_path).unwrap();
+        assert_eq!(stored_digest, digest);
+        assert_eq!(stored_size, size_bytes);
+
+        // 4. Stream CAS restoration
+        let comp = Computation::builder_with("stream_op", "tool")
+            .input("stream_test.bin", digest.clone(), size_bytes)
+            .build()
+            .unwrap();
+        let key = comp.compute_key().unwrap();
+
+        let entry = CacheEntry::new(
+            key,
+            comp,
+            vec![OutputManifestItem {
+                path: "restored_stream.bin".to_string(),
+                digest: digest.clone(),
+                size: size_bytes,
+                is_executable: None,
+            }],
+            ExecutionMetadata::default(),
+        );
+
+        let restore_dest = ws_dir.join("restore");
+        std::fs::create_dir_all(&restore_dest).unwrap();
+        cache.restore(&entry, &restore_dest).unwrap();
+
+        let restored_file = restore_dest.join("restored_stream.bin");
+        assert!(restored_file.is_file());
+        assert_eq!(std::fs::metadata(&restored_file).unwrap().len(), size_bytes);
+    }
 }
