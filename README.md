@@ -1306,6 +1306,26 @@ DCC provides layered trust modes (`TrustMode`) enabling safe integration of loca
 3. **`TrustMode::ReadOnly`**:
    - Restricts operations to lookup and safe extraction; completely forbids mutations and writes into cache storage.
 
+### Storage Backend Trait & Remote Abstraction (Milestone 15.1)
+
+DCC abstracts physical storage through the unified `Storage` trait, separating computation logic and metadata management from byte storage:
+
+```text
+               ┌─────────────────────────────────┐
+               │    Storage Trait Abstraction    │
+               └────────────────┬────────────────┘
+                                │
+        ┌───────────────────────┴───────────────────────┐
+        ▼                                               ▼
+[ LocalFilesystemStorage ]                      [ RemoteStorage ]
+- Fast local filesystem CAS                   - In-memory / Cloud / Network CAS
+- Directory sharded paths                     - Action/Result & Blob decoupling
+- Direct mmap / hardlink support              - Streaming transfer support
+```
+
+- **Pluggable Architecture**:
+  Both `LocalFilesystemStorage` and `RemoteStorage` implement the unified `Storage` interface (`put`, `put_file`, `get`, `get_bytes`, `exists`, `delete`, `metadata`, `verify`), enabling seamless backend switching via dynamic (`Box<dyn Storage>`) or static dispatch without changing computation models.
+
 ---
 
 

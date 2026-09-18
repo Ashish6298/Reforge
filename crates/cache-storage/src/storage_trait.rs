@@ -86,6 +86,128 @@ impl Storage for crate::cas::CasStorage {
     }
 }
 
+/// Type alias for local filesystem CAS storage implementing Storage backend trait (Milestone 15.1).
+pub type LocalFilesystemStorage = crate::cas::CasStorage;
+
+/// In-memory / Mock Remote Storage implementation preparing architecture for Milestone 15 Remote Cache.
+/// Separates Action/Result Cache metadata mapping from Content-Addressable Storage (CAS).
+#[derive(Debug, Default, Clone)]
+pub struct RemoteStorage {
+    blobs: std::sync::Arc<std::sync::RwLock<std::collections::HashMap<Digest, Vec<u8>>>>,
+}
+
+impl RemoteStorage {
+    /// Create a new empty remote storage instance.
+    pub fn new() -> Self {
+        Self {
+            blobs: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        }
+    }
+
+    /// Number of blobs stored in the remote backend.
+    pub fn blob_count(&self) -> usize {
+        self.blobs.read().map(|b| b.len()).unwrap_or(0)
+    }
+
+    /// Clear all blobs in the remote backend.
+    pub fn clear(&self) {
+        if let Ok(mut b) = self.blobs.write() {
+            b.clear();
+        }
+    }
+}
+
+impl Storage for RemoteStorage {
+    fn put(&self, bytes: &[u8]) -> Result<(Digest, u64)> {
+        let digest = Digest::from_bytes(bytes);
+        let size = bytes.len() as u64;
+        let mut blobs = self.blobs.write().map_err(|e| {
+            dcc_core::CacheError::StorageError(std::io::Error::other(format!(
+                "RemoteStorage lock poisoned: {}",
+                e
+            )))
+        })?;
+        blobs.insert(digest.clone(), bytes.to_vec());
+        Ok((digest, size))
+    }
+
+    fn put_file(&self, source_path: &Path) -> Result<(Digest, u64)> {
+        let bytes = std::fs::read(source_path)?;
+        self.put(&bytes)
+    }
+
+    fn get(&self, digest: &Digest) -> Result<Box<dyn Read + Send>> {
+        let blobs = self.blobs.read().map_err(|e| {
+            dcc_core::CacheError::StorageError(std::io::Error::other(format!(
+                "RemoteStorage lock poisoned: {}",
+                e
+            )))
+        })?;
+        let bytes = blobs.get(digest).ok_or_else(|| {
+            dcc_core::CacheError::StorageError(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Remote blob not found: {}", digest),
+            ))
+        })?;
+        Ok(Box::new(std::io::Cursor::new(bytes.clone())))
+    }
+
+    fn exists(&self, digest: &Digest) -> bool {
+        self.blobs
+            .read()
+            .map(|b| b.contains_key(digest))
+            .unwrap_or(false)
+    }
+
+    fn delete(&self, digest: &Digest) -> Result<bool> {
+        let mut blobs = self.blobs.write().map_err(|e| {
+            dcc_core::CacheError::StorageError(std::io::Error::other(format!(
+                "RemoteStorage lock poisoned: {}",
+                e
+            )))
+        })?;
+        Ok(blobs.remove(digest).is_some())
+    }
+
+    fn metadata(&self, digest: &Digest) -> Result<Option<BlobMetadata>> {
+        let blobs = self.blobs.read().map_err(|e| {
+            dcc_core::CacheError::StorageError(std::io::Error::other(format!(
+                "RemoteStorage lock poisoned: {}",
+                e
+            )))
+        })?;
+        Ok(blobs.get(digest).map(|b| BlobMetadata {
+            digest: digest.clone(),
+            size_bytes: b.len() as u64,
+            path: None,
+        }))
+    }
+
+    fn verify(&self, digest: &Digest) -> Result<()> {
+        let blobs = self.blobs.read().map_err(|e| {
+            dcc_core::CacheError::StorageError(std::io::Error::other(format!(
+                "RemoteStorage lock poisoned: {}",
+                e
+            )))
+        })?;
+        let bytes = blobs.get(digest).ok_or_else(|| {
+            dcc_core::CacheError::StorageError(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Remote blob not found: {}", digest),
+            ))
+        })?;
+        let actual_digest = Digest::from_bytes(bytes);
+        if &actual_digest != digest {
+            return Err(dcc_core::CacheError::IntegrityError {
+                expected: digest.as_str().to_string(),
+                actual: actual_digest.as_str().to_string(),
+                path: format!("remote://{}", digest),
+            });
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,5 +267,51 @@ mod tests {
         assert_eq!(size, content.len() as u64);
         assert!(storage.exists(&digest));
         assert_eq!(storage.get_bytes(&digest).unwrap(), content);
+    }
+
+    #[test]
+    fn test_milestone_15_1_remote_storage_backend_trait() {
+        let remote = RemoteStorage::new();
+        let test_payload = b"milestone 15 remote storage blob data";
+
+        // 1. Put raw bytes
+        let (digest, size) = remote.put(test_payload).unwrap();
+        assert_eq!(size, test_payload.len() as u64);
+        assert_eq!(remote.blob_count(), 1);
+
+        // 2. Exists & Metadata
+        assert!(remote.exists(&digest));
+        let meta = remote.metadata(&digest).unwrap().unwrap();
+        assert_eq!(meta.digest, digest);
+        assert_eq!(meta.size_bytes, size);
+        assert!(meta.path.is_none());
+
+        // 3. Get bytes & Verify
+        let retrieved = remote.get_bytes(&digest).unwrap();
+        assert_eq!(retrieved, test_payload);
+        assert!(remote.verify(&digest).is_ok());
+
+        // 4. Put file
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("remote_test.txt");
+        std::fs::write(&file_path, b"file content for remote").unwrap();
+        let (file_digest, file_size) = remote.put_file(&file_path).unwrap();
+        assert_eq!(file_size, 23);
+        assert!(remote.exists(&file_digest));
+        assert_eq!(remote.blob_count(), 2);
+
+        // 5. Delete & Verify disappearance
+        assert!(remote.delete(&digest).unwrap());
+        assert!(!remote.exists(&digest));
+        assert!(remote.get(&digest).is_err());
+        assert_eq!(remote.blob_count(), 1);
+
+        // 6. Dynamic dispatch via Box<dyn Storage>
+        let boxed: Box<dyn Storage> = Box::new(remote);
+        assert!(boxed.exists(&file_digest));
+        assert_eq!(
+            boxed.get_bytes(&file_digest).unwrap(),
+            b"file content for remote"
+        );
     }
 }
