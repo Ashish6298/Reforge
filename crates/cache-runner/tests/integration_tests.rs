@@ -1802,3 +1802,91 @@ fn test_milestone_16_1_ci_behavior_matrix() {
         b"CI compilation source content"
     );
 }
+
+#[test]
+fn test_milestone_16_2_graceful_degradation_when_cache_fails() {
+    // Milestone 16.2: If cache access fails (corrupted metadata, I/O errors, invalid JSON),
+    // the system must gracefully fall back to clean computation.
+    // Developer builds must never become unusable because the cache is unavailable or broken.
+
+    let env = TestEnv::new().unwrap();
+    env.create_input_file("app_code.txt", b"production application logic")
+        .unwrap();
+
+    #[cfg(windows)]
+    let (cmd, args) = (
+        "powershell.exe",
+        vec![
+            "-Command".to_string(),
+            "Copy-Item app_code.txt -Destination app_build.bin".to_string(),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (cmd, args) = (
+        "cp",
+        vec!["app_code.txt".to_string(), "app_build.bin".to_string()],
+    );
+
+    let computation = Computation::builder_with("app-build", cmd)
+        .args(args)
+        .input("app_code.txt", Digest::from_bytes(b""), 0)
+        .output("app_build.bin", true)
+        .build()
+        .unwrap();
+
+    let engine = RunnerEngine::new(
+        &env.storage,
+        EngineOptions {
+            working_dir: env.workspace_dir.path().to_path_buf(),
+            ..Default::default()
+        },
+    );
+
+    // Initial build succeeds and writes entry
+    let res1 = engine.execute(computation.clone()).unwrap();
+    assert_eq!(res1.status, ExecutionStatus::Miss);
+    assert_eq!(res1.exit_code, 0);
+
+    // 1. Scenario A: Corrupted JSON metadata file on disk
+    let entry_file = env.storage.entry_path(&res1.key);
+    fs::write(&entry_file, b"{ CORRUPTED_NON_JSON_METADATA").unwrap();
+    fs::remove_file(env.workspace_dir.path().join("app_build.bin")).unwrap();
+
+    // Execution must NOT crash or fail: it must gracefully fall back to computation
+    let res_fallback_json = engine.execute(computation.clone()).unwrap();
+    assert_eq!(res_fallback_json.status, ExecutionStatus::Miss);
+    assert_eq!(res_fallback_json.exit_code, 0);
+    assert_eq!(
+        env.read_output_file("app_build.bin").unwrap(),
+        b"production application logic"
+    );
+
+    // 2. Scenario B: Corrupted output blob in CAS
+    let out_digest = &res_fallback_json.outputs[0].digest;
+    let cas_path = env.storage.object_path(out_digest);
+    fs::write(&cas_path, b"TAMPERED_CAS_PAYLOAD").unwrap();
+    fs::remove_file(env.workspace_dir.path().join("app_build.bin")).unwrap();
+
+    // Execution again gracefully falls back to computation
+    let res_fallback_cas = engine.execute(computation.clone()).unwrap();
+    assert_eq!(res_fallback_cas.status, ExecutionStatus::Miss);
+    assert_eq!(res_fallback_cas.exit_code, 0);
+    assert_eq!(
+        env.read_output_file("app_build.bin").unwrap(),
+        b"production application logic"
+    );
+
+    // 3. Scenario C: Removed metadata while CAS remains (cache partially missing)
+    if entry_file.exists() {
+        fs::remove_file(&entry_file).unwrap();
+    }
+    fs::remove_file(env.workspace_dir.path().join("app_build.bin")).unwrap();
+
+    let res_fallback_missing = engine.execute(computation).unwrap();
+    assert_eq!(res_fallback_missing.status, ExecutionStatus::Miss);
+    assert_eq!(res_fallback_missing.exit_code, 0);
+    assert_eq!(
+        env.read_output_file("app_build.bin").unwrap(),
+        b"production application logic"
+    );
+}

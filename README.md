@@ -1397,6 +1397,26 @@ DCC provides robust operational guarantees across all 4 operational states in CI
 3. **State 3 — Cache Corrupted (Tampered / Invalid Data)**: Automatically detects checksum or identity mismatches, evicts damaged records, and executes cleanly without failing the job.
 4. **State 4 — Cache Partially Available (Missing Individual Blobs)**: Identifies missing artifacts in partial cache fetches and falls back to computation safely.
 
+### Graceful Degradation & Non-Breaking Resilience (Milestone 16.2)
+
+DCC enforces a strict non-breaking resilience guarantee:
+
+```text
+       Cache Access Error (Corrupted Data / Missing Blobs / IO Failure)
+                                      │
+                                      ▼
+                      Evict / Quarantine Broken Entry
+                                      │
+                                      ▼
+                      Fallback to Normal Computation
+                                      │
+                                      ▼
+                 Build / Test Suite Completes Successfully
+```
+
+- **Build Continuity**: Cache errors degrade gracefully into standard computation execution. Developer builds and CI pipelines never fail due to cache unavailability or data corruption.
+- **Self-Healing Recovery**: Corrupted entries are evicted immediately during lookup failure, allowing subsequent successful runs to recreate valid cache entries.
+
 ---
 
 
