@@ -70,14 +70,14 @@ dcc/
 
 ## 5. Milestone 20 — Engineering Release Audit Summary
 
-The **Milestone 20 Engineering Audit** validates that DCC v1.0.0 satisfies all correctness, reliability, security, performance, and API criteria:
+The **Milestone 20 Engineering Audit** validates that DCC v1.0.0 satisfies all correctness, reliability, security, performance, and developer experience criteria:
 
 | Audit Section | Verification Vectors | Measured Results & Status |
 | :--- | :--- | :--- |
 | **20.1 Correctness** | `same comp -> same key`, `diff comp -> diff key`, `changed input -> miss`, `changed env -> miss`, `changed tool -> miss`, `corrupt cache -> detected`, `missing cache -> safe miss`, `failed comp -> not cached` | **VERIFIED PASS** |
 | **20.2 Reliability** | Process crash resilience, disk capacity limits, partial write atomicity, concurrent locking, cache corruption detection, runtime deletion recovery, large cache eviction enforcement | **VERIFIED PASS** |
 | **20.3 Performance** | Cold execution (~20ms), Cache lookup (~0.12ms), Cache hit (~0.45ms), Cache restore (~0.18ms), Cache store (~0.22ms), Large files (~540 MB/s), Large cache O(1) lookup (~0.11ms), Concurrent workloads (8 threads, 0 deadlocks) | **EXCEEDS TARGET** |
-| **20.4 Developer Experience** | Standard POSIX CLI, actionable error messages, `--explain` diagnostics, stable JSON output | **VERIFIED PASS** |
+| **20.4 Developer Experience** | POSIX CLI semantics, actionable typed errors, `--explain` diagnostic miss reasons, stable JSON schema output, comprehensive docs, simple installation, predictable configuration | **VERIFIED PASS** |
 | **20.5 Rust API** | Idiomatic Rust public API, zero leaked internals, comprehensive documentation comments | **VERIFIED PASS** |
 | **20.6 Security** | Path traversal sandbox, symlink containment, secret scanning, `#![forbid(unsafe_code)]` | **VERIFIED SECURE** |
 | **20.7 Release Decision** | Formal v1.0.0 audit report documented at `docs/v1.0.0-release-audit.md` | **GO / APPROVED** |
