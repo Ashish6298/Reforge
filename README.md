@@ -68,14 +68,14 @@ dcc/
 
 ---
 
-## 5. Milestone 20 — v1.0.0 Engineering Release Audit Summary
+## 5. Milestone 20 — Engineering Release Audit Summary
 
 The **Milestone 20 Engineering Audit** validates that DCC v1.0.0 satisfies all correctness, reliability, security, performance, and API criteria:
 
 | Audit Section | Verification Vectors | Status |
 | :--- | :--- | :--- |
 | **20.1 Correctness** | `same computation -> same key`, `different computation -> different key`, `changed input -> cache miss`, `changed env -> cache miss`, `changed tool -> cache miss`, `corrupted cache -> detected`, `missing cache -> safe miss`, `failed computation -> not cached` | **VERIFIED PASS** |
-| **20.2 Reliability** | Crash isolation, disk full protection, atomic renames, multi-process locking, corrupt blob quarantining | **VERIFIED PASS** |
+| **20.2 Reliability** | Process crash resilience, disk capacity limits, partial write atomicity, concurrent locking, cache corruption detection, runtime deletion recovery, large cache eviction enforcement | **VERIFIED PASS** |
 | **20.3 Performance** | < 1ms hit restoration, ~540 MB/s streaming SHA-256 hashing, sub-millisecond index lookup | **EXCEEDS TARGET** |
 | **20.4 Developer Experience** | Standard POSIX CLI, actionable error messages, `--explain` diagnostics, stable JSON output | **VERIFIED PASS** |
 | **20.5 Rust API** | Idiomatic Rust public API, zero leaked internals, comprehensive documentation comments | **VERIFIED PASS** |
