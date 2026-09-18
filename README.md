@@ -1417,6 +1417,17 @@ DCC enforces a strict non-breaking resilience guarantee:
 - **Build Continuity**: Cache errors degrade gracefully into standard computation execution. Developer builds and CI pipelines never fail due to cache unavailability or data corruption.
 - **Self-Healing Recovery**: Corrupted entries are evicted immediately during lookup failure, allowing subsequent successful runs to recreate valid cache entries.
 
+### CI Workflow Example & Provider-Neutral Integration (Milestone 16.3)
+
+A complete CI/CD integration guide and GitHub Actions workflow is provided in [`docs/ci-workflow-example.md`](docs/ci-workflow-example.md):
+
+```text
+  [ 1. Checkout ] ──► [ 2. Restore Cache ] ──► [ 3. Run DCC ] ──► [ 4. Tests/Build ] ──► [ 5. Store Cache ]
+```
+
+- **GitHub Actions Reference**: Demonstrates automated cache restore and save (`actions/cache/restore@v4` and `actions/cache/save@v4`) targeting the `.dcc_cache/` directory.
+- **Provider-Neutral Support**: Works across GitHub Actions, GitLab CI, Jenkins, and containerized Docker build environments.
+
 ---
 
 
