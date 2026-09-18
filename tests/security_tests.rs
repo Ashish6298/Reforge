@@ -535,3 +535,62 @@ fn test_milestone_14_3_symlink_directory_escape_prevention() {
     }
 }
 
+#[test]
+fn test_milestone_14_4_sensitive_information_prevention() {
+    use dcc_core::{SensitiveDataDetector, SensitiveDataPolicy};
+
+    // 1. Verify key detection on credentials
+    let credentials_keys = vec![
+        "AWS_SECRET_ACCESS_KEY",
+        "DATABASE_PASSWORD",
+        "GITHUB_TOKEN",
+        "NPM_AUTH_TOKEN",
+        "PRIVATE_KEY_PEM",
+        "API_KEY",
+        "SSH_PRIVATE_KEY",
+    ];
+    for key in credentials_keys {
+        assert!(
+            SensitiveDataDetector::is_sensitive_key(key),
+            "SensitiveDataDetector must flag '{}' as sensitive credential",
+            key
+        );
+    }
+
+    // 2. Verify value detection on tokens and private keys
+    assert!(SensitiveDataDetector::is_sensitive_value("ghp_secretTokenValue123456789"));
+    assert!(SensitiveDataDetector::is_sensitive_value("glpat-privateGitLabToken"));
+    assert!(SensitiveDataDetector::is_sensitive_value("Bearer eyJhbGciOi..."));
+    assert!(SensitiveDataDetector::is_sensitive_value("-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----"));
+
+    // 3. Verify Computation builder rejects sensitive credentials under SensitiveDataPolicy::Deny
+    let deny_builder = Computation::builder_with("deploy", "aws")
+        .env("AWS_SECRET_ACCESS_KEY", "AKIAIOSFODNN7EXAMPLE")
+        .sensitive_policy(SensitiveDataPolicy::Deny)
+        .build();
+    assert!(
+        deny_builder.is_err(),
+        "ComputationBuilder must reject sensitive credentials when policy is Deny"
+    );
+
+    // 4. Verify Computation builder redacts sensitive credentials under SensitiveDataPolicy::Mask
+    let mask_comp = Computation::builder_with("deploy", "aws")
+        .env("DATABASE_URL", "postgres://user:secretpassword@localhost/db")
+        .env("PUBLIC_CONFIG", "safe_value")
+        .sensitive_policy(SensitiveDataPolicy::Mask)
+        .build()
+        .unwrap();
+
+    assert_eq!(
+        mask_comp.env.get("DATABASE_URL").unwrap(),
+        "[REDACTED]",
+        "DATABASE_URL must be redacted under SensitiveDataPolicy::Mask"
+    );
+    assert_eq!(
+        mask_comp.env.get("PUBLIC_CONFIG").unwrap(),
+        "safe_value",
+        "Non-sensitive values must remain unredacted"
+    );
+}
+
+

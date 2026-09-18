@@ -1244,7 +1244,44 @@ DCC prevents arbitrary file overwrite and directory escape vulnerabilities resul
 2. **Directory Symlink Escape Containment**:
    - `verify_symlink_safety` checks every component along the path; if an intermediate segment is a symlink pointing outside the canonical workspace boundary, the restoration is aborted immediately with `DccError::PathTraversal`.
 
+### Sensitive Information Protection (Milestone 14.4)
+
+DCC protects against accidental caching or leaking of credentials, secrets, tokens, and private keys:
+
+```text
+       [ Computation Environment & Arguments ]
+                          │
+            SensitiveDataDetector::scan()
+                          │
+     ┌────────────────────┴────────────────────┐
+     ▼                                         ▼
+[ Key Name Inspection ]            [ Payload Value Inspection ]
+(PASSWORD, TOKEN, SECRET,         (PEM Private Keys, Bearer tokens,
+ API_KEY, AUTH, SSH_KEY,           ghp_/glpat-/npm_ tokens,
+ DATABASE_URL, etc.)               db connection strings, etc.)
+     │                                         │
+     └────────────────────┬────────────────────┘
+                          │
+             SensitiveDataPolicy Handling
+       ┌──────────────────┼──────────────────┐
+       ▼                  ▼                  ▼
+[ Deny Policy ]    [ Warn Policy ]    [ Mask Policy ]
+Rejects execution  Emits stderr       Redacts secret to
+with error         warning diagnostic `[REDACTED]` in entry
+```
+
+1. **Caller Responsibility**:
+   - Callers (build systems, CI pipelines, CLI users) are responsible for filtering out private secrets and non-deterministic authentication tokens from input arguments and environment maps.
+2. **Opt-in Sensitive Data Policies (`SensitiveDataPolicy`)**:
+   - `SensitiveDataPolicy::Allow`: Caller-responsible mode; records values as supplied.
+   - `SensitiveDataPolicy::Warn`: Scans keys and values, logging warnings to stderr if sensitive data is detected.
+   - `SensitiveDataPolicy::Deny`: Strictly rejects computations containing sensitive secrets with `CacheError::SensitiveDataError`.
+   - `SensitiveDataPolicy::Mask`: Automatically redacts secret values to `[REDACTED]` prior to key computation and metadata persistence.
+3. **Automated Secret Detection (`SensitiveDataDetector`)**:
+   - Detects standard secret variable names and value signatures (such as RSA/OpenSSH private key headers, GitHub/GitLab/NPM access tokens, Bearer authorization headers, and database connection URIs).
+
 ---
+
 
 
 ## Quality Gates & Verification
