@@ -1148,6 +1148,45 @@ cargo run --release --example profile_and_optimize_benchmark
 
 ---
 
+## Security & Safety Architecture (Milestone 14)
+
+DCC treats cached artifacts as **potentially dangerous data**. A caching system must never blindly trust stored objects, metadata, or output manifests.
+
+### Cache Poisoning Defense (Milestone 14.1)
+
+DCC enforces multi-layered cryptographic verification across all access and restoration paths:
+
+```text
+       [ Cached Entry JSON ]
+                │
+         verify_identity()  ──► FAILS? ──► REJECT (Forged metadata / Key spoofing prevented)
+                │
+                ▼
+       [ CAS Object on Disk ]
+                │
+          verify_object()   ──► FAILS? ──► QUARANTINE to .corrupted & REJECT (Malicious blob isolated)
+                │
+                ▼
+       [ Atomic Staging .tmp ]
+                │
+          verify_stream()   ──► FAILS? ──► ROLLBACK & CLEAN (Destination workspace untouched)
+                │
+                ▼
+       [ Restored Artifact ]
+```
+
+1. **Malicious CAS Object Defense**:
+   - Every CAS blob is verified against its expected SHA-256 digest before reading or extracting.
+   - Corrupted or maliciously modified blobs are automatically renamed with a `.corrupted` extension (quarantine) and trigger safe fallback re-execution (`MissReason::CorruptedCache`).
+2. **Metadata Key Spoofing Defense**:
+   - `entry.verify_identity()` recalculates the canonical SHA-256 key from the embedded `Computation` model and asserts exact match against `entry.key`.
+   - Forged metadata claiming a benign key with a malicious command (e.g. `rm -rf /`) is rejected immediately prior to restoration.
+3. **Tampered Output Manifest & Atomic Rollback**:
+   - Restorations stage files into temporary `.tmp_restore_<nonce>` files.
+   - Stream digests are cryptographically re-validated before atomic `fs::rename`. If validation fails, temporary files are wiped and workspace files remain completely untouched.
+
+---
+
 ## Quality Gates & Verification
 
 ```bash

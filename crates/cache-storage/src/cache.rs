@@ -146,6 +146,9 @@ impl Cache {
         destination_dir: &Path,
         prefer_hardlinks: bool,
     ) -> Result<()> {
+        // Pre-restoration integrity guarantee: verify entry identity matches computation
+        entry.verify_identity()?;
+
         for output in &entry.outputs {
             let target_path = self.sanitize_path(destination_dir, &output.path)?;
 
