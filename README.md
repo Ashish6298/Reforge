@@ -60,7 +60,7 @@ dcc/
 │   ├── cache-integrations/ # Direct Rust builder APIs for compiler/toolchain integrations
 │   └── cache-test-utils/   # Shared test environment helpers and mock harness
 ├── docs/
-│   ├── v1.0.0-release-audit.md # Milestone 20 formal v1.0.0 engineering release audit
+│   ├── v1.0.0-release-audit.md # Milestone 20 formal v1.0.0 engineering release audit report
 │   ├── report/                 # Granular milestone reports (Milestone 0 through Milestone 20)
 │   └── ...                     # Architectural, security, and integration documentation
 └── tests/                  # Cross-platform and multi-crate integration suites
