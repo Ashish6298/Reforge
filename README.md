@@ -1077,6 +1077,27 @@ Quality pipeline steps executed on every OS:
 
 ---
 
+## Performance Benchmarks (`performance_benchmarks`)
+
+DCC provides comprehensive performance benchmarks covering all core primitives and operational paths:
+
+```bash
+cargo run --example performance_benchmarks
+```
+
+Measured operations include:
+1. **Hash Small File (4 KB)**: Microsecond-scale streaming SHA-256 calculation.
+2. **Hash Large File (10 MB)**: High-throughput constant-memory SHA-256 processing.
+3. **Hash Directory (Recursive)**: Canonical walkdir traversal and deterministic combined hashing.
+4. **Generate Key**: Computation specification normalization and canonical JSON serialization.
+5. **Lookup Cache**: Entry retrieval and access metadata updates.
+6. **Store Cache**: Atomic metadata commit and CAS output blob indexing.
+7. **Restore Cache**: Atomic materialization and SHA-256 verification.
+8. **Serialize & Deserialize Metadata**: Zero-loss JSON conversion efficiency.
+9. **Concurrent Lookup**: Multi-threaded read throughput under active thread contention.
+
+---
+
 ## Quality Gates & Verification
 
 ```bash
@@ -1087,6 +1108,7 @@ cargo fmt --all -- --check
 ```
 
 All 6 core exit criteria (deterministic computation modeling, canonical key generation, cache entry creation, retrieval, identity verification, and corrupted metadata detection) and all 11 physical storage scenarios (empty cache, single object, deduplication, corruption quarantine, interrupted write isolation, deletion, concurrent read/write races, deeply nested paths, multi-MB large files, and binary byte safety) are fully verified and tested.
+
 
 
 

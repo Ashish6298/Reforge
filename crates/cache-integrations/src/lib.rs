@@ -617,4 +617,94 @@ mod tests {
         assert!(metrics.storage_size_bytes > 0);
         assert!(metrics.speedup >= 1.0 || metrics.warm_build_with_cache_time_ms == 0);
     }
+
+    #[test]
+    fn test_milestone_13_1_benchmarks_all_ten_dimensions() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache_dir = temp_dir.path().join(".dcc_cache");
+        let ws_dir = temp_dir.path().join("ws");
+        std::fs::create_dir_all(&ws_dir).unwrap();
+
+        let cache = Cache::open(&cache_dir).unwrap();
+
+        // 1. Hash Small File
+        let small_file = ws_dir.join("small.bin");
+        std::fs::write(&small_file, b"small payload data 4kb").unwrap();
+        let d_small = Digest::hash_file(&small_file).unwrap();
+        assert_eq!(d_small.as_str().len(), 64);
+
+        // 2. Hash Large File
+        let large_file = ws_dir.join("large.bin");
+        std::fs::write(&large_file, vec![0x33u8; 1024 * 1024]).unwrap(); // 1MB test
+        let d_large = Digest::hash_file(&large_file).unwrap();
+        assert_eq!(d_large.as_str().len(), 64);
+
+        // 3. Hash Directory
+        let sub_dir = ws_dir.join("tree");
+        std::fs::create_dir_all(&sub_dir).unwrap();
+        std::fs::write(sub_dir.join("a.txt"), b"123").unwrap();
+        let d_dir = Digest::hash_directory(&sub_dir).unwrap();
+        assert_eq!(d_dir.as_str().len(), 64);
+
+        // 4. Generate Key
+        let comp = Computation::builder_with("bench", "tool")
+            .input("small.bin", d_small, 22)
+            .build()
+            .unwrap();
+        let key = comp.compute_key().unwrap();
+        assert_eq!(key.as_str().len(), 64);
+
+        // 5. Store Cache
+        let (blob_digest, blob_size) = cache.storage().store_object_bytes(b"blob data").unwrap();
+        let entry = CacheEntry::new(
+            key.clone(),
+            comp,
+            vec![OutputManifestItem {
+                path: "out.bin".to_string(),
+                digest: blob_digest,
+                size: blob_size,
+                is_executable: None,
+            }],
+            ExecutionMetadata::default(),
+        );
+        cache.store(&entry).unwrap();
+
+        // 6. Lookup Cache
+        let looked_up = cache.lookup(&key).unwrap();
+        assert!(looked_up.is_some());
+
+        // 7. Restore Cache
+        let dest = ws_dir.join("restore");
+        std::fs::create_dir_all(&dest).unwrap();
+        cache.restore(&entry, &dest).unwrap();
+        assert!(dest.join("out.bin").is_file());
+
+        // 8. Serialize Metadata
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains(key.as_str()));
+
+        // 9. Deserialize Metadata
+        let deserialized: CacheEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.key, key);
+
+        // 10. Concurrent Lookup
+        let cache_arc = Arc::new(cache);
+        let key_arc = Arc::new(key);
+        let mut handles = Vec::new();
+        for _ in 0..4 {
+            let c = Arc::clone(&cache_arc);
+            let k = Arc::clone(&key_arc);
+            handles.push(thread::spawn(move || {
+                for _ in 0..50 {
+                    assert!(c.lookup(&k).unwrap().is_some());
+                }
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+    }
 }

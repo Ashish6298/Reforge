@@ -58,6 +58,41 @@ impl Digest {
         Self::hash_reader(reader)
     }
 
+    /// Recursively hash a directory deterministically across platforms.
+    /// Traverses directory entries, sorts relative paths canonically, and hashes
+    /// relative paths together with file contents.
+    pub fn hash_directory(path: impl AsRef<Path>) -> std::io::Result<Self> {
+        let base_dir = path.as_ref();
+        let mut entries = Vec::new();
+
+        for entry in walkdir::WalkDir::new(base_dir)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if entry.file_type().is_file() {
+                if let Ok(rel) = entry.path().strip_prefix(base_dir) {
+                    let norm_rel = crate::paths::PathUtils::to_normalized_string(rel);
+                    let file_digest = Self::hash_file(entry.path())?;
+                    entries.push((norm_rel, file_digest));
+                }
+            }
+        }
+
+        // Sort canonically by relative path
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let mut hasher = Sha256::new();
+        for (rel_path, file_digest) in entries {
+            hasher.update(rel_path.as_bytes());
+            hasher.update(b":");
+            hasher.update(file_digest.as_str().as_bytes());
+            hasher.update(b"\n");
+        }
+
+        let result = hasher.finalize();
+        Ok(Self(hex::encode(result)))
+    }
+
     pub fn prefix(&self, len: usize) -> &str {
         let end = len.min(self.0.len());
         &self.0[..end]
@@ -147,6 +182,23 @@ mod tests {
         let file_digest = Digest::hash_file(&file_path).unwrap();
         let memory_digest = Digest::hash_bytes(payload);
         assert_eq!(file_digest, memory_digest);
+    }
+
+    #[test]
+    fn test_hash_directory() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let sub = temp_dir.path().join("nested");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(temp_dir.path().join("file_a.txt"), b"aaa").unwrap();
+        std::fs::write(sub.join("file_b.txt"), b"bbb").unwrap();
+
+        let dir_digest = Digest::hash_directory(temp_dir.path()).unwrap();
+        assert_eq!(dir_digest.as_str().len(), 64);
+
+        // Modifying one file changes directory hash
+        std::fs::write(sub.join("file_b.txt"), b"bbb_modified").unwrap();
+        let dir_digest2 = Digest::hash_directory(temp_dir.path()).unwrap();
+        assert_ne!(dir_digest, dir_digest2);
     }
 
     #[test]
