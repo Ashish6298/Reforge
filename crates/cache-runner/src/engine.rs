@@ -384,6 +384,7 @@ impl<'a> RunnerEngine<'a> {
         if self.options.verbose {
             eprintln!("[OUTPUT] validating outputs");
         }
+        let can_store = should_store && self.options.policy != CachePolicy::ReadOnly && self.options.trust_mode.allows_writes();
         let mut manifest_items = Vec::new();
         for output in &computation.outputs {
             let full_out_path = self.options.working_dir.join(&output.path);
@@ -397,7 +398,6 @@ impl<'a> RunnerEngine<'a> {
                 continue;
             }
 
-            let can_store = should_store && self.options.policy != CachePolicy::ReadOnly && self.options.trust_mode.allows_writes();
             let (digest, size) = if can_store { self.storage.store_object_from_file(&full_out_path)? } else { (Digest::hash_file(&full_out_path)?, std::fs::metadata(&full_out_path)?.len()) };
             manifest_items.push(OutputManifestItem {
                 path: output.path.clone(),
