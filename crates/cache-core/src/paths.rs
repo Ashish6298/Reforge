@@ -92,6 +92,30 @@ impl PathUtils {
         Ok(target)
     }
 
+    /// Safely prepares a target path for overwriting, removing existing files or symlinks without following them.
+    pub fn safe_prepare_target_path<P: AsRef<Path>>(target: P) -> Result<()> {
+        let p = target.as_ref();
+        if let Ok(meta) = std::fs::symlink_metadata(p) {
+            if meta.file_type().is_symlink() {
+                #[cfg(windows)]
+                {
+                    if meta.is_dir() {
+                        let _ = std::fs::remove_dir(p);
+                    } else {
+                        let _ = std::fs::remove_file(p);
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = std::fs::remove_file(p);
+                }
+            } else if p.is_file() {
+                let _ = std::fs::remove_file(p);
+            }
+        }
+        Ok(())
+    }
+
     /// Validates a path declared on a computation or build action.
     /// Rejects directory traversal (`../`, `/../`) while allowing safe relative paths and canonical absolute paths.
     pub fn validate_computation_path(path_str: &str) -> Result<()> {
