@@ -38,7 +38,7 @@ fn test_audit_20_3_measure_performance_metrics() {
         "sh",
         vec![
             "-c".to_string(),
-            "echo -n 'PERF_OUTPUT_DATA' > perf_out.txt".to_string(),
+            "printf '%s' 'PERF_OUTPUT_DATA' > perf_out.txt".to_string(),
         ],
     );
 

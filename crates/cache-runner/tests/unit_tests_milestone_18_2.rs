@@ -38,7 +38,7 @@ fn test_flow_1_command_miss_lifecycle() {
         "sh",
         vec![
             "-c".to_string(),
-            "echo -n 'GENERATED_DATA' > output.txt && echo -n 'STDOUT_LOG'".to_string(),
+            "printf '%s' 'GENERATED_DATA' > output.txt && printf '%s' 'STDOUT_LOG'".to_string(),
         ],
     );
 
@@ -96,7 +96,7 @@ fn test_flow_2_command_hit_lifecycle() {
         "sh",
         vec![
             "-c".to_string(),
-            "echo -n 'ARTIFACT_BYTES' > result.bin".to_string(),
+            "printf '%s' 'ARTIFACT_BYTES' > result.bin".to_string(),
         ],
     );
 
@@ -159,7 +159,7 @@ fn test_flow_3_input_changed_invalidation() {
         "sh",
         vec![
             "-c".to_string(),
-            "echo -n \"OUT: $(cat input.txt)\" > out.txt".to_string(),
+            "printf '%s' \"OUT: $(cat input.txt)\" > out.txt".to_string(),
         ],
     );
 
@@ -262,7 +262,7 @@ fn test_flow_5_cache_corruption_quarantine_and_fallback() {
         "sh",
         vec![
             "-c".to_string(),
-            "echo -n 'CORRECT_OUTPUT' > dist.bin".to_string(),
+            "printf '%s' 'CORRECT_OUTPUT' > dist.bin".to_string(),
         ],
     );
 
@@ -370,7 +370,7 @@ fn thread_id_runner(
             "sh",
             vec![
                 "-c".to_string(),
-                "sleep 0.1 && echo -n 'COMPILED_RESULT' > shared_out.bin".to_string(),
+                "sleep 0.1 && printf '%s' 'COMPILED_RESULT' > shared_out.bin".to_string(),
             ],
         );
 
@@ -424,7 +424,7 @@ fn test_flow_7_failed_command_never_cached() {
         "sh",
         vec![
             "-c".to_string(),
-            "echo -n 'SYNTAX_ERROR_LINE_42' >&2; exit 1".to_string(),
+            "printf '%s' 'SYNTAX_ERROR_LINE_42' >&2; exit 1".to_string(),
         ],
     );
 

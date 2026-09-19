@@ -255,7 +255,7 @@ fn test_cache_hit_lifecycle_and_guarantees() {
         "sh",
         vec![
             "-c".to_string(),
-            "echo -n 'BUILD_RESULT_123' > artifact.out && echo -n 'STDOUT_PAYLOAD' && echo -n 'STDERR_PAYLOAD' >&2".to_string(),
+            "printf '%s' 'BUILD_RESULT_123' > artifact.out && printf '%s' 'STDOUT_PAYLOAD' && printf '%s' 'STDERR_PAYLOAD' >&2".to_string(),
         ],
     );
 
@@ -352,7 +352,7 @@ fn test_cache_miss_lifecycle_and_guarantees() {
         "sh",
         vec![
             "-c".to_string(),
-            "echo -n 'TRANSFORMED_DATA' > result.bin && echo -n 'MISS_STDOUT_LOG' && echo -n 'MISS_STDERR_LOG' >&2".to_string(),
+            "printf '%s' 'TRANSFORMED_DATA' > result.bin && printf '%s' 'MISS_STDOUT_LOG' && printf '%s' 'MISS_STDERR_LOG' >&2".to_string(),
         ],
     );
 
@@ -442,7 +442,7 @@ fn test_failed_computations_are_not_cached_by_default() {
         "sh",
         vec![
             "-c".to_string(),
-            "echo -n 'FATAL COMPILATION ERROR' >&2; exit 42".to_string(),
+            "printf '%s' 'FATAL COMPILATION ERROR' >&2; exit 42".to_string(),
         ],
     );
 
@@ -511,7 +511,7 @@ fn test_milestone_5_1_input_changes_comprehensive() {
         "sh",
         vec![
             "-c".to_string(),
-            "content=$(cat input_a.txt); echo -n \"PROCESSED: $content\" > output.txt".to_string(),
+            "content=$(cat input_a.txt); printf '%s' \"PROCESSED: $content\" > output.txt".to_string(),
         ],
     );
 
@@ -607,7 +607,7 @@ fn test_milestone_5_2_command_and_argument_changes_comprehensive() {
         "sh",
         vec![
             "-c".to_string(),
-            "echo -n 'RESULT_FAST_MODE' > mode.out".to_string(),
+            "printf '%s' 'RESULT_FAST_MODE' > mode.out".to_string(),
         ],
     );
 
@@ -625,7 +625,7 @@ fn test_milestone_5_2_command_and_argument_changes_comprehensive() {
         "sh",
         vec![
             "-c".to_string(),
-            "echo -n 'RESULT_SAFE_MODE' > mode.out".to_string(),
+            "printf '%s' 'RESULT_SAFE_MODE' > mode.out".to_string(),
         ],
     );
 
@@ -738,7 +738,7 @@ fn test_milestone_5_3_tool_version_invalidation_comprehensive() {
         "sh",
         vec![
             "-c".to_string(),
-            "echo -n 'COMPILED_BINARY' > binary.out".to_string(),
+            "printf '%s' 'COMPILED_BINARY' > binary.out".to_string(),
         ],
     );
 
@@ -825,7 +825,7 @@ fn test_milestone_5_4_declared_environment_invalidation_comprehensive() {
         "sh",
         vec![
             "-c".to_string(),
-            "echo -n \"MODE: $FEATURE_MODE\" > env_out.txt".to_string(),
+            "printf '%s' \"MODE: $FEATURE_MODE\" > env_out.txt".to_string(),
         ],
     );
 
@@ -935,7 +935,7 @@ fn test_milestone_5_5_platform_invalidation_comprehensive() {
         "sh",
         vec![
             "-c".to_string(),
-            "echo -n 'COMPILED_FOR_TARGET' > app.bin".to_string(),
+            "printf '%s' 'COMPILED_FOR_TARGET' > app.bin".to_string(),
         ],
     );
 

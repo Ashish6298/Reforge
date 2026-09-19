@@ -216,7 +216,7 @@ fn test_audit_20_1_corrupted_cache_detected_and_safely_quarantined() {
         "sh",
         vec![
             "-c".to_string(),
-            "echo -n 'VALID_BINARY_BYTES' > binary.out".to_string(),
+            "printf '%s' 'VALID_BINARY_BYTES' > binary.out".to_string(),
         ],
     );
 
@@ -298,7 +298,7 @@ fn test_audit_20_1_failed_computation_not_cached_by_default() {
         "sh",
         vec![
             "-c".to_string(),
-            "echo -n 'Syntax Error' >&2; exit 42".to_string(),
+            "printf '%s' 'Syntax Error' >&2; exit 42".to_string(),
         ],
     );
 

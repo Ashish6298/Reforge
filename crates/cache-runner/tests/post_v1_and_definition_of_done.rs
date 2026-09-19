@@ -150,7 +150,7 @@ fn test_post_v1_4_advanced_cache_policies() {
     #[cfg(not(windows))]
     let (cmd, args) = (
         "sh",
-        vec!["-c".to_string(), "echo -n 'RES' > out.txt".to_string()],
+        vec!["-c".to_string(), "printf '%s' 'RES' > out.txt".to_string()],
     );
 
     let spec = CommandSpec::builder(cmd)
@@ -224,7 +224,7 @@ fn test_complete_20_point_definition_of_done() {
         "sh",
         vec![
             "-c".to_string(),
-            "echo -n 'DOD_OUTPUT' > dod_out.txt".to_string(),
+            "printf '%s' 'DOD_OUTPUT' > dod_out.txt".to_string(),
         ],
     );
 

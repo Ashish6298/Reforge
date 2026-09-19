@@ -40,7 +40,7 @@ fn test_audit_20_2_process_crash_resilience() {
         "sh",
         vec![
             "-c".to_string(),
-            "echo -n 'PARTIAL' > crash_out.txt && kill -9 $$".to_string(),
+            "printf '%s' 'PARTIAL' > crash_out.txt && kill -9 $$".to_string(),
         ],
     );
 
@@ -190,7 +190,7 @@ fn test_audit_20_2_concurrent_processes_and_locking() {
                 "sh",
                 vec![
                     "-c".to_string(),
-                    format!("echo -n 'THREAD_{}_OUTPUT' > concurrent_out_{}.txt", i, i),
+                    format!("printf '%s' 'THREAD_{}_OUTPUT' > concurrent_out_{}.txt", i, i),
                 ],
             );
 
