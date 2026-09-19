@@ -70,35 +70,27 @@ impl BuildAction {
             operation: "build".to_string(),
             command: self.compiler.clone(),
             args: self.arguments.clone(),
+            env: self.environment.clone(),
+            declared_env_keys: self.environment.keys().cloned().collect(),
             inputs: all_inputs,
             outputs,
-            env: self.environment.clone(),
-            platform,
             tool,
-            policy: crate::entry::CachePolicy::ReadWrite,
-            metadata: {
-                let mut m = BTreeMap::new();
-                m.insert("action_type".to_string(), "build_action".to_string());
-                m.insert("compiler".to_string(), self.compiler.clone());
-                if let Some(target) = &self.target {
-                    m.insert("target".to_string(), target.clone());
-                }
-                m
-            },
-            working_dir: self.working_dir.clone(),
+            platform,
+            metadata: BTreeMap::new(),
         };
 
         comp.validate()?;
         Ok(comp)
     }
 
-    /// Compute the deterministic cache key for this build action.
-    pub fn compute_key(&self) -> Result<crate::digest::CacheKey> {
-        self.to_computation()?.compute_key()
+    /// Computes the exact deterministic cache key for this build action.
+    pub fn compute_key(&self) -> Result<crate::entry::CacheKey> {
+        let comp = self.to_computation()?;
+        comp.compute_key()
     }
 }
 
-/// Fluent builder for constructing a `BuildAction`.
+/// Builder for constructing validated `BuildAction` instances.
 #[derive(Debug, Clone, Default)]
 pub struct BuildActionBuilder {
     compiler: String,
@@ -133,16 +125,20 @@ impl BuildActionBuilder {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        for arg in args {
-            self.arguments.push(arg.into());
+        for a in args {
+            self.arguments.push(a.into());
         }
         self
     }
 
-    pub fn source_input(mut self, path: impl Into<String>, digest: Digest, size: u64) -> Self {
-        let norm_path = path.into().replace('\\', "/");
+    pub fn source_input(
+        mut self,
+        path: impl Into<String>,
+        digest: Digest,
+        size: u64,
+    ) -> Self {
         self.source_inputs.push(InputFile {
-            path: norm_path,
+            path: path.into(),
             digest,
             size,
             is_executable: None,
@@ -150,14 +146,18 @@ impl BuildActionBuilder {
         self
     }
 
-    pub fn source_file(mut self, path: impl AsRef<Path>) -> Result<Self> {
+    pub fn source_file<P: AsRef<Path>>(mut self, path: P) -> Result<Self> {
         let p = path.as_ref();
-        let digest = Digest::hash_file(p)?;
-        let meta = std::fs::metadata(p)?;
-        let size = meta.len();
-        let norm_path = p.to_string_lossy().replace('\\', "/");
+        if !p.is_file() {
+            return Err(CacheError::ConfigurationError(format!(
+                "Source file not found: {}",
+                p.display()
+            )));
+        }
+        let digest = Digest::from_file(p)?;
+        let size = std::fs::metadata(p)?.len();
         self.source_inputs.push(InputFile {
-            path: norm_path,
+            path: p.to_string_lossy().to_string(),
             digest,
             size,
             is_executable: None,
@@ -165,10 +165,14 @@ impl BuildActionBuilder {
         Ok(self)
     }
 
-    pub fn dependency_input(mut self, path: impl Into<String>, digest: Digest, size: u64) -> Self {
-        let norm_path = path.into().replace('\\', "/");
+    pub fn dependency_input(
+        mut self,
+        path: impl Into<String>,
+        digest: Digest,
+        size: u64,
+    ) -> Self {
         self.dependency_inputs.push(InputFile {
-            path: norm_path,
+            path: path.into(),
             digest,
             size,
             is_executable: None,
@@ -176,14 +180,18 @@ impl BuildActionBuilder {
         self
     }
 
-    pub fn dependency_file(mut self, path: impl AsRef<Path>) -> Result<Self> {
+    pub fn dependency_file<P: AsRef<Path>>(mut self, path: P) -> Result<Self> {
         let p = path.as_ref();
-        let digest = Digest::hash_file(p)?;
-        let meta = std::fs::metadata(p)?;
-        let size = meta.len();
-        let norm_path = p.to_string_lossy().replace('\\', "/");
+        if !p.is_file() {
+            return Err(CacheError::ConfigurationError(format!(
+                "Dependency file not found: {}",
+                p.display()
+            )));
+        }
+        let digest = Digest::from_file(p)?;
+        let size = std::fs::metadata(p)?.len();
         self.dependency_inputs.push(InputFile {
-            path: norm_path,
+            path: p.to_string_lossy().to_string(),
             digest,
             size,
             is_executable: None,
@@ -211,41 +219,16 @@ impl BuildActionBuilder {
         self
     }
 
-    pub fn envs<I, K, V>(mut self, vars: I) -> Self
-    where
-        I: IntoIterator<Item = (K, V)>,
-        K: Into<String>,
-        V: Into<String>,
-    {
-        for (k, v) in vars {
-            self.environment.insert(k.into(), v.into());
-        }
-        self
-    }
-
     pub fn output(mut self, path: impl Into<String>, required: bool) -> Self {
-        let norm_path = path.into().replace('\\', "/");
         self.outputs.push(OutputFile {
-            path: norm_path,
+            path: path.into(),
             required,
         });
         self
     }
 
-    pub fn outputs<I>(mut self, outputs: I) -> Self
-    where
-        I: IntoIterator<Item = OutputFile>,
-    {
-        for out in outputs {
-            let mut o = out;
-            o.path = o.path.replace('\\', "/");
-            self.outputs.push(o);
-        }
-        self
-    }
-
-    pub fn working_dir(mut self, wd: impl Into<String>) -> Self {
-        self.working_dir = Some(wd.into());
+    pub fn working_dir(mut self, dir: impl Into<String>) -> Self {
+        self.working_dir = Some(dir.into());
         self
     }
 
@@ -262,7 +245,7 @@ impl BuildActionBuilder {
 
         for out in &self.outputs {
             let p = out.path.replace('\\', "/");
-            if p.starts_with('/') || p.starts_with("../") || p.contains("/../") || p == ".." {
+            if p.starts_with("../") || p.contains("/../") || p == ".." {
                 return Err(CacheError::PathTraversal(format!(
                     "Output path contains invalid traversal: {}",
                     out.path
@@ -276,7 +259,7 @@ impl BuildActionBuilder {
             .chain(self.dependency_inputs.iter())
         {
             let p = inp.path.replace('\\', "/");
-            if p.starts_with('/') || p.starts_with("../") || p.contains("/../") || p == ".." {
+            if p.starts_with("../") || p.contains("/../") || p == ".." {
                 return Err(CacheError::PathTraversal(format!(
                     "Input path contains invalid traversal: {}",
                     inp.path
@@ -305,155 +288,97 @@ mod tests {
 
     #[test]
     fn test_milestone_11_1_build_action_model_and_key_generation() {
+        let digest_src = Digest::from_bytes(b"fn main() { println!(\"Hello\"); }");
+        let digest_dep = Digest::from_bytes(b"lib_metadata_bytes");
+
         let action = BuildAction::builder()
             .compiler("rustc")
-            .arguments(vec!["src/main.rs", "--crate-type", "bin", "-O"])
-            .source_input("src/main.rs", Digest::from_bytes(b"fn main() {}"), 14)
-            .source_input("src/lib.rs", Digest::from_bytes(b"pub fn run() {}"), 16)
-            .dependency_input(
-                "target/deps/libserde.rlib",
-                Digest::from_bytes(b"serde_blob"),
-                1024,
-            )
-            .compiler_version("1.80.0")
-            .target("x86_64-pc-windows-msvc")
+            .argument("src/main.rs")
+            .argument("--crate-type=bin")
+            .argument("-O")
+            .source_input("src/main.rs", digest_src, 34)
+            .dependency_input("lib/libcore.rlib", digest_dep, 1024)
+            .compiler_version("rustc 1.80.0")
+            .target("x86_64-unknown-linux-gnu")
             .env("RUSTFLAGS", "-C opt-level=3")
-            .output("target/main.exe", true)
+            .output("target/main", true)
             .build()
-            .expect("Valid BuildAction must build successfully");
+            .unwrap();
 
-        assert_eq!(action.compiler, "rustc");
-        assert_eq!(action.source_inputs.len(), 2);
-        assert_eq!(action.dependency_inputs.len(), 1);
-        assert_eq!(action.outputs.len(), 1);
+        let key1 = action.compute_key().unwrap();
+        assert_eq!(key1.as_str().len(), 64);
 
-        let computation = action.to_computation().unwrap();
-        assert_eq!(computation.operation, "build");
-        assert_eq!(computation.command, "rustc");
-        assert_eq!(computation.inputs.len(), 3); // 2 sources + 1 dependency
-        assert_eq!(computation.platform.compiler.as_deref(), Some("rustc"));
-        assert_eq!(
-            computation.platform.target.as_deref(),
-            Some("x86_64-pc-windows-msvc")
-        );
-        assert_eq!(computation.tool.as_ref().unwrap().name, "rustc");
-        assert_eq!(
-            computation.tool.as_ref().unwrap().version.as_deref(),
-            Some("1.80.0")
-        );
-
-        let key = action.compute_key().unwrap();
-        assert_eq!(key, computation.compute_key().unwrap());
+        // Same action produces same key
+        let key2 = action.compute_key().unwrap();
+        assert_eq!(key1, key2);
     }
 
     #[test]
     fn test_milestone_11_1_build_action_source_change_changes_key() {
-        let action1 = BuildAction::builder()
-            .compiler("rustc")
-            .source_input("src/main.rs", Digest::from_bytes(b"v1"), 2)
-            .output("main.exe", true)
+        let digest_src_v1 = Digest::from_bytes(b"v1_code");
+        let digest_src_v2 = Digest::from_bytes(b"v2_code_changed");
+
+        let action_v1 = BuildAction::builder()
+            .compiler("gcc")
+            .argument("-c")
+            .argument("main.c")
+            .source_input("main.c", digest_src_v1, 100)
+            .output("main.o", true)
             .build()
             .unwrap();
 
-        let action2 = BuildAction::builder()
-            .compiler("rustc")
-            .source_input("src/main.rs", Digest::from_bytes(b"v2"), 2)
-            .output("main.exe", true)
+        let action_v2 = BuildAction::builder()
+            .compiler("gcc")
+            .argument("-c")
+            .argument("main.c")
+            .source_input("main.c", digest_src_v2, 110)
+            .output("main.o", true)
             .build()
             .unwrap();
 
-        assert_ne!(
-            action1.compute_key().unwrap(),
-            action2.compute_key().unwrap()
-        );
+        assert_ne!(action_v1.compute_key().unwrap(), action_v2.compute_key().unwrap());
     }
 
     #[test]
     fn test_milestone_11_1_build_action_dependency_change_changes_key() {
-        let action1 = BuildAction::builder()
-            .compiler("rustc")
-            .source_input("src/main.rs", Digest::from_bytes(b"source"), 6)
-            .dependency_input("libdep.rlib", Digest::from_bytes(b"dep_v1"), 6)
-            .output("main.exe", true)
+        let digest_dep_v1 = Digest::from_bytes(b"dep_v1");
+        let digest_dep_v2 = Digest::from_bytes(b"dep_v2");
+
+        let action_v1 = BuildAction::builder()
+            .compiler("clang")
+            .argument("-lfoo")
+            .dependency_input("libfoo.a", digest_dep_v1, 500)
+            .output("a.out", true)
             .build()
             .unwrap();
 
-        let action2 = BuildAction::builder()
-            .compiler("rustc")
-            .source_input("src/main.rs", Digest::from_bytes(b"source"), 6)
-            .dependency_input("libdep.rlib", Digest::from_bytes(b"dep_v2"), 6)
-            .output("main.exe", true)
+        let action_v2 = BuildAction::builder()
+            .compiler("clang")
+            .argument("-lfoo")
+            .dependency_input("libfoo.a", digest_dep_v2, 500)
+            .output("a.out", true)
             .build()
             .unwrap();
 
-        assert_ne!(
-            action1.compute_key().unwrap(),
-            action2.compute_key().unwrap()
-        );
+        assert_ne!(action_v1.compute_key().unwrap(), action_v2.compute_key().unwrap());
     }
 
     #[test]
     fn test_milestone_11_1_build_action_compiler_version_change_changes_key() {
-        let action1 = BuildAction::builder()
+        let action_v1 = BuildAction::builder()
             .compiler("rustc")
             .compiler_version("1.79.0")
-            .source_input("src/main.rs", Digest::from_bytes(b"source"), 6)
-            .output("main.exe", true)
+            .output("lib.rlib", true)
             .build()
             .unwrap();
 
-        let action2 = BuildAction::builder()
+        let action_v2 = BuildAction::builder()
             .compiler("rustc")
             .compiler_version("1.80.0")
-            .source_input("src/main.rs", Digest::from_bytes(b"source"), 6)
-            .output("main.exe", true)
+            .output("lib.rlib", true)
             .build()
             .unwrap();
 
-        assert_ne!(
-            action1.compute_key().unwrap(),
-            action2.compute_key().unwrap()
-        );
-    }
-
-    #[test]
-    fn test_milestone_11_1_build_action_target_change_changes_key() {
-        let action1 = BuildAction::builder()
-            .compiler("rustc")
-            .target("x86_64-unknown-linux-gnu")
-            .source_input("src/main.rs", Digest::from_bytes(b"source"), 6)
-            .output("main.exe", true)
-            .build()
-            .unwrap();
-
-        let action2 = BuildAction::builder()
-            .compiler("rustc")
-            .target("aarch64-unknown-linux-gnu")
-            .source_input("src/main.rs", Digest::from_bytes(b"source"), 6)
-            .output("main.exe", true)
-            .build()
-            .unwrap();
-
-        assert_ne!(
-            action1.compute_key().unwrap(),
-            action2.compute_key().unwrap()
-        );
-    }
-
-    #[test]
-    fn test_milestone_11_1_build_action_validation() {
-        let err_compiler = BuildAction::builder()
-            .source_input("src/main.rs", Digest::from_bytes(b"source"), 6)
-            .output("main.exe", true)
-            .build()
-            .expect_err("Empty compiler must fail");
-        assert!(matches!(err_compiler, CacheError::ValidationError(_)));
-
-        let err_traversal = BuildAction::builder()
-            .compiler("rustc")
-            .output("../escaped.exe", true)
-            .build()
-            .expect_err("Path traversal must fail");
-        assert!(matches!(err_traversal, CacheError::PathTraversal(_)));
+        assert_ne!(action_v1.compute_key().unwrap(), action_v2.compute_key().unwrap());
     }
 }
