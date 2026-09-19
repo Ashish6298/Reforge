@@ -105,7 +105,7 @@ fn test_failure_injection_permission_denied_safe_handling() {
         "sh",
         vec![
             "-c".to_string(),
-            "echo -n 'NEW_DATA' > readonly_out.bin".to_string(),
+            "printf '%s' 'NEW_DATA' > readonly_out.bin".to_string(),
         ],
     );
 
@@ -163,7 +163,7 @@ fn test_failure_injection_process_crash_clean_lock_release() {
         "sh",
         vec![
             "-c".to_string(),
-            "echo -n 'PROCESS_CRASHED_ABNORMALLY' >&2; exit 137".to_string(),
+            "printf '%s' 'PROCESS_CRASHED_ABNORMALLY' >&2; exit 137".to_string(),
         ],
     );
 
@@ -244,7 +244,7 @@ fn test_failure_injection_corrupted_metadata_self_healing() {
         "sh",
         vec![
             "-c".to_string(),
-            "echo -n 'COMPILED_METADATA_RESULT' > meta_out.bin".to_string(),
+            "printf '%s' 'COMPILED_METADATA_RESULT' > meta_out.bin".to_string(),
         ],
     );
 
@@ -312,7 +312,7 @@ fn test_failure_injection_corrupted_object_quarantine_and_fallback() {
         "sh",
         vec![
             "-c".to_string(),
-            "echo -n 'AUTHENTIC_BYTES' > blob_out.bin".to_string(),
+            "printf '%s' 'AUTHENTIC_BYTES' > blob_out.bin".to_string(),
         ],
     );
 
