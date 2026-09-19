@@ -450,7 +450,7 @@ fn test_milestone_6_3_duplicate_computation_avoidance_comprehensive() {
         vec![
             "-c".to_string(),
             format!(
-                "sleep 0.2 && echo 'EXEC_ENTRY' >> '{}' && echo -n 'EXPENSIVE_COMPUTATION_OUTPUT' > output.txt",
+                "sleep 0.2 && echo 'EXEC_ENTRY' >> '{}' && printf '%s' 'EXPENSIVE_COMPUTATION_OUTPUT' > output.txt",
                 counter_file_str
             ),
         ],
@@ -813,7 +813,7 @@ fn test_milestone_6_5_stress_50_concurrent_processes() {
                 "sh",
                 vec![
                     "-c".to_string(),
-                    "cp input.dat output.dat && echo -n 'SIDE_DATA' > side.txt".to_string(),
+                    "cp input.dat output.dat && printf '%s' 'SIDE_DATA' > side.txt".to_string(),
                 ],
             );
 
