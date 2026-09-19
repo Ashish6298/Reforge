@@ -397,7 +397,8 @@ impl<'a> RunnerEngine<'a> {
                 continue;
             }
 
-            let (digest, size) = self.storage.store_object_from_file(&full_out_path)?;
+            let can_store = should_store && self.options.policy != CachePolicy::ReadOnly && self.options.trust_mode.allows_writes();
+            let (digest, size) = if can_store { self.storage.store_object_from_file(&full_out_path)? } else { (Digest::hash_file(&full_out_path)?, std::fs::metadata(&full_out_path)?.len()) };
             manifest_items.push(OutputManifestItem {
                 path: output.path.clone(),
                 digest,
@@ -407,13 +408,13 @@ impl<'a> RunnerEngine<'a> {
         }
 
         // Store stdout and stderr as CAS objects
-        let stdout_digest = if !proc_output.stdout.is_empty() {
+        let stdout_digest = if can_store && !proc_output.stdout.is_empty() {
             Some(self.storage.store_object_bytes(&proc_output.stdout)?.0)
         } else {
             None
         };
 
-        let stderr_digest = if !proc_output.stderr.is_empty() {
+        let stderr_digest = if can_store && !proc_output.stderr.is_empty() {
             Some(self.storage.store_object_bytes(&proc_output.stderr)?.0)
         } else {
             None
