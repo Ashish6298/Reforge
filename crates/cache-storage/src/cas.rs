@@ -283,6 +283,11 @@ impl CasStorage {
             }
         }
 
+        if let Some(limit) = self.config.max_size_bytes {
+            let pruner = crate::eviction::Pruner::new(self);
+            let _ = pruner.enforce_max_size(limit);
+        }
+
         Ok(())
     }
 
