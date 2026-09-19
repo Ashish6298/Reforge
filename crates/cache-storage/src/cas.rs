@@ -284,8 +284,10 @@ impl CasStorage {
         }
 
         if let Some(limit) = self.config.max_size_bytes {
-            let pruner = crate::eviction::Pruner::new(self);
-            let _ = pruner.enforce_max_size(limit);
+            if limit < 10 * 1024 * 1024 * 1024 {
+                let pruner = crate::eviction::Pruner::new(self);
+                let _ = pruner.evict_with_strategy(crate::eviction::EvictionStrategy::Lru, limit);
+            }
         }
 
         Ok(())

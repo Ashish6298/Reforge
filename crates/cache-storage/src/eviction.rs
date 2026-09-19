@@ -194,7 +194,7 @@ impl<'a> Pruner<'a> {
             }
         }
 
-        let mut current_size: u64 = self.storage.stats().map(|s| s.total_size_bytes).unwrap_or_else(|_| entries_list.iter().map(|(_, _, s)| *s).sum());
+        let mut current_size: u64 = entries_list.iter().map(|(_, _, s)| *s).sum();
 
         for (_path, entry, size) in entries_list {
             if current_size <= max_size_bytes {
@@ -204,12 +204,6 @@ impl<'a> Pruner<'a> {
             if self.storage.delete_entry(&entry.key)? {
                 result.deleted_entries += 1;
                 current_size = current_size.saturating_sub(size);
-                // Immediately prune unreferenced objects to reclaim disk space
-                if let Ok(unref) = self.prune_unreferenced_objects() {
-                    result.deleted_objects += unref.deleted_objects;
-                    result.freed_bytes += unref.freed_bytes;
-                    current_size = self.storage.stats().map(|s| s.total_size_bytes).unwrap_or(current_size);
-                }
             }
         }
 
