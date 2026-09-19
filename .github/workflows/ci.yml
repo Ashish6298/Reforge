@@ -35,16 +35,7 @@ jobs:
         run: cargo fmt --all
 
       - name: Run Workspace Tests
-        shell: bash
-        run: |
-          cargo test --workspace -- --nocapture 2>&1 | tee test_output.txt
-
-      - name: Upload Test Output
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-output-${{ matrix.os }}
-          path: test_output.txt
+        run: cargo test --workspace --verbose
 
       - name: Clippy Linter Check
         run: cargo clippy --workspace --all-targets --all-features
