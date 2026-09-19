@@ -35,7 +35,21 @@ jobs:
         run: cargo fmt --all
 
       - name: Run Workspace Tests
-        run: cargo test --workspace --verbose
+        shell: bash
+        run: |
+          set +e
+          cargo test --workspace -- --nocapture > test_output.txt 2>&1
+          STATUS=$?
+          echo "## Test Output (${{ matrix.os }})" >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          if grep -q -E "(FAILED|error\[|panicked at)" test_output.txt; then
+            grep -E "(FAILED|error\[|panicked at)" test_output.txt -B 2 -A 8 >> $GITHUB_STEP_SUMMARY
+          else
+            tail -n 60 test_output.txt >> $GITHUB_STEP_SUMMARY
+          fi
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat test_output.txt
+          exit $STATUS
 
       - name: Clippy Linter Check
         run: cargo clippy --workspace --all-targets --all-features
