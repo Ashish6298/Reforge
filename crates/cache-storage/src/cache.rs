@@ -194,6 +194,11 @@ impl Cache {
 
             if let Some(parent) = target_path.parent() {
                 fs::create_dir_all(parent)?;
+                if let (Ok(can_parent), Ok(can_dest)) = (parent.canonicalize(), destination_dir.canonicalize()) {
+                    if !can_parent.starts_with(&can_dest) {
+                        return Err(CacheError::PathTraversal(format!("Symlink directory escape: parent resolves outside destination")));
+                    }
+                }
             }
 
             // Verify CAS object exists and is valid before restoration
