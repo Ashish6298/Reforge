@@ -29,7 +29,7 @@ fn test_audit_20_6_path_traversal_rejection() {
     ];
 
     for p in malicious_paths {
-        let is_safe = PathUtils::is_safe_relative_path(p);
+        let is_safe = PathUtils::sanitize_relative_path(".", p).is_ok();
         assert!(
             !is_safe,
             "PathUtils must reject path traversal attempt: {}",
@@ -68,22 +68,24 @@ fn test_audit_20_6_cache_poisoning_tamper_detection() {
 
 #[test]
 fn test_audit_20_6_sensitive_data_detection() {
-    let detector = SensitiveDataDetector::default();
-
     // Environment keys
-    assert!(detector.is_sensitive_env_key("AWS_SECRET_ACCESS_KEY"));
-    assert!(detector.is_sensitive_env_key("GITHUB_TOKEN"));
-    assert!(detector.is_sensitive_env_key("DATABASE_PASSWORD"));
-    assert!(detector.is_sensitive_env_key("AUTH_BEARER_TOKEN"));
-    assert!(!detector.is_sensitive_env_key("RUST_BACKTRACE"));
-    assert!(!detector.is_sensitive_env_key("PATH"));
+    assert!(SensitiveDataDetector::is_sensitive_key("AWS_SECRET_ACCESS_KEY"));
+    assert!(SensitiveDataDetector::is_sensitive_key("GITHUB_TOKEN"));
+    assert!(SensitiveDataDetector::is_sensitive_key("DATABASE_PASSWORD"));
+    assert!(SensitiveDataDetector::is_sensitive_key("AUTH_BEARER_TOKEN"));
+    assert!(!SensitiveDataDetector::is_sensitive_key("RUST_BACKTRACE"));
+    assert!(!SensitiveDataDetector::is_sensitive_key("PATH"));
 
-    // Payload byte scanning
-    let secret_payload = b"api_key = \"AKIAIOSFODNN7EXAMPLE\";";
-    assert!(detector.contains_secrets(secret_payload));
+    // Sensitive value scanning
+    let secret_val = "ghp_secretTokenValue123456789";
+    assert!(SensitiveDataDetector::is_sensitive_value(secret_val));
 
-    let clean_payload = b"let x = 42; println!(\"{}\", x);";
-    assert!(!detector.contains_secrets(clean_payload));
+    let clean_val = "target/debug/app";
+    assert!(!SensitiveDataDetector::is_sensitive_value(clean_val));
+
+    // Env var scanning
+    assert!(SensitiveDataDetector::scan_env_var("MY_TOKEN", "12345").is_some());
+    assert!(SensitiveDataDetector::scan_env_var("NORMAL_VAR", "value").is_none());
 }
 
 // ============================================================================

@@ -12,8 +12,8 @@
 //! - 20.2 Reliability & Fault Tolerance
 //! - 20.6 Security & Integrity Validation
 
-use dcc_core::{Computation, Digest, FailurePolicy, SensitiveDataDetector, ToolIdentity};
-use dcc_runner::{CommandSpec, EngineOptions, ExecutionStatus, RunnerEngine};
+use dcc_core::{Computation, Digest, ToolIdentity};
+use dcc_runner::{CommandSpec, EngineOptions, ExecutionStatus, FailurePolicy, RunnerEngine};
 use dcc_test_utils::TestEnv;
 use std::fs;
 
@@ -176,7 +176,7 @@ fn test_audit_20_1_changed_tool_identity_causes_cache_miss() {
         .operation("compile")
         .command("rustc")
         .args(vec!["main.rs"])
-        .tool(ToolIdentity::with_version("rustc", "1.75.0"))
+        .tool_identity(ToolIdentity::with_version("rustc", "1.75.0"))
         .build()
         .unwrap();
 
@@ -184,7 +184,7 @@ fn test_audit_20_1_changed_tool_identity_causes_cache_miss() {
         .operation("compile")
         .command("rustc")
         .args(vec!["main.rs"])
-        .tool(ToolIdentity::with_version("rustc", "1.76.0"))
+        .tool_identity(ToolIdentity::with_version("rustc", "1.76.0"))
         .build()
         .unwrap();
 
