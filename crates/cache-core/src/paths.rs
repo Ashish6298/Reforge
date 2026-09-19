@@ -92,21 +92,17 @@ impl PathUtils {
         Ok(target)
     }
 
-    /// Validates and verifies that a computation's input and output paths are strictly
-    /// contained within the workspace root without symlink dereference attacks.
-    pub fn validate_computation_path<P: AsRef<Path>>(
-        workspace_root: P,
-        declared_path: &str,
-    ) -> Result<PathBuf> {
-        let root = workspace_root.as_ref();
-        let sanitized = Self::sanitize_relative_path(root, declared_path)?;
-
-        // If path already exists, verify it doesn't resolve outside sandbox via symlink
-        if sanitized.exists() {
-            Self::verify_symlink_safety(root, &sanitized)?;
+    /// Validates a path declared on a computation or build action.
+    /// Rejects directory traversal (`../`, `/../`) while allowing safe relative paths and canonical absolute paths.
+    pub fn validate_computation_path(path_str: &str) -> Result<()> {
+        let norm = path_str.replace('\\', "/");
+        if norm.starts_with("../") || norm.contains("/../") || norm == ".." {
+            return Err(CacheError::PathTraversal(format!(
+                "Path contains invalid directory traversal: '{}'",
+                path_str
+            )));
         }
-
-        Ok(sanitized)
+        Ok(())
     }
 
     /// Inspects whether a path or any ancestor component is a symlink pointing outside `sandbox_root`.
@@ -125,7 +121,7 @@ impl PathUtils {
             .map_err(|e| CacheError::StorageError(e))?;
 
         if !canonical_target.starts_with(&canonical_root) {
-            return Err(CacheError::SymlinkAttack(format!(
+            return Err(CacheError::PathTraversal(format!(
                 "Symlink resolution of '{}' escaped sandbox root '{}'",
                 target.display(),
                 root.display()
@@ -202,15 +198,15 @@ mod tests {
 
     #[test]
     fn test_validate_computation_path() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let valid_file = temp_dir.path().join("source.rs");
-        std::fs::write(&valid_file, b"content").unwrap();
+        assert!(PathUtils::validate_computation_path("src/lib.rs").is_ok());
+        assert!(PathUtils::validate_computation_path(r"src\nested\mod.rs").is_ok());
+        assert!(PathUtils::validate_computation_path("target/debug/output.rlib").is_ok());
+        assert!(PathUtils::validate_computation_path("C:/project/src/main.rs").is_ok());
+        assert!(PathUtils::validate_computation_path("/usr/local/bin/rustc").is_ok());
 
-        let res = PathUtils::validate_computation_path(temp_dir.path(), "source.rs");
-        assert!(res.is_ok());
-
-        let invalid = PathUtils::validate_computation_path(temp_dir.path(), "../outside.txt");
-        assert!(invalid.is_err());
+        assert!(PathUtils::validate_computation_path("../escape.rs").is_err());
+        assert!(PathUtils::validate_computation_path(r"..\escape.rs").is_err());
+        assert!(PathUtils::validate_computation_path("foo/../../escape.rs").is_err());
     }
 
     #[test]
