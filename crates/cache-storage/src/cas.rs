@@ -309,18 +309,13 @@ impl CasStorage {
             }
         };
 
-        let mut entry: CacheEntry = match serde_json::from_reader(BufReader::new(file)) {
+        let entry: CacheEntry = match serde_json::from_reader(BufReader::new(file)) {
             Ok(e) => e,
             Err(e) => {
                 let _ = fs::remove_file(&path);
                 return Err(CacheError::CorruptedEntry(path, e.to_string()));
             }
         };
-
-        // Update last accessed time and hit count
-        entry.metadata.last_accessed_at = Utc::now();
-        entry.metadata.hit_count = entry.metadata.hit_count.saturating_add(1);
-        let _ = self.store_entry(&entry);
 
         Ok(Some(entry))
     }
