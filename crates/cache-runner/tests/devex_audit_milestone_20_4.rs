@@ -38,7 +38,7 @@ fn test_audit_20_4_miss_reasons_understandable() {
         MissReason::CorruptedCache {
             reason: "checksum mismatch".to_string(),
         },
-        MissReason::ForcedBypass,
+        MissReason::ForcedRecompute,
     ];
 
     for r in &reasons {
@@ -73,7 +73,7 @@ fn test_audit_20_4_errors_useful_and_actionable() {
 
 #[test]
 fn test_audit_20_4_json_output_stable() {
-    let env = TestEnv::new().unwrap();
+    let _env = TestEnv::new().unwrap();
     let comp = dcc_core::Computation::builder()
         .operation("echo")
         .command("echo")
@@ -83,7 +83,7 @@ fn test_audit_20_4_json_output_stable() {
     let key = comp.compute_key().unwrap();
 
     let result = ExecutionResult {
-        key,
+        key: key.clone(),
         status: ExecutionStatus::Miss,
         exit_code: 0,
         execution_time_ms: 15,
