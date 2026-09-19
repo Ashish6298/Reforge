@@ -1,0 +1,181 @@
+[1m[92m    Updating[0m crates.io index
+[1m[92m Downloading[0m crates ...
+[1m[92m  Downloaded[0m anstyle-parse v1.0.0
+[1m[92m  Downloaded[0m anstyle-query v1.1.5
+[1m[92m  Downloaded[0m anyhow v1.0.104
+[1m[92m  Downloaded[0m anstream v1.0.0
+[1m[92m  Downloaded[0m itoa v1.0.18
+[1m[92m  Downloaded[0m anstyle v1.0.14
+[1m[92m  Downloaded[0m autocfg v1.5.1
+[1m[92m  Downloaded[0m utf8parse v0.2.2
+[1m[92m  Downloaded[0m fs2 v0.4.3
+[1m[92m  Downloaded[0m is_terminal_polyfill v1.70.2
+[1m[92m  Downloaded[0m thiserror-impl v1.0.69
+[1m[92m  Downloaded[0m hex v0.4.3
+[1m[92m  Downloaded[0m version_check v0.9.5
+[1m[92m  Downloaded[0m heck v0.5.0
+[1m[92m  Downloaded[0m same-file v1.0.6
+[1m[92m  Downloaded[0m crypto-common v0.1.7
+[1m[92m  Downloaded[0m strsim v0.11.1
+[1m[92m  Downloaded[0m block-buffer v0.10.4
+[1m[92m  Downloaded[0m cfg-if v1.0.4
+[1m[92m  Downloaded[0m cpufeatures v0.2.17
+[1m[92m  Downloaded[0m colorchoice v1.0.5
+[1m[92m  Downloaded[0m equivalent v1.0.2
+[1m[92m  Downloaded[0m errno v0.3.14
+[1m[92m  Downloaded[0m generic-array v0.14.7
+[1m[92m  Downloaded[0m fastrand v2.5.0
+[1m[92m  Downloaded[0m clap_lex v1.1.1
+[1m[92m  Downloaded[0m sha2 v0.10.9
+[1m[92m  Downloaded[0m walkdir v2.5.0
+[1m[92m  Downloaded[0m zmij v1.0.23
+[1m[92m  Downloaded[0m quote v1.0.47
+[1m[92m  Downloaded[0m thiserror v1.0.69
+[1m[92m  Downloaded[0m iana-time-zone v0.1.65
+[1m[92m  Downloaded[0m tempfile v3.27.0
+[1m[92m  Downloaded[0m clap_derive v4.6.7
+[1m[92m  Downloaded[0m once_cell v1.21.4
+[1m[92m  Downloaded[0m digest v0.10.7
+[1m[92m  Downloaded[0m proc-macro2 v1.0.107
+[1m[92m  Downloaded[0m getrandom v0.4.3
+[1m[92m  Downloaded[0m num-traits v0.2.19
+[1m[92m  Downloaded[0m unicode-ident v1.0.24
+[1m[92m  Downloaded[0m bitflags v2.13.2
+[1m[92m  Downloaded[0m clap v4.6.7
+[1m[92m  Downloaded[0m serde_core v1.0.229
+[1m[92m  Downloaded[0m serde_derive v1.0.229
+[1m[92m  Downloaded[0m serde v1.0.229
+[1m[92m  Downloaded[0m typenum v1.20.1
+[1m[92m  Downloaded[0m memchr v2.8.3
+[1m[92m  Downloaded[0m indexmap v2.14.2
+[1m[92m  Downloaded[0m hashbrown v0.17.1
+[1m[92m  Downloaded[0m serde_json v1.0.151
+[1m[92m  Downloaded[0m clap_builder v4.6.7
+[1m[92m  Downloaded[0m chrono v0.4.45
+[1m[92m  Downloaded[0m syn v3.0.5
+[1m[92m  Downloaded[0m syn v2.0.119
+[1m[92m  Downloaded[0m rustix v1.1.4
+[1m[92m  Downloaded[0m libc v0.2.189
+[1m[92m  Downloaded[0m linux-raw-sys v0.12.1
+[1m[92m   Compiling[0m proc-macro2 v1.0.107
+[1m[92m   Compiling[0m unicode-ident v1.0.24
+[1m[92m   Compiling[0m quote v1.0.47
+[1m[92m   Compiling[0m version_check v0.9.5
+[1m[92m   Compiling[0m serde_core v1.0.229
+[1m[92m   Compiling[0m generic-array v0.14.7
+[1m[92m   Compiling[0m typenum v1.20.1
+[1m[92m   Compiling[0m libc v0.2.189
+[1m[92m   Compiling[0m autocfg v1.5.1
+[1m[92m   Compiling[0m num-traits v0.2.19
+[1m[92m   Compiling[0m zmij v1.0.23
+[1m[92m   Compiling[0m syn v3.0.5
+[1m[92m   Compiling[0m serde v1.0.229
+[1m[92m   Compiling[0m cfg-if v1.0.4
+[1m[92m   Compiling[0m crypto-common v0.1.7
+[1m[92m   Compiling[0m block-buffer v0.10.4
+[1m[92m   Compiling[0m syn v2.0.119
+[1m[92m   Compiling[0m thiserror v1.0.69
+[1m[92m   Compiling[0m hashbrown v0.17.1
+[1m[92m   Compiling[0m getrandom v0.4.3
+[1m[92m   Compiling[0m serde_json v1.0.151
+[1m[92m   Compiling[0m rustix v1.1.4
+[1m[92m   Compiling[0m equivalent v1.0.2
+[1m[92m   Compiling[0m indexmap v2.14.2
+[1m[92m   Compiling[0m thiserror-impl v1.0.69
+[1m[92m   Compiling[0m digest v0.10.7
+[1m[92m   Compiling[0m same-file v1.0.6
+[1m[92m   Compiling[0m linux-raw-sys v0.12.1
+[1m[92m   Compiling[0m serde_derive v1.0.229
+[1m[92m   Compiling[0m iana-time-zone v0.1.65
+[1m[92m   Compiling[0m itoa v1.0.18
+[1m[92m   Compiling[0m bitflags v2.13.2
+[1m[92m   Compiling[0m cpufeatures v0.2.17
+[1m[92m   Compiling[0m memchr v2.8.3
+[1m[92m   Compiling[0m sha2 v0.10.9
+[1m[92m   Compiling[0m walkdir v2.5.0
+[1m[92m   Compiling[0m fastrand v2.5.0
+[1m[92m   Compiling[0m hex v0.4.3
+[1m[92m   Compiling[0m once_cell v1.21.4
+[1m[92m   Compiling[0m tempfile v3.27.0
+[1m[92m   Compiling[0m fs2 v0.4.3
+[1m[92m   Compiling[0m anyhow v1.0.104
+[1m[92m   Compiling[0m utf8parse v0.2.2
+[1m[92m   Compiling[0m anstyle-parse v1.0.0
+[1m[92m   Compiling[0m anstyle v1.0.14
+[1m[92m   Compiling[0m is_terminal_polyfill v1.70.2
+[1m[92m   Compiling[0m colorchoice v1.0.5
+[1m[92m   Compiling[0m anstyle-query v1.1.5
+[1m[92m   Compiling[0m anstream v1.0.0
+[1m[92m   Compiling[0m heck v0.5.0
+[1m[92m   Compiling[0m strsim v0.11.1
+[1m[92m   Compiling[0m clap_lex v1.1.1
+[1m[92m   Compiling[0m clap_derive v4.6.7
+[1m[92m   Compiling[0m clap_builder v4.6.7
+[1m[92m   Compiling[0m chrono v0.4.45
+[1m[92m   Compiling[0m dcc-core v1.0.0 (/home/runner/work/Reforge/Reforge/crates/cache-core)
+[1m[92m   Compiling[0m clap v4.6.7
+[1m[91merror[E0061][0m[1m: this function takes 2 arguments but 1 argument was supplied[0m
+   [1m[94m--> [0mcrates/cache-core/src/computation.rs:212:13
+    [1m[94m|[0m
+[1m[94m212[0m [1m[94m|[0m             crate::paths::PathUtils::validate_computation_path(&out.path)?;
+    [1m[94m|[0m             [1m[91m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m[1m[94m-----------[0m [1m[94margument #2 of type `&str` is missing[0m
+    [1m[94m|[0m
+[1m[92mnote[0m: associated function defined here
+   [1m[94m--> [0mcrates/cache-core/src/paths.rs:97:12
+    [1m[94m|[0m
+[1m[94m 97[0m [1m[94m|[0m     pub fn validate_computation_path<P: AsRef<Path>>(
+    [1m[94m|[0m            [1m[92m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+[1m[94m 98[0m [1m[94m|[0m         workspace_root: P,
+[1m[94m 99[0m [1m[94m|[0m         declared_path: &str,
+    [1m[94m|[0m         [1m[94m-------------------[0m
+[1m[96mhelp[0m: provide the argument
+    [1m[94m|[0m
+[1m[94m212[0m [1m[94m| [0m            crate::paths::PathUtils::validate_computation_path(&out.path[92m, /* &str */[0m)?;
+    [1m[94m|[0m                                                                         [92m++++++++++++[0m
+
+[1m[91merror[E0061][0m[1m: this function takes 2 arguments but 1 argument was supplied[0m
+   [1m[94m--> [0mcrates/cache-core/src/computation.rs:215:13
+    [1m[94m|[0m
+[1m[94m215[0m [1m[94m|[0m             crate::paths::PathUtils::validate_computation_path(&inp.path)?;
+    [1m[94m|[0m             [1m[91m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m[1m[94m-----------[0m [1m[94margument #2 of type `&str` is missing[0m
+    [1m[94m|[0m
+[1m[92mnote[0m: associated function defined here
+   [1m[94m--> [0mcrates/cache-core/src/paths.rs:97:12
+    [1m[94m|[0m
+[1m[94m 97[0m [1m[94m|[0m     pub fn validate_computation_path<P: AsRef<Path>>(
+    [1m[94m|[0m            [1m[92m^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+[1m[94m 98[0m [1m[94m|[0m         workspace_root: P,
+[1m[94m 99[0m [1m[94m|[0m         declared_path: &str,
+    [1m[94m|[0m         [1m[94m-------------------[0m
+[1m[96mhelp[0m: provide the argument
+    [1m[94m|[0m
+[1m[94m215[0m [1m[94m| [0m            crate::paths::PathUtils::validate_computation_path(&inp.path[92m, /* &str */[0m)?;
+    [1m[94m|[0m                                                                         [92m++++++++++++[0m
+
+[1m[91merror[E0599][0m[1m: no variant, associated function, or constant named `SymlinkAttack` found for enum `error::CacheError` in the current scope[0m
+   [1m[94m--> [0mcrates/cache-core/src/paths.rs:128:36
+    [1m[94m|[0m
+[1m[94m128[0m [1m[94m|[0m             return Err(CacheError::SymlinkAttack(format!(
+    [1m[94m|[0m                                    [1m[91m^^^^^^^^^^^^^[0m [1m[91mvariant, associated function, or constant not found in `error::CacheError`[0m
+    [1m[94m|[0m
+   [1m[94m::: [0mcrates/cache-core/src/error.rs:5:1
+    [1m[94m|[0m
+[1m[94m  5[0m [1m[94m|[0m pub enum CacheError {
+    [1m[94m|[0m [1m[94m-------------------[0m [1m[94mvariant, associated function, or constant `SymlinkAttack` not found for this enum[0m
+
+[1m[91merror[E0599][0m[1m: no variant, associated function, or constant named `SymlinkAttack` found for enum `CacheError` in the current scope[0m
+   [1m[94m--> [0mcrates/cache-core/src/paths.rs:128:36
+    [1m[94m|[0m
+[1m[94m128[0m [1m[94m|[0m             return Err(CacheError::SymlinkAttack(format!(
+    [1m[94m|[0m                                    [1m[91m^^^^^^^^^^^^^[0m [1m[91mvariant, associated function, or constant not found in `CacheError`[0m
+    [1m[94m|[0m
+   [1m[94m::: [0mcrates/cache-core/src/error.rs:5:1
+    [1m[94m|[0m
+[1m[94m  5[0m [1m[94m|[0m pub enum CacheError {
+    [1m[94m|[0m [1m[94m-------------------[0m [1m[94mvariant, associated function, or constant `SymlinkAttack` not found for this enum[0m
+
+[1mSome errors have detailed explanations: E0061, E0599.[0m
+[1mFor more information about an error, try `rustc --explain E0061`.[0m
+[1m[91merror[0m: could not compile `dcc-core` (lib) due to 3 previous errors
+[1m[33mwarning[0m: build failed, waiting for other jobs to finish...
+[1m[91merror[0m: could not compile `dcc-core` (lib test) due to 3 previous errors
