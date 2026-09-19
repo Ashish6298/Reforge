@@ -182,7 +182,7 @@ fn test_milestone_18_4_same_key_writers() {
         vec![
             "-c".to_string(),
             format!(
-                "sleep 0.15 && echo 'RAN' >> '{}' && echo -n 'SAME_KEY_RESULT' > out.txt",
+                "sleep 0.15 && echo 'RAN' >> '{}' && printf '%s' 'SAME_KEY_RESULT' > out.txt",
                 counter_file_str
             ),
         ],
