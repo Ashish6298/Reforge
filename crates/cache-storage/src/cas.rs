@@ -286,7 +286,36 @@ impl CasStorage {
         if let Some(limit) = self.config.max_size_bytes {
             if limit < 10 * 1024 * 1024 * 1024 {
                 let pruner = crate::eviction::Pruner::new(self);
-                let _ = pruner.evict_with_strategy(crate::eviction::EvictionStrategy::Lru, limit);
+                // Enforce capacity: keep evicting until real on-disk size is within the limit.
+                // Each inner round uses evict_with_strategy which compares against output-blob
+                // sizes only. We pass a scaled-down limit to compensate for JSON metadata overhead,
+                // then re-check real disk stats and repeat until we are within bounds.
+                let mut rounds = 0;
+                while rounds < 30 {
+                    rounds += 1;
+                    let stats = match self.stats() {
+                        Ok(s) => s,
+                        Err(_) => break,
+                    };
+                    if stats.total_size_bytes <= limit {
+                        break;
+                    }
+                    // Subtract JSON entry file overhead from the target limit so that
+                    // evict_with_strategy (which only tracks blob sizes) evicts enough entries.
+                    let entry_overhead = stats.total_entry_size_bytes;
+                    let adjusted_limit = limit.saturating_sub(entry_overhead);
+                    let evicted = pruner.evict_with_strategy(
+                        crate::eviction::EvictionStrategy::Lru,
+                        adjusted_limit,
+                    );
+                    if evicted
+                        .map(|r| r.deleted_entries == 0 && r.deleted_objects == 0)
+                        .unwrap_or(true)
+                    {
+                        // Nothing was evicted; stop to avoid an infinite loop
+                        break;
+                    }
+                }
             }
         }
 
